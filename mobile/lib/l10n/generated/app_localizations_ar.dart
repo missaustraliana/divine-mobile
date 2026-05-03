@@ -5065,7 +5065,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get categoryWrestling => 'مصارعة';
 
   @override
-  String get profileSetupUploadSuccess => 'تم رفع صورة الملف الشخصي بنجاح!';
+  String get profileSetupUploadStaged => 'تم الرفع — اضغط على حفظ للتطبيق';
 
   @override
   String inboxReportedUser(String displayName) {

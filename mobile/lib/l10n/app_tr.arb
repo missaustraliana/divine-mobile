@@ -2453,7 +2453,7 @@
     "libraryWebUnavailableDescription": "Taslaklar ve klipler cihazında saklanır; yönetmek için Divine’ı telefonda aç.",
     "libraryWebUnavailableHeadline": "Kitaplık mobil uygulamada",
     "notificationFollowBack": "Geri takip et",
-    "profileSetupUploadSuccess": "Profil fotoğrafı başarıyla yüklendi!",
+    "profileSetupUploadStaged": "Yüklendi — uygulamak için Kaydet'e dokunun",
     "proofmodeCheckAiGenerated": "Yapay zeka ile oluşturulup oluşturulmadığını kontrol et",
     "dmSendFailedMessage": "Mesaj gönderilemedi",
     "dmSendFailedRetry": "Tekrar Dene",

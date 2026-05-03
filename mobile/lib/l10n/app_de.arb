@@ -2454,7 +2454,7 @@
     "libraryWebUnavailableDescription": "Entwürfe und Clips werden auf deinem Gerät gespeichert. Öffne Divine auf dem Smartphone, um sie zu verwalten.",
     "libraryWebUnavailableHeadline": "Mediathek ist in der mobilen App",
     "notificationFollowBack": "Zurückfolgen",
-    "profileSetupUploadSuccess": "Profilbild erfolgreich hochgeladen!",
+    "profileSetupUploadStaged": "Hochgeladen – tippe auf Speichern, um zu übernehmen",
     "proofmodeCheckAiGenerated": "Prüfen, ob KI-generiert",
     "dmSendFailedMessage": "Nachricht konnte nicht gesendet werden",
     "dmSendFailedRetry": "Erneut versuchen",

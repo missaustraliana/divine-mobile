@@ -5256,8 +5256,8 @@ class AppLocalizationsRo extends AppLocalizations {
   String get categoryWrestling => 'Wrestling';
 
   @override
-  String get profileSetupUploadSuccess =>
-      'Fotografia de profil a fost încărcată cu succes!';
+  String get profileSetupUploadStaged =>
+      'Încărcată — apasă pe Salvează pentru a aplica';
 
   @override
   String inboxReportedUser(String displayName) {

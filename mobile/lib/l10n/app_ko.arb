@@ -1742,7 +1742,7 @@
     "libraryWebUnavailableDescription": "임시 저장과 클립은 기기에 저장됩니다. 관리하려면 휴대폰에서 Divine을 열어 주세요.",
     "libraryWebUnavailableHeadline": "라이브러리는 모바일 앱에서 이용할 수 있어요",
     "notificationFollowBack": "맞팔로우",
-    "profileSetupUploadSuccess": "프로필 사진이 성공적으로 업로드되었어요!",
+    "profileSetupUploadStaged": "업로드됐어요 — 적용하려면 저장을 탭하세요",
     "proofmodeCheckAiGenerated": "AI 생성 여부 확인",
     "dmSendFailedMessage": "메시지를 보내지 못했어요",
     "dmSendFailedRetry": "다시 시도",

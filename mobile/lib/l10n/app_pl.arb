@@ -2454,7 +2454,7 @@
     "libraryWebUnavailableDescription": "Wersje robocze i klipy są na urządzeniu — otwórz Divine w telefonie, żeby nimi zarządzać.",
     "libraryWebUnavailableHeadline": "Biblioteka jest w aplikacji mobilnej",
     "notificationFollowBack": "Zaobserwuj",
-    "profileSetupUploadSuccess": "Zdjęcie profilowe przesłane pomyślnie!",
+    "profileSetupUploadStaged": "Przesłano — dotknij Zapisz, aby zastosować",
     "proofmodeCheckAiGenerated": "Sprawdź, czy wygenerowane przez AI",
     "dmSendFailedMessage": "Nie udało się wysłać wiadomości",
     "dmSendFailedRetry": "Spróbuj ponownie",

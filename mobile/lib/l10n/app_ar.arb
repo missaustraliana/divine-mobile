@@ -2446,7 +2446,7 @@
     "libraryWebUnavailableDescription": "تُحفظ المسودات والمقاطع على جهازك. افتح Divine على هاتفك لإدارتها.",
     "libraryWebUnavailableHeadline": "المكتبة متوفّرة في التطبيق على الجوال",
     "notificationFollowBack": "متابعة بالمقابل",
-    "profileSetupUploadSuccess": "تم رفع صورة الملف الشخصي بنجاح!",
+    "profileSetupUploadStaged": "تم الرفع — اضغط على حفظ للتطبيق",
     "proofmodeCheckAiGenerated": "التحقق إذا كان مُنشأً بالذكاء الاصطناعي",
     "dmSendFailedMessage": "تعذّر إرسال الرسالة",
     "dmSendFailedRetry": "إعادة المحاولة",

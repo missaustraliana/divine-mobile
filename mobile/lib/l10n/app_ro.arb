@@ -2454,7 +2454,7 @@
     "libraryWebUnavailableDescription": "Ciornele și clipurile sunt pe dispozitivul tău — deschide Divine pe telefon ca să le gestionezi.",
     "libraryWebUnavailableHeadline": "Biblioteca e în aplicația mobilă",
     "notificationFollowBack": "Urmărește înapoi",
-    "profileSetupUploadSuccess": "Fotografia de profil a fost încărcată cu succes!",
+    "profileSetupUploadStaged": "Încărcată — apasă pe Salvează pentru a aplica",
     "proofmodeCheckAiGenerated": "Verifică dacă este generat de AI",
     "dmSendFailedMessage": "Mesajul nu a putut fi trimis",
     "dmSendFailedRetry": "Reîncearcă",

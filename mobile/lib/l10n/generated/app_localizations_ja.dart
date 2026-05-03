@@ -4897,7 +4897,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get categoryWrestling => 'プロレス';
 
   @override
-  String get profileSetupUploadSuccess => 'プロフィール写真をアップロードしたよ！';
+  String get profileSetupUploadStaged => 'アップロードしたよ — 適用するには「保存」をタップしてね';
 
   @override
   String inboxReportedUser(String displayName) {

@@ -5240,8 +5240,8 @@ class AppLocalizationsPl extends AppLocalizations {
   String get categoryWrestling => 'Wrestling';
 
   @override
-  String get profileSetupUploadSuccess =>
-      'Zdjęcie profilowe przesłane pomyślnie!';
+  String get profileSetupUploadStaged =>
+      'Przesłano — dotknij Zapisz, aby zastosować';
 
   @override
   String inboxReportedUser(String displayName) {

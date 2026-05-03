@@ -5158,7 +5158,7 @@ class AppLocalizationsEs extends AppLocalizations {
   String get categoryWrestling => 'Lucha libre';
 
   @override
-  String get profileSetupUploadSuccess => '¡Foto de perfil subida con éxito!';
+  String get profileSetupUploadStaged => 'Subida — toca Guardar para aplicar';
 
   @override
   String inboxReportedUser(String displayName) {

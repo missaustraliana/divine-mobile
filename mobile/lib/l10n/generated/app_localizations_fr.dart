@@ -5179,8 +5179,8 @@ class AppLocalizationsFr extends AppLocalizations {
   String get categoryWrestling => 'Catch';
 
   @override
-  String get profileSetupUploadSuccess =>
-      'Photo de profil importée avec succès !';
+  String get profileSetupUploadStaged =>
+      'Importée — touchez Enregistrer pour appliquer';
 
   @override
   String inboxReportedUser(String displayName) {

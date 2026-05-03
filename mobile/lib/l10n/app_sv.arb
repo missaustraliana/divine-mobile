@@ -2454,7 +2454,7 @@
     "libraryWebUnavailableDescription": "Utkast och klipp sparas på enheten — öppna Divine i mobilen för att hantera dem.",
     "libraryWebUnavailableHeadline": "Biblioteket finns i mobilappen",
     "notificationFollowBack": "Följ tillbaka",
-    "profileSetupUploadSuccess": "Profilbilden laddades upp!",
+    "profileSetupUploadStaged": "Uppladdad — tryck på Spara för att tillämpa",
     "proofmodeCheckAiGenerated": "Kontrollera om AI-genererat",
     "dmSendFailedMessage": "Meddelandet kunde inte skickas",
     "dmSendFailedRetry": "Försök igen",

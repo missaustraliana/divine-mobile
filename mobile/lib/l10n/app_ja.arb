@@ -2446,7 +2446,7 @@
     "libraryWebUnavailableDescription": "下書きとクリップは端末に保存されます。管理するにはスマートフォンでDivineを開いてください。",
     "libraryWebUnavailableHeadline": "ライブラリはモバイルアプリで利用できます",
     "notificationFollowBack": "フォローバック",
-    "profileSetupUploadSuccess": "プロフィール写真をアップロードしたよ！",
+    "profileSetupUploadStaged": "アップロードしたよ — 適用するには「保存」をタップしてね",
     "proofmodeCheckAiGenerated": "AI生成かチェック",
     "dmSendFailedMessage": "メッセージを送信できなかった",
     "dmSendFailedRetry": "もう一回",

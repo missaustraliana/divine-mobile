@@ -5160,7 +5160,8 @@ class AppLocalizationsBg extends AppLocalizations {
   String get categoryWrestling => 'Борба';
 
   @override
-  String get profileSetupUploadSuccess => 'Профилната снимка е качена успешно!';
+  String get profileSetupUploadStaged =>
+      'Качено — натисни Запази, за да приложиш';
 
   @override
   String inboxReportedUser(String displayName) {

@@ -4914,7 +4914,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get categoryWrestling => '레슬링';
 
   @override
-  String get profileSetupUploadSuccess => '프로필 사진이 성공적으로 업로드되었어요!';
+  String get profileSetupUploadStaged => '업로드됐어요 — 적용하려면 저장을 탭하세요';
 
   @override
   String inboxReportedUser(String displayName) {

@@ -2454,7 +2454,7 @@
     "libraryWebUnavailableDescription": "Rascunhos e clipes ficam no seu dispositivo — abra o Divine no celular para gerenciá-los.",
     "libraryWebUnavailableHeadline": "A biblioteca fica no app móvel",
     "notificationFollowBack": "Seguir de volta",
-    "profileSetupUploadSuccess": "Foto de perfil enviada com sucesso!",
+    "profileSetupUploadStaged": "Enviada — toque em Salvar para aplicar",
     "proofmodeCheckAiGenerated": "Verificar se gerado por IA",
     "dmSendFailedMessage": "Falha ao enviar a mensagem",
     "dmSendFailedRetry": "Tentar novamente",

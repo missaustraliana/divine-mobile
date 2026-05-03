@@ -5083,7 +5083,8 @@ class AppLocalizationsId extends AppLocalizations {
   String get categoryWrestling => 'Gulat';
 
   @override
-  String get profileSetupUploadSuccess => 'Foto profil berhasil diunggah!';
+  String get profileSetupUploadStaged =>
+      'Diunggah — ketuk Simpan untuk menerapkan';
 
   @override
   String inboxReportedUser(String displayName) {

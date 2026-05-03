@@ -5009,7 +5009,7 @@ class AppLocalizationsAm extends AppLocalizations {
   String get categoryWrestling => 'ትግል';
 
   @override
-  String get profileSetupUploadSuccess => 'የመገለጫ ስዕል በተሳካ ሁኔታ ተሰቅሏል!';
+  String get profileSetupUploadStaged => 'ተሰቅሏል — ለመተግበር አስቀምጥን ጠቅ ያድርጉ';
 
   @override
   String inboxReportedUser(String displayName) {
