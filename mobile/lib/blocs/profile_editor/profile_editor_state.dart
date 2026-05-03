@@ -3,6 +3,12 @@
 
 part of 'profile_editor_bloc.dart';
 
+/// Sentinel for [ProfileEditorState.copyWith] to distinguish "field not
+/// supplied" from "field explicitly set to null". Picture URLs default to
+/// null but need an explicit way to be cleared back to null without
+/// resorting to magic-string conventions.
+const Object _kUnset = Object();
+
 /// Status of the profile editor operation.
 enum ProfileEditorStatus {
   /// Initial state, no operation in progress.
@@ -43,6 +49,58 @@ enum ProfileEditorError {
 
   /// Username is reserved - user should contact support.
   usernameReserved,
+}
+
+/// Categorization of avatar upload failures for l10n-friendly UI messaging.
+///
+/// The bloc maps the raw error to one of these cases at the catch site, and
+/// the UI layer maps each case to a localized snackbar string. Enum cases
+/// rather than error strings keep state l10n-clean (per `error_handling.md`)
+/// while preserving the granular failure messaging the existing UI shows.
+enum AvatarUploadError {
+  /// Network or connection error (timeout, connection refused, DNS, etc).
+  network,
+
+  /// Authentication error (401/403, signer rejection).
+  auth,
+
+  /// File too large (413, size limit exceeded).
+  fileTooLarge,
+
+  /// Server error (500/502/503/504, upstream unavailable).
+  server,
+
+  /// Generic / uncategorized failure.
+  generic,
+}
+
+/// Status of the staged avatar upload for the current edit session.
+///
+/// The avatar shown on the edit screen resolves to
+/// `pendingPictureUrl ?? persistedPictureUrl`. The status enum lets the UI
+/// drive a spinner (uploading), a success snackbar (transition to staged),
+/// or the existing error snackbar (transition to failed) without inferring
+/// behavior from nullable URL values.
+enum PendingAvatarStatus {
+  /// No upload in flight and no staged picture for this session. The avatar
+  /// renders the persisted picture (or placeholder).
+  idle,
+
+  /// An upload is in flight. The widget should show a spinner overlay; the
+  /// avatar continues to render whatever was visible before (the local
+  /// pick preview, the previously staged URL, or the persisted picture).
+  uploading,
+
+  /// An upload finished and produced a new picture URL. The avatar renders
+  /// the staged URL until the user taps Save (which persists it) or
+  /// discards the edit.
+  staged,
+
+  /// An upload failed. `pendingPictureUrl` is preserved (so a retry path
+  /// doesn't blank a previously-staged picture). The bloc's error stream
+  /// fires alongside this transition; the UI surfaces the localized
+  /// message via the existing error snackbar.
+  failed,
 }
 
 /// Status of username validation/checking.
@@ -115,6 +173,13 @@ enum ExternalNip05ValidationError {
 }
 
 /// State for the ProfileEditorBloc.
+///
+/// The avatar shown on the edit screen resolves to
+/// `pendingPictureUrl ?? persistedPictureUrl`. `pendingPictureUrl` is set
+/// when the user has uploaded or pasted a new picture in the current edit
+/// session but has not yet tapped Save. `persistedPictureUrl` mirrors the
+/// kind 0 currently on the relays. Save publishes the effective value of
+/// the two; Save remains the only publish point.
 final class ProfileEditorState extends Equatable {
   const ProfileEditorState({
     this.status = ProfileEditorStatus.initial,
@@ -130,6 +195,10 @@ final class ProfileEditorState extends Equatable {
     this.externalNip05 = '',
     this.initialExternalNip05,
     this.externalNip05Error,
+    this.pendingAvatarStatus = PendingAvatarStatus.idle,
+    this.pendingPictureUrl,
+    this.persistedPictureUrl,
+    this.avatarUploadError,
   });
 
   /// Current status of the operation.
@@ -171,6 +240,27 @@ final class ProfileEditorState extends Equatable {
   /// Validation error for external NIP-05 input.
   final ExternalNip05ValidationError? externalNip05Error;
 
+  /// Status of the staged avatar upload for this edit session.
+  final PendingAvatarStatus pendingAvatarStatus;
+
+  /// URL of the staged picture (uploaded or pasted) that has not yet been
+  /// persisted via Save. `null` means no staged change for this session.
+  final String? pendingPictureUrl;
+
+  /// URL of the picture currently persisted on the user's kind 0. `null`
+  /// when the user has no profile yet (new user) or no picture set.
+  final String? persistedPictureUrl;
+
+  /// Categorization of the most recent avatar upload failure, set on the
+  /// transition to [PendingAvatarStatus.failed]. Cleared on every other
+  /// state emit (matches the existing transient `error` field pattern).
+  final AvatarUploadError? avatarUploadError;
+
+  /// The picture URL that should be written when Save is tapped: prefer
+  /// the staged value over the persisted one. Returns `null` when neither
+  /// is set, signalling "no picture".
+  String? get effectivePictureUrl => pendingPictureUrl ?? persistedPictureUrl;
+
   /// Whether the username state allows saving the profile (divine.video mode).
   bool get isUsernameSaveReady {
     if (usernameStatus == UsernameStatus.checking) return false;
@@ -198,6 +288,10 @@ final class ProfileEditorState extends Equatable {
   }
 
   /// Creates a copy with updated values.
+  ///
+  /// `pendingPictureUrl` and `persistedPictureUrl` use a sentinel default so
+  /// callers can explicitly pass `null` to clear them. Omitting the argument
+  /// preserves the existing value.
   ProfileEditorState copyWith({
     ProfileEditorStatus? status,
     ProfileEditorError? error,
@@ -212,6 +306,10 @@ final class ProfileEditorState extends Equatable {
     String? externalNip05,
     String? initialExternalNip05,
     ExternalNip05ValidationError? externalNip05Error,
+    PendingAvatarStatus? pendingAvatarStatus,
+    Object? pendingPictureUrl = _kUnset,
+    Object? persistedPictureUrl = _kUnset,
+    AvatarUploadError? avatarUploadError,
   }) {
     return ProfileEditorState(
       status: status ?? this.status,
@@ -227,6 +325,14 @@ final class ProfileEditorState extends Equatable {
       externalNip05: externalNip05 ?? this.externalNip05,
       initialExternalNip05: initialExternalNip05 ?? this.initialExternalNip05,
       externalNip05Error: externalNip05Error,
+      pendingAvatarStatus: pendingAvatarStatus ?? this.pendingAvatarStatus,
+      pendingPictureUrl: identical(pendingPictureUrl, _kUnset)
+          ? this.pendingPictureUrl
+          : pendingPictureUrl as String?,
+      persistedPictureUrl: identical(persistedPictureUrl, _kUnset)
+          ? this.persistedPictureUrl
+          : persistedPictureUrl as String?,
+      avatarUploadError: avatarUploadError,
     );
   }
 
@@ -245,5 +351,9 @@ final class ProfileEditorState extends Equatable {
     externalNip05,
     initialExternalNip05,
     externalNip05Error,
+    pendingAvatarStatus,
+    pendingPictureUrl,
+    persistedPictureUrl,
+    avatarUploadError,
   ];
 }
