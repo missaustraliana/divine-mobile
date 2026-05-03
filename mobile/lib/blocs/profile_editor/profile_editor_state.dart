@@ -280,7 +280,14 @@ final class ProfileEditorState extends Equatable {
   }
 
   /// Whether the profile can be saved in the current mode.
+  ///
+  /// Returns false while an avatar upload is in flight: saving in that
+  /// window would publish kind 0 with `persistedPictureUrl` (the old
+  /// picture) and force the user to Save a second time once the staged
+  /// URL lands. The [_SaveButton] reads this via `canSave`, and the bloc
+  /// enforces the same invariant defensively in `_onProfileSaved`.
   bool get isSaveReady {
+    if (pendingAvatarStatus == PendingAvatarStatus.uploading) return false;
     return switch (nip05Mode) {
       Nip05Mode.divine => isUsernameSaveReady,
       Nip05Mode.external_ => isExternalNip05SaveReady,

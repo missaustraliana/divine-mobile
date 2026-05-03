@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:blossom_upload_service/blossom_upload_service.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:mocktail/mocktail.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -42,6 +43,16 @@ BlossomSignedEvent _signedEvent(
       'sig': 'test_sig',
     },
   );
+}
+
+/// Generates a minimal JPEG with EXIF orientation and a GPS latitude ref.
+Uint8List _jpegBytesWithGps(String latitudeRef) {
+  final image = img.Image(width: 2, height: 2);
+  final jpgBytes = img.encodeJpg(image, quality: 95);
+  final exif = img.ExifData()
+    ..imageIfd.orientation = 6
+    ..gpsIfd['GPSLatitudeRef'] = img.IfdValueAscii(latitudeRef);
+  return img.injectJpgExif(jpgBytes, exif) ?? Uint8List.fromList(jpgBytes);
 }
 
 void main() {

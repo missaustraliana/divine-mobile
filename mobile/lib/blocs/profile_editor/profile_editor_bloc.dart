@@ -248,6 +248,21 @@ class ProfileEditorBloc extends Bloc<ProfileEditorEvent, ProfileEditorState> {
     ProfileSaved event,
     Emitter<ProfileEditorState> emit,
   ) async {
+    // Drop the save when an avatar upload is still in flight. Without this
+    // guard, `_resolveEffectivePicture` would fall back to
+    // `persistedPictureUrl` and publish kind 0 with the OLD picture, then
+    // the staged URL would land and the user would have to Save again. The
+    // UI also disables Save during upload (via `isSaveReady`); this is the
+    // belt-and-braces so any other caller — retry CTAs, future events —
+    // can't slip past.
+    if (state.pendingAvatarStatus == PendingAvatarStatus.uploading) {
+      Log.info(
+        'Ignoring ProfileSaved received while avatar upload is in flight',
+        name: 'ProfileEditorBloc',
+      );
+      return;
+    }
+
     // The effective picture is owned by bloc state (staged > persisted),
     // with `event.picture` as a legacy fallback for callers that haven't
     // migrated to the staged-state model yet.

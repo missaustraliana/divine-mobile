@@ -1799,6 +1799,32 @@ void main() {
         );
         expect(state.isSaveReady, isFalse);
       });
+
+      test('returns false while an avatar upload is in flight', () {
+        // Reviewer #3916 bullet: Save must be unavailable during upload so
+        // the publish path can't race the staged URL.
+        const state = ProfileEditorState(
+          username: 'alice',
+          usernameStatus: UsernameStatus.available,
+          pendingAvatarStatus: PendingAvatarStatus.uploading,
+        );
+        expect(state.isSaveReady, isFalse);
+      });
+
+      test(
+        'returns true once the upload settles to staged (otherwise valid)',
+        () {
+          // Sanity check the gate is purely the uploading status, not
+          // "any non-idle pendingAvatarStatus".
+          const state = ProfileEditorState(
+            username: 'alice',
+            usernameStatus: UsernameStatus.available,
+            pendingAvatarStatus: PendingAvatarStatus.staged,
+            pendingPictureUrl: 'https://media.divine.video/staged-hash',
+          );
+          expect(state.isSaveReady, isTrue);
+        },
+      );
     });
 
     // Reviewer-mandated coverage for option C from PR #3916: avatar uploads
@@ -2202,7 +2228,6 @@ void main() {
             () => mockProfileRepository.saveProfileEvent(
               displayName: testDisplayName,
               about: testAbout,
-              clearNip05: true,
               picture: testStagedUrl,
             ),
           ).called(1);
@@ -2298,6 +2323,51 @@ void main() {
           verifyNever(
             () => mockProfileRepository.claimUsername(
               username: any(named: 'username'),
+            ),
+          );
+        },
+      );
+
+      blocTest<ProfileEditorBloc, ProfileEditorState>(
+        'ProfileSaved while uploading is dropped — no publish, no claim',
+        // Pins the bloc-side guard from reviewer #3916 follow-up: even if the
+        // UI gate (`isSaveReady`) is bypassed, the bloc must not call into
+        // saveProfileEvent / claimUsername with a stale `persistedPictureUrl`
+        // while the staged URL is still in flight.
+        build: createBloc,
+        seed: () => const ProfileEditorState(
+          pendingAvatarStatus: PendingAvatarStatus.uploading,
+          persistedPictureUrl: testPersistedUrl,
+        ),
+        act: (bloc) => bloc.add(
+          const ProfileSaved(
+            pubkey: testPubkey,
+            displayName: testDisplayName,
+            about: testAbout,
+          ),
+        ),
+        expect: () => const <ProfileEditorState>[],
+        verify: (_) {
+          verifyNever(
+            () => mockProfileRepository.saveProfileEvent(
+              displayName: any(named: 'displayName'),
+              about: any(named: 'about'),
+              username: any(named: 'username'),
+              nip05: any(named: 'nip05'),
+              clearNip05: any(named: 'clearNip05'),
+              picture: any(named: 'picture'),
+              banner: any(named: 'banner'),
+              currentProfile: any(named: 'currentProfile'),
+            ),
+          );
+          verifyNever(
+            () => mockProfileRepository.claimUsername(
+              username: any(named: 'username'),
+            ),
+          );
+          verifyNever(
+            () => mockProfileRepository.getCachedProfile(
+              pubkey: any(named: 'pubkey'),
             ),
           );
         },

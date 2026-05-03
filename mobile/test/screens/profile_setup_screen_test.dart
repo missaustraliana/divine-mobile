@@ -2,7 +2,6 @@
 // ABOUTME: Tests status indicators, pre-population, and validation behavior
 
 import 'package:bloc_test/bloc_test.dart';
-import 'package:blossom_upload_service/blossom_upload_service.dart';
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
