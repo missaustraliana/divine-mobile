@@ -5,38 +5,28 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 
-/// Strips EXIF metadata (GPS, device info, timestamps) from image files.
+/// Strips EXIF metadata (GPS, device info, timestamps) from images.
 ///
-/// On native platforms (iOS, Android, macOS), uses platform channels to
-/// decode and re-encode the image, discarding all EXIF data.
-///
-/// On web, uses the pure-Dart `image` package to re-encode JPEGs without
-/// metadata. Other formats are left untouched on web.
+/// Path-based APIs ([stripMetadata], [stripMetadataInPlace]) use platform
+/// channels and are native-only — `dart:io` `File` cannot be constructed
+/// from an `image_picker` blob URL on web. Web callers must use
+/// [stripMetadataBytes], which runs in pure Dart over raw bytes.
 class ImageMetadataStripper {
   static const _channel = MethodChannel('image_metadata_stripper');
 
   /// Strips all EXIF metadata from the image at [inputPath] and writes
-  /// the cleaned image to [outputPath].
-  ///
-  /// On web, decodes JPEG files via the `image` package and re-encodes
-  /// them without EXIF data. Non-JPEG files are copied as-is.
+  /// the cleaned image to [outputPath]. Native-only — use
+  /// [stripMetadataBytes] on web.
   ///
   /// Throws [PlatformException] if the native call fails.
   static Future<void> stripMetadata({
     required String inputPath,
     required String outputPath,
   }) async {
-    if (kIsWeb) {
-      // coverage:ignore-start
-      // kIsWeb is a compile-time constant; tested via stripMetadataWeb.
-      await stripMetadataWeb(inputPath: inputPath, outputPath: outputPath);
-      // coverage:ignore-end
-    } else {
-      await _channel.invokeMethod<void>('stripImageMetadata', {
-        'inputPath': inputPath,
-        'outputPath': outputPath,
-      });
-    }
+    await _channel.invokeMethod<void>('stripImageMetadata', {
+      'inputPath': inputPath,
+      'outputPath': outputPath,
+    });
   }
 
   /// Convenience: strips metadata in-place by writing to a temp file
@@ -88,36 +78,6 @@ class ImageMetadataStripper {
       } on Exception catch (_) {}
     }
     return imageFile;
-  }
-
-  /// Web fallback: strips metadata from JPEG and PNG files using
-  /// pure Dart. JPEG EXIF is replaced losslessly (only orientation is
-  /// preserved). PNG is decoded and re-encoded (lossless).
-  /// Other formats are copied unchanged.
-  @visibleForTesting
-  static Future<void> stripMetadataWeb({
-    required String inputPath,
-    required String outputPath,
-  }) async {
-    final inputFile = File(inputPath);
-    final bytes = await inputFile.readAsBytes();
-    final lowerPath = inputPath.toLowerCase();
-
-    if (lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg')) {
-      final clean = stripJpegExif(bytes);
-      await File(outputPath).writeAsBytes(clean);
-      return;
-    } else if (lowerPath.endsWith('.png')) {
-      final decoded = img.decodePng(bytes);
-      if (decoded != null) {
-        final clean = img.encodePng(decoded);
-        await File(outputPath).writeAsBytes(clean);
-        return;
-      }
-    }
-
-    // Unsupported format or decode failed — copy as-is.
-    await inputFile.copy(outputPath);
   }
 
   /// Strips EXIF metadata from raw image bytes using pure Dart.

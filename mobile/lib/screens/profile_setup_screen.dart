@@ -1282,7 +1282,15 @@ class _ProfileSetupScreenViewState
     final file = _selectedImage;
     final bytes = _selectedImageBytes;
     final filename = _selectedImageFilename;
-    if (file == null && bytes == null) return;
+    if (file == null && bytes == null) {
+      Log.error(
+        '_uploadSelectedImage called without a selected image; '
+        'caller forgot to populate _selectedImage or _selectedImageBytes',
+        name: 'ProfileSetupScreen',
+        category: LogCategory.ui,
+      );
+      return;
+    }
     final l10n = context.l10n;
 
     setState(() {
