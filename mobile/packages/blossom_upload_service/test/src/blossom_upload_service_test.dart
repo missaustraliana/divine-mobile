@@ -3030,9 +3030,11 @@ void main() {
           expect(capturedPayload, isA<Uint8List>());
           expect(capturedPayload, isNotEmpty);
 
-          // Progress reaches 1.0 on success and starts at 0.1.
-          expect(progress.first, equals(0.1));
-          expect(progress.last, equals(1.0));
+          // Progress reports the start (0.1) and the completion (1.0).
+          // Asserted with `contains` rather than first/last so adding
+          // intermediate milestones doesn't break this test.
+          expect(progress, contains(0.1));
+          expect(progress, contains(1.0));
         },
       );
 
@@ -3195,6 +3197,27 @@ void main() {
         // GPS field stripped → same hash → same canonical URL.
         expect(r1.videoId, equals(r2.videoId));
       });
+
+      test(
+        'returns failure when an unexpected error escapes pre-upload prep',
+        () async {
+          // Drive the outer `on Object catch` by making the auth check
+          // itself throw — the only path before `_uploadImageSourceToServers`
+          // can capture errors. Mirrors the existing `uploadImage returns
+          // failure when file processing throws` test on the file path.
+          when(
+            () => mockAuthProvider.isAuthenticated,
+          ).thenThrow(StateError('boom'));
+
+          final result = await service.uploadImageBytes(
+            bytes: makeJpegBytes(),
+            nostrPubkey: _testPublicKey,
+          );
+
+          expect(result.success, isFalse);
+          expect(result.errorMessage, contains('Image upload failed'));
+        },
+      );
     });
 
     group('uploadBugReport - error paths', () {

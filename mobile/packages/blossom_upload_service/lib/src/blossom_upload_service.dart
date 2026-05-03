@@ -226,9 +226,6 @@ class BlossomResumableUploadException implements Exception {
 /// share their HTTP plumbing across native and web without leaking File
 /// assumptions into the bytes path.
 sealed class _UploadSource {
-  /// Total payload size in bytes.
-  int get size;
-
   /// Suggested filename, sent to the resumable init endpoint and used in
   /// log lines. The bytes path threads this through from the caller; the
   /// file path derives it from the underlying URI.
@@ -246,6 +243,10 @@ sealed class _UploadSource {
   /// Used by the resumable chunk loop. File-backed sources lazily open a
   /// single [RandomAccessFile] and reuse it across calls; byte-backed
   /// sources slice the in-memory buffer.
+  ///
+  /// **Not safe for concurrent calls on the same source instance.** The
+  /// file impl mutates a shared `RandomAccessFile`'s position; callers
+  /// must serialize. The chunk loop in `_uploadChunks` already does so.
   Future<List<int>> readRange(int start, int length);
 
   /// Releases any resources opened by [readRange]. Always safe to call
@@ -255,15 +256,11 @@ sealed class _UploadSource {
 }
 
 class _FileUploadSource extends _UploadSource {
-  _FileUploadSource(this.file, this.fileSize);
+  _FileUploadSource(this.file);
 
   final File file;
-  final int fileSize;
 
   RandomAccessFile? _reader;
-
-  @override
-  int get size => fileSize;
 
   @override
   String get filename =>
@@ -296,9 +293,6 @@ class _BytesUploadSource extends _UploadSource {
 
   @override
   final String filename;
-
-  @override
-  int get size => bytes.length;
 
   @override
   Object getStreamingBody() => bytes;
@@ -1711,7 +1705,7 @@ class BlossomUploadService {
           }
 
           late BlossomUploadResult result;
-          final videoSource = _FileUploadSource(videoFile, fileSize);
+          final videoSource = _FileUploadSource(videoFile);
           if (useResumable) {
             result = await _uploadWithSingleLegacyFallback(
               serverUrl: serverUrl,
@@ -1918,7 +1912,7 @@ class BlossomUploadService {
       onProgress?.call(0.2);
 
       return _uploadImageSourceToServers(
-        source: _FileUploadSource(strippedFile, fileSize),
+        source: _FileUploadSource(strippedFile),
         fileHash: fileHash,
         fileSize: fileSize,
         contentType: mimeType,
@@ -2210,7 +2204,7 @@ class BlossomUploadService {
 
           final result = await _uploadToServer(
             serverUrl: serverUrl,
-            source: _FileUploadSource(bugReportFile, fileSize),
+            source: _FileUploadSource(bugReportFile),
             fileHash: fileHash,
             fileSize: fileSize,
             contentType: 'text/plain',
@@ -2401,7 +2395,7 @@ class BlossomUploadService {
 
           final result = await _uploadToServer(
             serverUrl: serverUrl,
-            source: _FileUploadSource(audioFile, fileSize),
+            source: _FileUploadSource(audioFile),
             fileHash: fileHash,
             fileSize: fileSize,
             contentType: mimeType,
