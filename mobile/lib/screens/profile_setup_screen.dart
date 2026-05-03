@@ -31,23 +31,21 @@ import 'package:openvine/widgets/user_avatar.dart';
 import 'package:unified_logger/unified_logger.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// Maps a [BlossomUploadFailureReason] from the upload service to the
-/// localized message shown to the user when an avatar upload fails.
+/// Maps an [AvatarUploadError] case to its localized snackbar string.
 ///
-/// `null` (no reason supplied — defensive for older paths or unmapped
-/// failures) falls through to the generic "upload failed" copy.
+/// Categorization happens in the bloc (see `_classifyUploadError`); the UI
+/// just picks the right l10n key. Keeping this here colocates UI copy with
+/// the screen that shows it.
 String profileSetupUploadErrorMessage(
   AppLocalizations l10n,
-  BlossomUploadFailureReason? reason,
+  AvatarUploadError error,
 ) {
-  return switch (reason) {
-    BlossomUploadFailureReason.network => l10n.profileSetupUploadNetworkError,
-    BlossomUploadFailureReason.auth => l10n.profileSetupUploadAuthError,
-    BlossomUploadFailureReason.fileTooLarge =>
-      l10n.profileSetupUploadFileTooLarge,
-    BlossomUploadFailureReason.server => l10n.profileSetupUploadServerError,
-    BlossomUploadFailureReason.unknown ||
-    null => l10n.profileSetupUploadFailedGeneric,
+  return switch (error) {
+    AvatarUploadError.network => l10n.profileSetupUploadNetworkError,
+    AvatarUploadError.auth => l10n.profileSetupUploadAuthError,
+    AvatarUploadError.fileTooLarge => l10n.profileSetupUploadFileTooLarge,
+    AvatarUploadError.server => l10n.profileSetupUploadServerError,
+    AvatarUploadError.generic => l10n.profileSetupUploadFailedGeneric,
   };
 }
 
@@ -71,6 +69,7 @@ class ProfileSetupScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profileRepository = ref.watch(profileRepositoryProvider);
+    final blossomUploadService = ref.watch(blossomUploadServiceProvider);
     final authService = ref.watch(authServiceProvider);
 
     final pubkey = authService.currentPublicKeyHex;
@@ -83,8 +82,16 @@ class ProfileSetupScreen extends ConsumerWidget {
     return MultiBlocProvider(
       providers: [
         BlocProvider<ProfileEditorBloc>(
+          // Riverpod-into-BlocProvider bridge: rebuild the bloc when any
+          // captured dependency's identity changes (auth flip, account
+          // switch). Record-typed key compares per-field with `==`; the
+          // captured classes do not override `==`, so equality falls
+          // through to identity — exactly the semantics this needs.
+          // See `state_management.md`.
+          key: ValueKey((profileRepository, blossomUploadService, pubkey)),
           create: (context) => ProfileEditorBloc(
             profileRepository: profileRepository,
+            blossomUploadService: blossomUploadService,
             hasExistingProfile: authService.hasExistingProfile,
             currentUserPubkey: pubkey,
           ),
@@ -129,16 +136,17 @@ class _ProfileSetupScreenViewState
   final _usernameFocusNode = FocusNode();
   final _externalNip05FocusNode = FocusNode();
 
-  bool _isUploadingImage = false;
-  // Native picks land here so the file path can flow through the
-  // platform-channel EXIF stripper.
+  // Local-preview state for the brief window between picking and the
+  // bloc receiving the staged URL. The bloc's `pendingPictureUrl` takes
+  // over once `pendingAvatarStatus == staged`. Cleared on the next pick
+  // or on `ProfilePictureUploadCleared`.
+  //
+  // Native picks: file path flows through the platform-channel EXIF
+  // stripper inside the upload service. Web picks: `image_picker` returns
+  // a blob URL `dart:io File` cannot open, so the bytes drive both the
+  // preview and the bytes-based upload path.
   File? _selectedImage;
-  // Web picks land here because `image_picker` returns a blob URL that
-  // `dart:io File` cannot open. The bytes drive both the preview and the
-  // bytes-based upload path.
   Uint8List? _selectedImageBytes;
-  String? _selectedImageFilename;
-  String? _uploadedImageUrl;
   Color? _selectedProfileColor;
 
   @override
@@ -207,6 +215,10 @@ class _ProfileSetupScreenViewState
             });
 
             final editorBloc = context.read<ProfileEditorBloc>();
+            // Seed bloc with the persisted picture so the avatar widget can
+            // render `pendingPictureUrl ?? persistedPictureUrl` purely from
+            // state, no widget-local fallback for the existing avatar.
+            editorBloc.add(InitialPersistedPictureSet(profile.picture));
             if (extractedUsername != null) {
               editorBloc.add(InitialUsernameSet(extractedUsername));
             }
@@ -345,9 +357,7 @@ class _ProfileSetupScreenViewState
                 case ProfileEditorError.noRelaysConnected:
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text(
-                        context.l10n.profileSetupNoRelaysConnected,
-                      ),
+                      content: Text(context.l10n.profileSetupNoRelaysConnected),
                       backgroundColor: VineTheme.error,
                       duration: const Duration(seconds: 6),
                       action: pubkey == null
@@ -355,16 +365,46 @@ class _ProfileSetupScreenViewState
                           : SnackBarAction(
                               label: context.l10n.profileSetupRetryLabel,
                               textColor: VineTheme.whiteText,
-                              onPressed: () => _retryAfterRelayReconnect(
-                                context,
-                                pubkey,
-                              ),
+                              onPressed: () =>
+                                  _retryAfterRelayReconnect(context, pubkey),
                             ),
                     ),
                   );
                 case null:
                   break;
               }
+            }
+          },
+        ),
+        BlocListener<ProfileEditorBloc, ProfileEditorState>(
+          listenWhen: (prev, curr) =>
+              prev.pendingAvatarStatus != curr.pendingAvatarStatus,
+          listener: (context, state) {
+            switch (state.pendingAvatarStatus) {
+              case PendingAvatarStatus.staged:
+                // Avatar preview has already swapped (BlocBuilder is rebuilding
+                // from `effectivePictureUrl`). The snackbar makes the staged
+                // contract explicit: bytes uploaded, not yet published.
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(context.l10n.profileSetupUploadStaged),
+                    backgroundColor: VineTheme.vineGreen,
+                  ),
+                );
+              case PendingAvatarStatus.failed:
+                final classified =
+                    state.avatarUploadError ?? AvatarUploadError.generic;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      profileSetupUploadErrorMessage(context.l10n, classified),
+                    ),
+                    backgroundColor: VineTheme.error,
+                  ),
+                );
+              case PendingAvatarStatus.idle:
+              case PendingAvatarStatus.uploading:
+                break;
             }
           },
         ),
@@ -438,168 +478,194 @@ class _ProfileSetupScreenViewState
                                   // 144 avatar + 20 (half of 40px buttons extending below)
                                   height: 164,
                                   width: 144,
-                                  child: Stack(
-                                    clipBehavior: Clip.none,
-                                    children: [
-                                      // Profile picture preview
-                                      UserAvatar(
-                                        imageProvider:
-                                            _buildProfilePictureProvider(),
-                                        name: _nameController.text.trim(),
-                                        placeholderSeed: pubkey,
-                                        size: 144,
-                                        semanticLabel: context
-                                            .l10n
-                                            .profileSetupProfilePicturePreview,
-                                      ),
-                                      // Upload progress indicator
-                                      if (_isUploadingImage)
-                                        Positioned(
-                                          top: 0,
-                                          left: 0,
-                                          width: 144,
-                                          height: 144,
-                                          child: DecoratedBox(
-                                            decoration: BoxDecoration(
-                                              borderRadius:
-                                                  BorderRadius.circular(56),
-                                              color: VineTheme.backgroundColor
-                                                  .withValues(alpha: 0.7),
-                                            ),
-                                            child: const Center(
-                                              child: CircularProgressIndicator(
-                                                color: VineTheme.vineGreen,
-                                                strokeWidth: 3,
+                                  child: BlocBuilder<ProfileEditorBloc, ProfileEditorState>(
+                                    buildWhen: (prev, curr) =>
+                                        prev.pendingAvatarStatus !=
+                                            curr.pendingAvatarStatus ||
+                                        prev.pendingPictureUrl !=
+                                            curr.pendingPictureUrl ||
+                                        prev.persistedPictureUrl !=
+                                            curr.persistedPictureUrl,
+                                    builder: (context, editorState) {
+                                      final isUploadingImage =
+                                          editorState.pendingAvatarStatus ==
+                                          PendingAvatarStatus.uploading;
+                                      return Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          // Profile picture preview
+                                          UserAvatar(
+                                            imageProvider:
+                                                _buildProfilePictureProvider(
+                                                  editorState,
+                                                ),
+                                            name: _nameController.text.trim(),
+                                            placeholderSeed: pubkey,
+                                            size: 144,
+                                            semanticLabel: context
+                                                .l10n
+                                                .profileSetupProfilePicturePreview,
+                                          ),
+                                          // Upload progress indicator
+                                          if (isUploadingImage)
+                                            Positioned(
+                                              top: 0,
+                                              left: 0,
+                                              width: 144,
+                                              height: 144,
+                                              child: DecoratedBox(
+                                                decoration: BoxDecoration(
+                                                  borderRadius:
+                                                      BorderRadius.circular(56),
+                                                  color: VineTheme
+                                                      .backgroundColor
+                                                      .withValues(alpha: 0.7),
+                                                ),
+                                                child: const Center(
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                        color:
+                                                            VineTheme.vineGreen,
+                                                        strokeWidth: 3,
+                                                      ),
+                                                ),
                                               ),
+                                            ),
+                                          // Image source buttons - overlapping bottom of avatar
+                                          Positioned(
+                                            bottom: 0,
+                                            left: 0,
+                                            right: 0,
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                // Show camera button on mobile only
+                                                if (!_isDesktopPlatform()) ...[
+                                                  GestureDetector(
+                                                    onTap: isUploadingImage
+                                                        ? null
+                                                        : () => _pickImage(
+                                                            ImageSource.camera,
+                                                          ),
+                                                    child: Container(
+                                                      width: 40,
+                                                      height: 40,
+                                                      decoration: BoxDecoration(
+                                                        color: VineTheme
+                                                            .surfaceContainer,
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              16,
+                                                            ),
+                                                        border: Border.all(
+                                                          color: VineTheme
+                                                              .outlineMuted,
+                                                          width: 2,
+                                                        ),
+                                                      ),
+                                                      child: Center(
+                                                        child: SvgPicture.asset(
+                                                          DivineIconName
+                                                              .cameraPlus
+                                                              .assetPath,
+                                                          width: 24,
+                                                          height: 24,
+                                                          colorFilter:
+                                                              const ColorFilter.mode(
+                                                                VineTheme
+                                                                    .primary,
+                                                                BlendMode.srcIn,
+                                                              ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 12),
+                                                ],
+                                                GestureDetector(
+                                                  onTap: isUploadingImage
+                                                      ? null
+                                                      : () => _pickImage(
+                                                          ImageSource.gallery,
+                                                        ),
+                                                  child: Container(
+                                                    width: 40,
+                                                    height: 40,
+                                                    decoration: BoxDecoration(
+                                                      color: VineTheme
+                                                          .surfaceContainer,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            16,
+                                                          ),
+                                                      border: Border.all(
+                                                        color: VineTheme
+                                                            .outlineMuted,
+                                                        width: 2,
+                                                      ),
+                                                    ),
+                                                    child: Center(
+                                                      child: SvgPicture.asset(
+                                                        DivineIconName
+                                                            .imagesSquare
+                                                            .assetPath,
+                                                        width: 24,
+                                                        height: 24,
+                                                        colorFilter:
+                                                            const ColorFilter.mode(
+                                                              VineTheme.primary,
+                                                              BlendMode.srcIn,
+                                                            ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 12),
+                                                // URL input button
+                                                GestureDetector(
+                                                  onTap: () =>
+                                                      _showImageUrlSheet(
+                                                        context,
+                                                      ),
+                                                  child: Container(
+                                                    width: 40,
+                                                    height: 40,
+                                                    decoration: BoxDecoration(
+                                                      color: VineTheme
+                                                          .surfaceContainer,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            16,
+                                                          ),
+                                                      border: Border.all(
+                                                        color: VineTheme
+                                                            .outlineMuted,
+                                                        width: 2,
+                                                      ),
+                                                    ),
+                                                    child: Center(
+                                                      child: SvgPicture.asset(
+                                                        DivineIconName
+                                                            .linkSimple
+                                                            .assetPath,
+                                                        width: 24,
+                                                        height: 24,
+                                                        colorFilter:
+                                                            const ColorFilter.mode(
+                                                              VineTheme.primary,
+                                                              BlendMode.srcIn,
+                                                            ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                        ),
-                                      // Image source buttons - overlapping bottom of avatar
-                                      Positioned(
-                                        bottom: 0,
-                                        left: 0,
-                                        right: 0,
-                                        child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            // Show camera button on mobile only
-                                            if (!_isDesktopPlatform()) ...[
-                                              GestureDetector(
-                                                onTap: _isUploadingImage
-                                                    ? null
-                                                    : () => _pickImage(
-                                                        ImageSource.camera,
-                                                      ),
-                                                child: Container(
-                                                  width: 40,
-                                                  height: 40,
-                                                  decoration: BoxDecoration(
-                                                    color: VineTheme
-                                                        .surfaceContainer,
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          16,
-                                                        ),
-                                                    border: Border.all(
-                                                      color: VineTheme
-                                                          .outlineMuted,
-                                                      width: 2,
-                                                    ),
-                                                  ),
-                                                  child: Center(
-                                                    child: SvgPicture.asset(
-                                                      DivineIconName
-                                                          .cameraPlus
-                                                          .assetPath,
-                                                      width: 24,
-                                                      height: 24,
-                                                      colorFilter:
-                                                          const ColorFilter.mode(
-                                                            VineTheme.primary,
-                                                            BlendMode.srcIn,
-                                                          ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 12),
-                                            ],
-                                            GestureDetector(
-                                              onTap: _isUploadingImage
-                                                  ? null
-                                                  : () => _pickImage(
-                                                      ImageSource.gallery,
-                                                    ),
-                                              child: Container(
-                                                width: 40,
-                                                height: 40,
-                                                decoration: BoxDecoration(
-                                                  color: VineTheme
-                                                      .surfaceContainer,
-                                                  borderRadius:
-                                                      BorderRadius.circular(16),
-                                                  border: Border.all(
-                                                    color:
-                                                        VineTheme.outlineMuted,
-                                                    width: 2,
-                                                  ),
-                                                ),
-                                                child: Center(
-                                                  child: SvgPicture.asset(
-                                                    DivineIconName
-                                                        .imagesSquare
-                                                        .assetPath,
-                                                    width: 24,
-                                                    height: 24,
-                                                    colorFilter:
-                                                        const ColorFilter.mode(
-                                                          VineTheme.primary,
-                                                          BlendMode.srcIn,
-                                                        ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            // URL input button
-                                            GestureDetector(
-                                              onTap: () =>
-                                                  _showImageUrlSheet(context),
-                                              child: Container(
-                                                width: 40,
-                                                height: 40,
-                                                decoration: BoxDecoration(
-                                                  color: VineTheme
-                                                      .surfaceContainer,
-                                                  borderRadius:
-                                                      BorderRadius.circular(16),
-                                                  border: Border.all(
-                                                    color:
-                                                        VineTheme.outlineMuted,
-                                                    width: 2,
-                                                  ),
-                                                ),
-                                                child: Center(
-                                                  child: SvgPicture.asset(
-                                                    DivineIconName
-                                                        .linkSimple
-                                                        .assetPath,
-                                                    width: 24,
-                                                    height: 24,
-                                                    colorFilter:
-                                                        const ColorFilter.mode(
-                                                          VineTheme.primary,
-                                                          BlendMode.srcIn,
-                                                        ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
+                                        ],
+                                      );
+                                    },
                                   ),
                                 ),
                               ),
@@ -1039,7 +1105,12 @@ class _ProfileSetupScreenViewState
                                 about: _bioController.text,
                                 username: _nip05Controller.text,
                                 externalNip05: _externalNip05Controller.text,
-                                picture: _pictureController.text,
+                                // Picture is owned by bloc state
+                                // (`pendingPictureUrl ?? persistedPictureUrl`).
+                                // Don't pass `_pictureController.text` here —
+                                // it's only used as the URL-entry sheet
+                                // text field and is staged separately via
+                                // `ProfilePictureUrlSet`.
                                 banner: _selectedProfileColor != null
                                     ? '0x${_selectedProfileColor!.toARGB32().toRadixString(16).substring(2)}'
                                     : null,
@@ -1076,7 +1147,7 @@ class _ProfileSetupScreenViewState
         about: _bioController.text,
         username: _nip05Controller.text,
         externalNip05: _externalNip05Controller.text,
-        picture: _pictureController.text,
+        // Picture sourced from bloc state (see ProfileSaved dispatch above).
         banner: _selectedProfileColor != null
             ? '0x${_selectedProfileColor!.toARGB32().toRadixString(16).substring(2)}'
             : null,
@@ -1084,23 +1155,28 @@ class _ProfileSetupScreenViewState
     );
   }
 
-  ImageProvider<Object>? _buildProfilePictureProvider() {
-    // Priority: in-memory bytes (web pick) > local file (native pick) >
-    // uploaded URL > manually entered URL > placeholder.
-    if (_selectedImageBytes != null) {
-      return MemoryImage(_selectedImageBytes!);
+  ImageProvider<Object>? _buildProfilePictureProvider(
+    ProfileEditorState editorState,
+  ) {
+    // Priority:
+    //   1. Local pick preview (only relevant during upload — the bloc has
+    //      no URL yet).
+    //   2. Staged picture from bloc state (post-upload or manual URL).
+    //   3. Persisted picture from bloc state (current kind 0 value).
+    //   4. Placeholder.
+    if (editorState.pendingAvatarStatus == PendingAvatarStatus.uploading) {
+      if (_selectedImageBytes != null) return MemoryImage(_selectedImageBytes!);
+      if (_selectedImage != null) return FileImage(_selectedImage!);
     }
 
-    if (_selectedImage != null) {
-      return FileImage(_selectedImage!);
+    final pending = editorState.pendingPictureUrl;
+    if (pending != null && pending.isNotEmpty) {
+      return NetworkImage(pending);
     }
 
-    if (_uploadedImageUrl != null && _uploadedImageUrl!.isNotEmpty) {
-      return NetworkImage(_uploadedImageUrl!);
-    }
-
-    if (_pictureController.text.isNotEmpty) {
-      return NetworkImage(_pictureController.text);
+    final persisted = editorState.persistedPictureUrl;
+    if (persisted != null && persisted.isNotEmpty) {
+      return NetworkImage(persisted);
     }
 
     return null;
@@ -1141,6 +1217,16 @@ class _ProfileSetupScreenViewState
         category: LogCategory.ui,
       );
 
+      final pubkey = ref.read(authServiceProvider).currentPublicKeyHex;
+      if (pubkey == null) {
+        Log.error(
+          'Cannot upload avatar: no public key available',
+          name: 'ProfileSetupScreen',
+          category: LogCategory.ui,
+        );
+        return;
+      }
+
       if (kIsWeb) {
         // Resolve the blob synchronously here — once we navigate away from
         // the picker the URL can be revoked.
@@ -1149,22 +1235,27 @@ class _ProfileSetupScreenViewState
         setState(() {
           _selectedImage = null;
           _selectedImageBytes = bytes;
-          _selectedImageFilename = picked.name;
-          _uploadedImageUrl = null;
           _pictureController.clear();
         });
+        context.read<ProfileEditorBloc>().add(
+          ProfilePictureUploadRequested(
+            pubkey: pubkey,
+            bytes: bytes,
+            filename: picked.name,
+          ),
+        );
       } else {
         if (!mounted) return;
+        final file = File(picked.path);
         setState(() {
-          _selectedImage = File(picked.path);
+          _selectedImage = file;
           _selectedImageBytes = null;
-          _selectedImageFilename = null;
-          _uploadedImageUrl = null;
           _pictureController.clear();
         });
+        context.read<ProfileEditorBloc>().add(
+          ProfilePictureUploadRequested(pubkey: pubkey, file: file),
+        );
       }
-
-      await _uploadSelectedImage();
     } catch (e) {
       Log.error(
         'Error picking image: $e',
@@ -1278,133 +1369,6 @@ class _ProfileSetupScreenViewState
     }
   }
 
-  Future<void> _uploadSelectedImage() async {
-    final file = _selectedImage;
-    final bytes = _selectedImageBytes;
-    final filename = _selectedImageFilename;
-    if (file == null && bytes == null) {
-      Log.error(
-        '_uploadSelectedImage called without a selected image; '
-        'caller forgot to populate _selectedImage or _selectedImageBytes',
-        name: 'ProfileSetupScreen',
-        category: LogCategory.ui,
-      );
-      return;
-    }
-    final l10n = context.l10n;
-
-    setState(() {
-      _isUploadingImage = true;
-    });
-
-    try {
-      final authService = ref.read(authServiceProvider);
-      final uploadService = ref.read(blossomUploadServiceProvider);
-
-      if (authService.currentPublicKeyHex == null) {
-        // No signed-in identity: classify as auth so the user sees the
-        // sign-in-again copy rather than a generic "upload failed".
-        _showUploadFailureSnackBar(l10n, BlossomUploadFailureReason.auth);
-        return;
-      }
-
-      void onProgress(double progress) {
-        // Only log at major milestones to reduce noise
-        if (progress == 1.0 || progress == 0.0) {
-          Log.debug(
-            'Upload ${progress == 1.0 ? "completed" : "started"}',
-            name: 'ProfileSetupScreen',
-            category: LogCategory.ui,
-          );
-        }
-      }
-
-      // Web pick → bytes → uploadImageBytes (pure-Dart EXIF strip).
-      // Native pick → File → uploadImage (platform-channel EXIF strip).
-      final result = bytes != null
-          ? await uploadService.uploadImageBytes(
-              bytes: bytes,
-              nostrPubkey: authService.currentPublicKeyHex!,
-              filename: filename,
-              onProgress: onProgress,
-            )
-          : await uploadService.uploadImage(
-              imageFile: file!,
-              nostrPubkey: authService.currentPublicKeyHex!,
-              onProgress: onProgress,
-            );
-
-      if (result.success && result.cdnUrl != null) {
-        setState(() {
-          _uploadedImageUrl = result.cdnUrl;
-          _pictureController.text = result.cdnUrl!;
-        });
-
-        // Dismiss keyboard after programmatically setting text field value
-        if (mounted) {
-          FocusScope.of(context).unfocus();
-        }
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(l10n.profileSetupUploadSuccess),
-              backgroundColor: VineTheme.success,
-            ),
-          );
-        }
-      } else {
-        Log.error(
-          'Image upload failed: ${result.errorMessage} '
-          '(reason: ${result.failureReason}, status: ${result.statusCode})',
-          name: 'ProfileSetupScreen',
-          category: LogCategory.ui,
-        );
-        _showUploadFailureSnackBar(l10n, result.failureReason);
-      }
-    } catch (e) {
-      // Defensive: uploadImage normally returns a result rather than
-      // throwing, so anything reaching here is unexpected (file IO,
-      // provider lookup). Surface the generic copy.
-      Log.error(
-        'Unexpected error uploading image: $e',
-        name: 'ProfileSetupScreen',
-        category: LogCategory.ui,
-      );
-      Log.error(
-        'Upload error type: ${e.runtimeType}',
-        name: 'ProfileSetupScreen',
-        category: LogCategory.ui,
-      );
-      _showUploadFailureSnackBar(l10n, null);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isUploadingImage = false;
-        });
-      }
-    }
-  }
-
-  void _showUploadFailureSnackBar(
-    AppLocalizations l10n,
-    BlossomUploadFailureReason? reason,
-  ) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(profileSetupUploadErrorMessage(l10n, reason)),
-        backgroundColor: VineTheme.error,
-        duration: const Duration(seconds: 5),
-        action: SnackBarAction(
-          label: l10n.profileSetupGotItButton,
-          textColor: VineTheme.whiteText,
-          onPressed: () {},
-        ),
-      ),
-    );
-  }
-
   void _showNostrInfoSheet(BuildContext context) {
     // Unfocus any field before opening sheet
     FocusScope.of(context).unfocus();
@@ -1464,8 +1428,12 @@ class _ProfileSetupScreenViewState
         ),
       ],
     ).then((_) {
-      // Unfocus after sheet is dismissed to prevent auto-focus on form fields
+      // Stage the URL the user typed so the avatar widget previews it and
+      // Save can publish it. Empty string clears any prior staged change.
       if (context.mounted) {
+        context.read<ProfileEditorBloc>().add(
+          ProfilePictureUrlSet(_pictureController.text),
+        );
         FocusScope.of(context).unfocus();
       }
     });
@@ -1625,10 +1593,7 @@ class _UsernameReservedIndicator extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 context.l10n.profileSetupUsernameReserved,
-                style: const TextStyle(
-                  color: VineTheme.warning,
-                  fontSize: 12,
-                ),
+                style: const TextStyle(color: VineTheme.warning, fontSize: 12),
               ),
             ],
           ),
@@ -1839,9 +1804,7 @@ class _UsernameReservedDialogState extends State<UsernameReservedDialog> {
       );
       if (!launched && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.l10n.profileSetupCouldntOpenEmail),
-          ),
+          SnackBar(content: Text(context.l10n.profileSetupCouldntOpenEmail)),
         );
       }
     }
