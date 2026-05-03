@@ -130,7 +130,14 @@ class _ProfileSetupScreenViewState
   final _externalNip05FocusNode = FocusNode();
 
   bool _isUploadingImage = false;
+  // Native picks land here so the file path can flow through the
+  // platform-channel EXIF stripper.
   File? _selectedImage;
+  // Web picks land here because `image_picker` returns a blob URL that
+  // `dart:io File` cannot open. The bytes drive both the preview and the
+  // bytes-based upload path.
+  Uint8List? _selectedImageBytes;
+  String? _selectedImageFilename;
   String? _uploadedImageUrl;
   Color? _selectedProfileColor;
 
@@ -1078,7 +1085,12 @@ class _ProfileSetupScreenViewState
   }
 
   ImageProvider<Object>? _buildProfilePictureProvider() {
-    // Priority: selected image > uploaded URL > manual URL > placeholder
+    // Priority: in-memory bytes (web pick) > local file (native pick) >
+    // uploaded URL > manually entered URL > placeholder.
+    if (_selectedImageBytes != null) {
+      return MemoryImage(_selectedImageBytes!);
+    }
+
     if (_selectedImage != null) {
       return FileImage(_selectedImage!);
     }
@@ -1094,68 +1106,65 @@ class _ProfileSetupScreenViewState
     return null;
   }
 
-  /// Platform-aware image selection
+  /// Platform-aware image selection.
+  ///
+  /// Native (mobile + desktop): selects an [XFile] with a real filesystem
+  /// path, wraps it in `dart:io File`, and routes through
+  /// `BlossomUploadService.uploadImage` so the platform-channel EXIF
+  /// stripper runs.
+  ///
+  /// Web: `image_picker` returns an [XFile] whose `.path` is a blob URL
+  /// that `dart:io` cannot resolve, so we read the bytes directly and
+  /// route through `BlossomUploadService.uploadImageBytes`, which strips
+  /// EXIF in pure Dart and uploads from memory.
   Future<void> _pickImage(ImageSource source) async {
-    // TODO(#3887): Remove when the upload pipeline accepts bytes / XFile.
-    // The current path constructs `dart:io File` from `image_picker`, which
-    // hands back a blob URL on web and fails at the first I/O call.
-    if (kIsWeb) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.l10n.profileSetupUploadUnsupportedOnWeb),
-            backgroundColor: VineTheme.error,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: context.l10n.profileSetupGotItButton,
-              textColor: VineTheme.whiteText,
-              onPressed: () {},
-            ),
-          ),
-        );
-      }
-      return;
-    }
-
     try {
       Log.info(
-        '🖼️ Attempting to pick image from ${source.name} on ${defaultTargetPlatform.name}',
+        '🖼️ Attempting to pick image from ${source.name} on '
+        '${kIsWeb ? "web" : defaultTargetPlatform.name}',
         name: 'ProfileSetupScreen',
         category: LogCategory.ui,
       );
 
-      File? selectedFile;
-
-      // Use different methods based on platform and source
-      if (source == ImageSource.gallery && _isDesktopPlatform()) {
-        // Use file_selector for desktop gallery/file browsing
-        selectedFile = await _pickImageFromDesktop();
-      } else {
-        // Use image_picker for mobile or camera
-        selectedFile = await _pickImageFromMobile(source);
-      }
-
-      if (selectedFile != null) {
-        Log.info(
-          '✅ Image picked successfully: ${selectedFile.path}',
-          name: 'ProfileSetupScreen',
-          category: LogCategory.ui,
-        );
-        setState(() {
-          _selectedImage = selectedFile;
-          _uploadedImageUrl = null; // Clear previous upload
-          _pictureController.clear(); // Clear manual URL
-        });
-
-        // Upload the image
-        await _uploadImage();
-      } else {
+      final picked = await _pickXFile(source);
+      if (picked == null) {
         Log.info(
           '❌ No image selected',
           name: 'ProfileSetupScreen',
           category: LogCategory.ui,
         );
+        return;
       }
+      Log.info(
+        '✅ Image picked: ${picked.name}',
+        name: 'ProfileSetupScreen',
+        category: LogCategory.ui,
+      );
+
+      if (kIsWeb) {
+        // Resolve the blob synchronously here — once we navigate away from
+        // the picker the URL can be revoked.
+        final bytes = await picked.readAsBytes();
+        if (!mounted) return;
+        setState(() {
+          _selectedImage = null;
+          _selectedImageBytes = bytes;
+          _selectedImageFilename = picked.name;
+          _uploadedImageUrl = null;
+          _pictureController.clear();
+        });
+      } else {
+        if (!mounted) return;
+        setState(() {
+          _selectedImage = File(picked.path);
+          _selectedImageBytes = null;
+          _selectedImageFilename = null;
+          _uploadedImageUrl = null;
+          _pictureController.clear();
+        });
+      }
+
+      await _uploadSelectedImage();
     } catch (e) {
       Log.error(
         'Error picking image: $e',
@@ -1185,14 +1194,51 @@ class _ProfileSetupScreenViewState
     }
   }
 
-  /// Check if running on desktop platform
-  bool _isDesktopPlatform() =>
-      defaultTargetPlatform == TargetPlatform.macOS ||
-      defaultTargetPlatform == TargetPlatform.windows ||
-      defaultTargetPlatform == TargetPlatform.linux;
+  /// Picks a single image, returning the picker's [XFile] without resolving
+  /// it to a `dart:io File`. The returned XFile may have a blob-URL `path`
+  /// on web; callers must use [XFile.readAsBytes] there rather than
+  /// constructing a `File`.
+  Future<XFile?> _pickXFile(ImageSource source) async {
+    // image_picker handles both gallery and camera on web, mobile, and
+    // (since plugin updates) desktop camera. file_selector is only
+    // preferred for native desktop gallery, where it provides a richer
+    // file-type filter UX.
+    if (!kIsWeb && source == ImageSource.gallery && _isDesktopPlatform()) {
+      return _pickXFileFromDesktop();
+    }
 
-  /// Use file_selector for desktop platforms
-  Future<File?> _pickImageFromDesktop() async {
+    try {
+      return await _picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+        requestFullMetadata: false,
+      );
+    } catch (e) {
+      Log.error(
+        'image_picker error: $e',
+        name: 'ProfileSetupScreen',
+        category: LogCategory.ui,
+      );
+      rethrow;
+    }
+  }
+
+  /// Check if running on desktop platform.
+  ///
+  /// Always returns false on web — `defaultTargetPlatform` reports the
+  /// host OS in a desktop browser, but a browser is not desktop for
+  /// picker-routing purposes (no real filesystem access).
+  bool _isDesktopPlatform() {
+    if (kIsWeb) return false;
+    return defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux;
+  }
+
+  /// Use file_selector for native desktop platforms.
+  Future<XFile?> _pickXFileFromDesktop() async {
     try {
       Log.info(
         '🖥️ Starting desktop file picker...',
@@ -1205,86 +1251,38 @@ class _ProfileSetupScreenViewState
         extensions: const <String>['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'],
       );
 
-      Log.info(
-        '🖥️ Opening file dialog with type group: ${typeGroup.label}',
-        name: 'ProfileSetupScreen',
-        category: LogCategory.ui,
-      );
-
       final file = await openFile(acceptedTypeGroups: <XTypeGroup>[typeGroup]);
 
-      if (file != null) {
-        Log.info(
-          '✅ Desktop file selected: ${file.path}',
-          name: 'ProfileSetupScreen',
-          category: LogCategory.ui,
-        );
-        Log.info(
-          '📁 File name: ${file.name}',
-          name: 'ProfileSetupScreen',
-          category: LogCategory.ui,
-        );
-        Log.info(
-          '📁 File size: ${await file.length()} bytes',
-          name: 'ProfileSetupScreen',
-          category: LogCategory.ui,
-        );
-        return File(file.path);
-      } else {
+      if (file == null) {
         Log.info(
           '❌ Desktop file picker: User cancelled or no file selected',
           name: 'ProfileSetupScreen',
           category: LogCategory.ui,
         );
+        return null;
       }
-      return null;
+
+      Log.info(
+        '✅ Desktop file selected: ${file.name}',
+        name: 'ProfileSetupScreen',
+        category: LogCategory.ui,
+      );
+      return file;
     } catch (e) {
       Log.error(
         'Desktop file picker error: $e',
         name: 'ProfileSetupScreen',
         category: LogCategory.ui,
       );
-      Log.error(
-        'Error type: ${e.runtimeType}',
-        name: 'ProfileSetupScreen',
-        category: LogCategory.ui,
-      );
-      Log.error(
-        'Stack trace: ${StackTrace.current}',
-        name: 'ProfileSetupScreen',
-        category: LogCategory.ui,
-      );
       rethrow;
     }
   }
 
-  /// Use image_picker for mobile platforms and camera
-  Future<File?> _pickImageFromMobile(ImageSource source) async {
-    try {
-      final image = await _picker.pickImage(
-        source: source,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 85,
-        requestFullMetadata: false,
-      );
-
-      if (image != null) {
-        return File(image.path);
-      }
-      return null;
-    } catch (e) {
-      Log.error(
-        'Mobile image picker error: $e',
-        name: 'ProfileSetupScreen',
-        category: LogCategory.ui,
-      );
-      rethrow;
-    }
-  }
-
-  Future<void> _uploadImage() async {
-    if (_selectedImage == null) return;
+  Future<void> _uploadSelectedImage() async {
+    final file = _selectedImage;
+    final bytes = _selectedImageBytes;
+    final filename = _selectedImageFilename;
+    if (file == null && bytes == null) return;
     final l10n = context.l10n;
 
     setState(() {
@@ -1302,20 +1300,31 @@ class _ProfileSetupScreenViewState
         return;
       }
 
-      final result = await uploadService.uploadImage(
-        imageFile: _selectedImage!,
-        nostrPubkey: authService.currentPublicKeyHex!,
-        onProgress: (progress) {
-          // Only log at major milestones to reduce noise
-          if (progress == 1.0 || progress == 0.0) {
-            Log.debug(
-              'Upload ${progress == 1.0 ? "completed" : "started"}',
-              name: 'ProfileSetupScreen',
-              category: LogCategory.ui,
+      void onProgress(double progress) {
+        // Only log at major milestones to reduce noise
+        if (progress == 1.0 || progress == 0.0) {
+          Log.debug(
+            'Upload ${progress == 1.0 ? "completed" : "started"}',
+            name: 'ProfileSetupScreen',
+            category: LogCategory.ui,
+          );
+        }
+      }
+
+      // Web pick → bytes → uploadImageBytes (pure-Dart EXIF strip).
+      // Native pick → File → uploadImage (platform-channel EXIF strip).
+      final result = bytes != null
+          ? await uploadService.uploadImageBytes(
+              bytes: bytes,
+              nostrPubkey: authService.currentPublicKeyHex!,
+              filename: filename,
+              onProgress: onProgress,
+            )
+          : await uploadService.uploadImage(
+              imageFile: file!,
+              nostrPubkey: authService.currentPublicKeyHex!,
+              onProgress: onProgress,
             );
-          }
-        },
-      );
 
       if (result.success && result.cdnUrl != null) {
         setState(() {

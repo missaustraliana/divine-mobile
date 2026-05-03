@@ -120,6 +120,70 @@ class ImageMetadataStripper {
     await inputFile.copy(outputPath);
   }
 
+  /// Strips EXIF metadata from raw image bytes using pure Dart.
+  ///
+  /// Designed for the web upload path where `dart:io` `File` cannot be used
+  /// against an `image_picker` blob URL. Native callers that already hold a
+  /// real filesystem path should prefer [stripMetadataInPlace] so the
+  /// hardware-accelerated platform stripper runs.
+  ///
+  /// JPEG EXIF is replaced losslessly (only orientation is preserved).
+  /// PNG is decoded and re-encoded (lossless). Other formats fall through to
+  /// a generic decode → JPEG re-encode, which discards metadata at the cost
+  /// of a re-encode. If decoding fails entirely, the original bytes are
+  /// returned unchanged so the upload can still proceed.
+  ///
+  /// The returned `filename` mirrors [stripMetadataInPlace]'s rename rule:
+  /// PNG keeps its `.png` extension; everything that is re-encoded as JPEG
+  /// switches to `.jpg`.
+  static ({Uint8List bytes, String filename}) stripMetadataBytes({
+    required Uint8List bytes,
+    required String filename,
+  }) {
+    final lower = filename.toLowerCase();
+
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+      return (bytes: stripJpegExif(bytes), filename: filename);
+    }
+
+    if (lower.endsWith('.png')) {
+      final decoded = img.decodePng(bytes);
+      if (decoded != null) {
+        return (
+          bytes: Uint8List.fromList(img.encodePng(decoded)),
+          filename: filename,
+        );
+      }
+    }
+
+    // Generic fallback: decode whatever the image package can recognise
+    // and re-encode as JPEG. This drops EXIF/XMP/etc. as a side-effect of
+    // the round-trip. `decodeImage` panics on some malformed inputs (e.g.
+    // PSD's signature probe) instead of returning null, so swallow any
+    // throw and fall through to returning the original bytes.
+    try {
+      final decoded = img.decodeImage(bytes);
+      if (decoded != null) {
+        final reencoded = Uint8List.fromList(
+          img.encodeJpg(decoded, quality: 95),
+        );
+        return (
+          bytes: reencoded,
+          filename: '${withoutExtension(filename)}.jpg',
+        );
+      }
+    } on Object catch (e, stackTrace) {
+      developer.log(
+        'Failed to decode image bytes for stripping; returning original',
+        name: 'ImageMetadataStripper',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
+
+    return (bytes: bytes, filename: filename);
+  }
+
   /// Replaces all JPEG EXIF data with a minimal block that only
   /// contains the orientation tag (if present). No re-encoding,
   /// no quality loss.

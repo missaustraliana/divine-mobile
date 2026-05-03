@@ -345,6 +345,90 @@ void main() {
       });
     });
 
+    group('stripMetadataBytes', () {
+      test('strips JPEG EXIF and preserves orientation', () {
+        final input = _jpegWithExif();
+
+        final result = ImageMetadataStripper.stripMetadataBytes(
+          bytes: input,
+          filename: 'photo.jpg',
+        );
+
+        expect(result.filename, equals('photo.jpg'));
+        final exif = img.decodeJpgExif(result.bytes);
+        expect(exif?.imageIfd.orientation, equals(6));
+        expect(exif?.gpsIfd['GPSLatitudeRef'], isNull);
+      });
+
+      test('handles .jpeg extension', () {
+        final result = ImageMetadataStripper.stripMetadataBytes(
+          bytes: _jpegWithExif(),
+          filename: 'photo.jpeg',
+        );
+
+        expect(result.filename, equals('photo.jpeg'));
+        expect(
+          img.decodeJpgExif(result.bytes)?.gpsIfd['GPSLatitudeRef'],
+          isNull,
+        );
+      });
+
+      test('re-encodes PNG and keeps the .png extension', () {
+        final result = ImageMetadataStripper.stripMetadataBytes(
+          bytes: _pngBytes(),
+          filename: 'avatar.png',
+        );
+
+        expect(result.filename, equals('avatar.png'));
+        final decoded = img.decodePng(result.bytes);
+        expect(decoded, isNotNull);
+        expect(decoded!.width, equals(2));
+      });
+
+      test(
+        'falls back to JPEG re-encode for recognised non-JPEG/PNG formats',
+        () {
+          final input = _bmpBytes();
+
+          final result = ImageMetadataStripper.stripMetadataBytes(
+            bytes: input,
+            filename: 'photo.bmp',
+          );
+
+          // BMP is decoded then re-encoded as JPEG; extension switches.
+          expect(result.filename, equals('photo.jpg'));
+          // The first two bytes of a JPEG SOI marker.
+          expect(result.bytes[0], equals(0xFF));
+          expect(result.bytes[1], equals(0xD8));
+        },
+      );
+
+      test('returns bytes unchanged when decoding fails entirely', () {
+        final input = Uint8List.fromList([0x00, 0x01, 0x02]);
+
+        final result = ImageMetadataStripper.stripMetadataBytes(
+          bytes: input,
+          filename: 'broken.xyz',
+        );
+
+        expect(result.bytes, same(input));
+        expect(result.filename, equals('broken.xyz'));
+      });
+
+      test('case-insensitive on the filename extension', () {
+        final result = ImageMetadataStripper.stripMetadataBytes(
+          bytes: _jpegWithExif(),
+          filename: 'PHOTO.JPG',
+        );
+
+        expect(result.filename, equals('PHOTO.JPG'));
+        expect(
+          img.decodeJpgExif(result.bytes)?.gpsIfd['GPSLatitudeRef'],
+          isNull,
+        );
+      });
+    });
+
     group('stripJpegExif', () {
       test('strips GPS but preserves orientation', () {
         final result = ImageMetadataStripper.stripJpegExif(_jpegWithExif());
