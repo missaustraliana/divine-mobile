@@ -5338,6 +5338,19 @@ class AppLocalizationsRo extends AppLocalizations {
   }
 
   @override
+  String get dmSendFailedMessage => 'Mesajul nu a putut fi trimis';
+
+  @override
+  String get dmSendFailedRetry => 'Reîncearcă';
+
+  @override
+  String get dmSendPartialMessage =>
+      'Trimis, dar nu s-a sincronizat cu celelalte dispozitive';
+
+  @override
+  String get dmConversationLoadError => 'Mesajele nu au putut fi încărcate';
+
+  @override
   String get reportDialogCancel => 'Anulează';
 
   @override

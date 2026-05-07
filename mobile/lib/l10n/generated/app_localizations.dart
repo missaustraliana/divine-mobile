@@ -9210,6 +9210,30 @@ abstract class AppLocalizations {
   /// **'You were invited to collaborate on a video: {url}\n\nOpen diVine to review and accept.'**
   String collaboratorInviteDmBodyUntitled(String url);
 
+  /// SnackBar text shown in a DM conversation when a send fails (relay error, signer error, network error). Paired with the retry action `dmSendFailedRetry`.
+  ///
+  /// In en, this message translates to:
+  /// **'Message couldn\'t be sent'**
+  String get dmSendFailedMessage;
+
+  /// SnackBarAction button label that retries the failed DM send. Keep short — fits next to the SnackBar message.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get dmSendFailedRetry;
+
+  /// SnackBar text shown in a DM conversation after a send where the recipient received the message but the sender's self-addressed gift wrap failed to publish. The sender's other devices won't see this message on relay-only restore. Paired with the retry action `dmSendFailedRetry`.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent, but didn\'t sync to your other devices'**
+  String get dmSendPartialMessage;
+
+  /// Error text shown in place of the message list when DmRepository.watchMessages emits an error (e.g. local DB read failure). Distinct from send failures (which use `dmSendFailedMessage`).
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load messages'**
+  String get dmConversationLoadError;
+
   /// No description provided for @reportDialogCancel.
   ///
   /// In en, this message translates to:

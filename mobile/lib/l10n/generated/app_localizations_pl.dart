@@ -5323,6 +5323,19 @@ class AppLocalizationsPl extends AppLocalizations {
   }
 
   @override
+  String get dmSendFailedMessage => 'Nie udało się wysłać wiadomości';
+
+  @override
+  String get dmSendFailedRetry => 'Spróbuj ponownie';
+
+  @override
+  String get dmSendPartialMessage =>
+      'Wysłano, ale nie zsynchronizowano z twoimi innymi urządzeniami';
+
+  @override
+  String get dmConversationLoadError => 'Nie udało się wczytać wiadomości';
+
+  @override
   String get reportDialogCancel => 'Anuluj';
 
   @override

@@ -5253,6 +5253,20 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String get dmSendFailedMessage => 'Nachricht konnte nicht gesendet werden';
+
+  @override
+  String get dmSendFailedRetry => 'Erneut versuchen';
+
+  @override
+  String get dmSendPartialMessage =>
+      'Gesendet, aber nicht mit deinen anderen Geräten synchronisiert';
+
+  @override
+  String get dmConversationLoadError =>
+      'Nachrichten konnten nicht geladen werden';
+
+  @override
   String get reportDialogCancel => 'Abbrechen';
 
   @override

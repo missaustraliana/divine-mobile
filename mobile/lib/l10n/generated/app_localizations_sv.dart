@@ -5188,6 +5188,20 @@ class AppLocalizationsSv extends AppLocalizations {
   }
 
   @override
+  String get dmSendFailedMessage => 'Meddelandet kunde inte skickas';
+
+  @override
+  String get dmSendFailedRetry => 'Försök igen';
+
+  @override
+  String get dmSendPartialMessage =>
+      'Skickat, men inte synkat till dina andra enheter';
+
+  @override
+  String get dmConversationLoadError =>
+      'Det gick inte att läsa in meddelandena';
+
+  @override
   String get reportDialogCancel => 'Avbryt';
 
   @override

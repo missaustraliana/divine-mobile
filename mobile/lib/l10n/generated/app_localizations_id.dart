@@ -5163,6 +5163,19 @@ class AppLocalizationsId extends AppLocalizations {
   }
 
   @override
+  String get dmSendFailedMessage => 'Pesan gagal dikirim';
+
+  @override
+  String get dmSendFailedRetry => 'Coba Lagi';
+
+  @override
+  String get dmSendPartialMessage =>
+      'Terkirim, tapi tidak tersinkron ke perangkat lainmu';
+
+  @override
+  String get dmConversationLoadError => 'Pesan tidak dapat dimuat';
+
+  @override
   String get reportDialogCancel => 'Batal';
 
   @override

@@ -4994,6 +4994,18 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
+  String get dmSendFailedMessage => '메시지를 보내지 못했어요';
+
+  @override
+  String get dmSendFailedRetry => '다시 시도';
+
+  @override
+  String get dmSendPartialMessage => '보냈지만 다른 기기에 동기화되지 않았어요';
+
+  @override
+  String get dmConversationLoadError => '메시지를 불러오지 못했어요';
+
+  @override
   String get reportDialogCancel => '취소';
 
   @override

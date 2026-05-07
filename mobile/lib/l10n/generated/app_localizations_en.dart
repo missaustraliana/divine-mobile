@@ -5194,6 +5194,19 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get dmSendFailedMessage => 'Message couldn\'t be sent';
+
+  @override
+  String get dmSendFailedRetry => 'Retry';
+
+  @override
+  String get dmSendPartialMessage =>
+      'Sent, but didn\'t sync to your other devices';
+
+  @override
+  String get dmConversationLoadError => 'Could not load messages';
+
+  @override
   String get reportDialogCancel => 'Cancel';
 
   @override

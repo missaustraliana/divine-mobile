@@ -5222,6 +5222,20 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String get dmSendFailedMessage => 'Falha ao enviar a mensagem';
+
+  @override
+  String get dmSendFailedRetry => 'Tentar novamente';
+
+  @override
+  String get dmSendPartialMessage =>
+      'Enviado, mas não sincronizou com seus outros dispositivos';
+
+  @override
+  String get dmConversationLoadError =>
+      'Não foi possível carregar as mensagens';
+
+  @override
   String get reportDialogCancel => 'Cancelar';
 
   @override

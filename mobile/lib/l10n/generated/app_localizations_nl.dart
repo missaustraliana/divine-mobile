@@ -5210,6 +5210,19 @@ class AppLocalizationsNl extends AppLocalizations {
   }
 
   @override
+  String get dmSendFailedMessage => 'Bericht kon niet worden verzonden';
+
+  @override
+  String get dmSendFailedRetry => 'Opnieuw';
+
+  @override
+  String get dmSendPartialMessage =>
+      'Verzonden, maar niet gesynchroniseerd met je andere apparaten';
+
+  @override
+  String get dmConversationLoadError => 'Berichten konden niet worden geladen';
+
+  @override
   String get reportDialogCancel => 'Annuleren';
 
   @override
