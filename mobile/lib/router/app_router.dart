@@ -293,6 +293,34 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             ),
           ),
 
+          // EXPLORE tab - select a specific tab by name (grid mode)
+          GoRoute(
+            path: ExploreScreen.pathTabSubpath,
+            pageBuilder: (ctx, st) {
+              final tabName = ExploreScreen.tabNameFromPathParameter(
+                st.pathParameters['name'],
+              );
+              if (tabName == null) {
+                return NoTransitionPage(
+                  key: st.pageKey,
+                  child: RouteErrorScreen(message: ctx.l10n.routeUnknownPath),
+                );
+              }
+              return NoTransitionPage(
+                key: st.pageKey,
+                child: Navigator(
+                  key: NavigatorKeys.exploreGrid,
+                  onGenerateRoute: (r) => MaterialPageRoute(
+                    builder: (_) => ExploreScreen(initialTabName: tabName),
+                    settings: const RouteSettings(
+                      name: ExploreScreen.routeName,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+
           // EXPLORE tab - feed mode (with video index)
           GoRoute(
             path: ExploreScreen.pathWithIndex,
