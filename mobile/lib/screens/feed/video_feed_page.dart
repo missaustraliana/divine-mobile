@@ -207,26 +207,6 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
     unawaited(feedState.animateToPage(nextIndex));
   }
 
-  /// Whether auto-advance is available on this build. Reduced-motion users
-  /// keep the control and runtime disabled regardless of in-app toggle state.
-  bool _isAutoAdvanceAvailable() {
-    if (!mounted) return false;
-    return !MediaQuery.disableAnimationsOf(context);
-  }
-
-  void _toggleAutoAdvance() {
-    if (!_isAutoAdvanceAvailable()) return;
-
-    _autoAdvanceCubit.toggle();
-    if (!_autoAdvanceCubit.state.isEffectivelyActive) {
-      _autoAdvanceCubit.clearPendingPaginationAdvance();
-    }
-    announceAutoAdvanceToggle(
-      context,
-      enabled: _autoAdvanceCubit.state.enabled,
-    );
-  }
-
   void _suppressAutoAdvance() => _autoAdvanceCubit.suppressForInteraction();
 
   void _resumeAutoAdvanceAfterSwipe() => _autoAdvanceCubit.resumeAfterSwipe();
@@ -589,14 +569,13 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
               // toggled / suppressed / resumed.
               final autoState = context.watch<FeedAutoAdvanceCubit>().state;
 
-              // Gate the rail + runtime on the user's reduced-motion
-              // preference. When Auto is unavailable,
-              // force it "off" at the view layer regardless of cubit state.
+              // Gate the runtime on the user's reduced-motion preference.
+              // When Auto is unavailable, force it "off" at the view layer
+              // regardless of cubit state. The popover toggle has its own
+              // matching visibility gate in [_PlaybackModeToggle].
               final autoAdvanceAvailable = !MediaQuery.disableAnimationsOf(
                 context,
               );
-              final effectiveAutoEnabled =
-                  autoAdvanceAvailable && autoState.enabled;
               final effectiveAutoActive =
                   autoAdvanceAvailable && autoState.isEffectivelyActive;
 
@@ -668,10 +647,6 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
                                 pagePosition: _pagePosition,
                                 contextTitle: state.mode.name,
                                 listSources: listSources,
-                                showAutoButton: autoAdvanceAvailable,
-                                isAutoEnabled: effectiveAutoEnabled,
-                                feedController: null,
-                                onAutoPressed: _toggleAutoAdvance,
                                 onInteracted: _suppressAutoAdvance,
                               );
                             },
@@ -729,10 +704,7 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
                               pagePosition: _pagePosition,
                               contextTitle: state.mode.name,
                               listSources: listSources,
-                              showAutoButton: autoAdvanceAvailable,
-                              isAutoEnabled: effectiveAutoEnabled,
                               isAutoAdvanceActive: effectiveAutoActive,
-                              onAutoPressed: _toggleAutoAdvance,
                               onInteracted: _suppressAutoAdvance,
                               onAutoAdvanceCompleted:
                                   _handleAutoAdvanceCompleted,
@@ -906,12 +878,9 @@ class _PooledVideoFeedItem extends ConsumerWidget {
     required this.index,
     required this.isActive,
     required this.pagePosition,
-    required this.showAutoButton,
-    required this.isAutoEnabled,
     required this.isAutoAdvanceActive,
     this.contextTitle,
     this.listSources,
-    this.onAutoPressed,
     this.onInteracted,
     this.onAutoAdvanceCompleted,
   });
@@ -920,12 +889,9 @@ class _PooledVideoFeedItem extends ConsumerWidget {
   final int index;
   final bool isActive;
   final ValueNotifier<double> pagePosition;
-  final bool showAutoButton;
-  final bool isAutoEnabled;
   final bool isAutoAdvanceActive;
   final String? contextTitle;
   final Set<String>? listSources;
-  final VoidCallback? onAutoPressed;
   final VoidCallback? onInteracted;
   final VoidCallback? onAutoAdvanceCompleted;
 
@@ -967,10 +933,7 @@ class _PooledVideoFeedItem extends ConsumerWidget {
         pagePosition: pagePosition,
         contextTitle: contextTitle,
         listSources: listSources,
-        showAutoButton: showAutoButton,
-        isAutoEnabled: isAutoEnabled,
         isAutoAdvanceActive: isAutoAdvanceActive,
-        onAutoPressed: onAutoPressed,
         onInteracted: onInteracted,
         onAutoAdvanceCompleted: onAutoAdvanceCompleted,
       ),
@@ -984,12 +947,8 @@ class _WebVideoFeedItem extends ConsumerWidget {
     required this.index,
     required this.isActive,
     required this.pagePosition,
-    required this.feedController,
-    required this.showAutoButton,
-    required this.isAutoEnabled,
     this.contextTitle,
     this.listSources,
-    this.onAutoPressed,
     this.onInteracted,
   });
 
@@ -997,12 +956,8 @@ class _WebVideoFeedItem extends ConsumerWidget {
   final int index;
   final bool isActive;
   final ValueNotifier<double> pagePosition;
-  final VideoFeedController? feedController;
-  final bool showAutoButton;
-  final bool isAutoEnabled;
   final String? contextTitle;
   final Set<String>? listSources;
-  final VoidCallback? onAutoPressed;
   final VoidCallback? onInteracted;
 
   @override
@@ -1034,10 +989,6 @@ class _WebVideoFeedItem extends ConsumerWidget {
         pagePosition: pagePosition,
         index: index,
         listSources: listSources,
-        showAutoButton: showAutoButton,
-        feedController: feedController,
-        isAutoEnabled: isAutoEnabled,
-        onAutoPressed: onAutoPressed,
         onInteracted: onInteracted,
       ),
     );
@@ -1050,12 +1001,9 @@ class _PooledVideoFeedItemContent extends StatefulWidget {
     required this.index,
     required this.isActive,
     required this.pagePosition,
-    required this.showAutoButton,
-    required this.isAutoEnabled,
     required this.isAutoAdvanceActive,
     this.contextTitle,
     this.listSources,
-    this.onAutoPressed,
     this.onInteracted,
     this.onAutoAdvanceCompleted,
   });
@@ -1064,12 +1012,9 @@ class _PooledVideoFeedItemContent extends StatefulWidget {
   final int index;
   final bool isActive;
   final ValueNotifier<double> pagePosition;
-  final bool showAutoButton;
-  final bool isAutoEnabled;
   final bool isAutoAdvanceActive;
   final String? contextTitle;
   final Set<String>? listSources;
-  final VoidCallback? onAutoPressed;
   final VoidCallback? onInteracted;
   final VoidCallback? onAutoAdvanceCompleted;
 
@@ -1176,11 +1121,7 @@ class _PooledVideoFeedItemContentState
                       player: player,
                       firstFrameFuture:
                           videoController?.waitUntilFirstFrameRendered,
-                      feedController: feedController,
                       listSources: widget.listSources,
-                      showAutoButton: widget.showAutoButton,
-                      isAutoEnabled: widget.isAutoEnabled,
-                      onAutoPressed: widget.onAutoPressed,
                       onInteracted: widget.onInteracted,
                       onContentWarningRevealed: () {
                         _contentWarningRevealed = true;

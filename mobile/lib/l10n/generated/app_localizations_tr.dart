@@ -1070,6 +1070,18 @@ class AppLocalizationsTr extends AppLocalizations {
   String get videoPlayerEditVideoTooltip => 'Videoyu düzenle';
 
   @override
+  String get videoSettingsMenuOpen => 'Open playback settings';
+
+  @override
+  String get videoSettingsMenuClose => 'Close playback settings';
+
+  @override
+  String get videoSettingsCaptionsEnable => 'Enable captions';
+
+  @override
+  String get videoSettingsCaptionsDisable => 'Disable captions';
+
+  @override
   String get contentWarningLabel => 'İçerik Uyarısı';
 
   @override
@@ -1378,6 +1390,18 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get videoActionShareLabel => 'Paylaş';
+
+  @override
+  String get videoActionReportLabel => 'Report';
+
+  @override
+  String get videoActionReport => 'Report video';
+
+  @override
+  String get videoActionEditLabel => 'Edit';
+
+  @override
+  String get videoActionEdit => 'Edit video';
 
   @override
   String get videoActionAboutLabel => 'Hakkında';
@@ -4322,28 +4346,61 @@ class AppLocalizationsTr extends AppLocalizations {
   String get reportReasonSpam => 'Spam veya İstenmeyen İçerik';
 
   @override
+  String get reportReasonSpamSubtitle => 'Unwanted or repetitive content';
+
+  @override
   String get reportReasonHarassment => 'Taciz, Zorbalık veya Tehdit';
+
+  @override
+  String get reportReasonHarassmentSubtitle =>
+      'Harmful and unwanted replies or mentions';
 
   @override
   String get reportReasonViolence => 'Şiddet veya Aşırı İçerik';
 
   @override
+  String get reportReasonViolenceSubtitle =>
+      'Violent, extremist, or harmful content';
+
+  @override
   String get reportReasonSexualContent => 'Cinsel veya Yetişkin İçerik';
+
+  @override
+  String get reportReasonSexualContentSubtitle =>
+      'Nudity, porn, or explicit content';
 
   @override
   String get reportReasonCopyright => 'Telif Hakkı İhlali';
 
   @override
+  String get reportReasonCopyrightSubtitle =>
+      'Unauthorized use of intellectual property';
+
+  @override
   String get reportReasonFalseInfo => 'Yanlış Bilgi';
+
+  @override
+  String get reportReasonFalseInfoSubtitle => 'Misleading or false claims';
 
   @override
   String get reportReasonCsam => 'Çocuk Güvenliği İhlali';
 
   @override
+  String get reportReasonCsamSubtitle =>
+      'Content that exploits or endangers minors';
+
+  @override
   String get reportReasonAiGenerated => 'Yapay Zeka Üretimi İçerik';
 
   @override
+  String get reportReasonAiGeneratedSubtitle =>
+      'Suspected AI-generated content';
+
+  @override
   String get reportReasonOther => 'Diğer Politika İhlali';
+
+  @override
+  String get reportReasonOtherSubtitle => 'Violations not listed above';
 
   @override
   String reportFailed(Object error) {
@@ -4363,6 +4420,9 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get reportLearnMore => 'Daha Fazla Bilgi';
+
+  @override
+  String get reportLearnMoreAt => 'Learn more at';
 
   @override
   String get reportSafetyUrl => 'divine.video/safety';
@@ -6757,17 +6817,6 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get videoMetadataRemoveSemanticLabel => 'Kaldır';
-
-  @override
-  String get metadataCaptionsLabel => 'Altyazılar';
-
-  @override
-  String get metadataCaptionsEnabledSemantics =>
-      'Tüm videolar için altyazılar etkin';
-
-  @override
-  String get metadataCaptionsDisabledSemantics =>
-      'Tüm videolar için altyazılar devre dışı';
 
   @override
   String get fullscreenFeedRemovedMessage => 'Video kaldırıldı';

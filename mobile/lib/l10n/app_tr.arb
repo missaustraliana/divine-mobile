@@ -2959,9 +2959,6 @@
     "videoActionAutoLabel": "Otomatik",
     "videoActionEnableAutoAdvance": "Otomatik ilerlemeyi etkinleştir",
     "videoActionDisableAutoAdvance": "Otomatik ilerlemeyi devre dışı bırak",
-    "metadataCaptionsLabel": "Altyazılar",
-    "metadataCaptionsEnabledSemantics": "Tüm videolar için altyazılar etkin",
-    "metadataCaptionsDisabledSemantics": "Tüm videolar için altyazılar devre dışı",
     "@metadataLoopsLabel": {
         "placeholders": {
             "count": {

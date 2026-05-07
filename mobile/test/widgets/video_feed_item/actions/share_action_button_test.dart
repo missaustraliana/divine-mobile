@@ -227,7 +227,6 @@ void main() {
         expect(find.text('Save Video'), findsOneWidget);
         expect(find.text('Copy'), findsOneWidget);
         expect(find.text('Share via'), findsOneWidget);
-        expect(find.text('Report'), findsOneWidget);
       });
 
       testWidgets('copy action responds when tapping the icon-label gap', (

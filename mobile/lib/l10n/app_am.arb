@@ -3508,18 +3508,6 @@
     "videoMetadataPausePreviewSemanticLabel": "ቅድመ እይታን ባለበት አቁም",
     "videoMetadataClosePreviewSemanticLabel": "የቪዲዮ ቅድመ እይታን ዝጋ",
     "videoMetadataRemoveSemanticLabel": "አስወግድ",
-    "metadataCaptionsLabel": "መግለጫ ጽሑፎች",
-    "@metadataCaptionsLabel": {
-        "description": "Label for the global captions toggle in the video metadata sheet"
-    },
-    "metadataCaptionsEnabledSemantics": "መግለጫ ጽሑፎች ለሁሉም ቪዲዮዎች ነቅተዋል።",
-    "@metadataCaptionsEnabledSemantics": {
-        "description": "Screen reader label when the global captions toggle is on"
-    },
-    "metadataCaptionsDisabledSemantics": "መግለጫ ጽሑፎች ለሁሉም ቪዲዮዎች ተሰናክለዋል።",
-    "@metadataCaptionsDisabledSemantics": {
-        "description": "Screen reader label when the global captions toggle is off"
-    },
     "fullscreenFeedRemovedMessage": "ቪዲዮ ተወግዷል",
     "@fullscreenFeedRemovedMessage": {
         "description": "Empty-state message shown in the fullscreen feed when the last visible video has just been deleted, blocked, or muted and the route cannot be popped back to a parent (e.g. a cold deep-link)."
