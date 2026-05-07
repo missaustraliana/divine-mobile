@@ -3791,6 +3791,19 @@ class AppLocalizationsKo extends AppLocalizations {
   String get feedModeFollowing => '팔로잉';
 
   @override
+  String feedModeSemanticLabel(String label) {
+    return '피드 모드: $label';
+  }
+
+  @override
+  String videoAuthorSemanticLabel(String displayName) {
+    return '동영상 작성자: $displayName';
+  }
+
+  @override
+  String get videoAuthorAvatarSemanticLabel => '작성자 프로필 사진';
+
+  @override
   String get feedForYouEmpty =>
       '추천 피드가 비어 있어요.\n동영상을 탐색하고 크리에이터를 팔로우해 피드를 만들어보세요.';
 

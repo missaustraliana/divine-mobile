@@ -3776,6 +3776,19 @@ class AppLocalizationsJa extends AppLocalizations {
   String get feedModeFollowing => 'フォロー中';
 
   @override
+  String feedModeSemanticLabel(String label) {
+    return 'フィードモード: $label';
+  }
+
+  @override
+  String videoAuthorSemanticLabel(String displayName) {
+    return '動画の作者: $displayName';
+  }
+
+  @override
+  String get videoAuthorAvatarSemanticLabel => '作者のアバター';
+
+  @override
   String get feedForYouEmpty =>
       'おすすめフィードはまだ空です。\n動画を見つけてクリエイターをフォローし、あなた向けに育てましょう。';
 

@@ -6972,6 +6972,24 @@ abstract class AppLocalizations {
   /// **'Following'**
   String get feedModeFollowing;
 
+  /// Semantic label for the feed mode row (current mode plus affordance hint). Screen reader only.
+  ///
+  /// In en, this message translates to:
+  /// **'Feed mode: {label}'**
+  String feedModeSemanticLabel(String label);
+
+  /// Semantic label for the video author's display name region. Screen reader only.
+  ///
+  /// In en, this message translates to:
+  /// **'Video author: {displayName}'**
+  String videoAuthorSemanticLabel(String displayName);
+
+  /// Semantic label for the author's circular profile avatar on feed video metadata. Screen reader only.
+  ///
+  /// In en, this message translates to:
+  /// **'Author avatar'**
+  String get videoAuthorAvatarSemanticLabel;
+
   /// No description provided for @feedForYouEmpty.
   ///
   /// In en, this message translates to:

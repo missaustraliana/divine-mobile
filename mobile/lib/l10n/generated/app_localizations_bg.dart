@@ -4015,6 +4015,19 @@ class AppLocalizationsBg extends AppLocalizations {
   String get feedModeFollowing => 'Следвани';
 
   @override
+  String feedModeSemanticLabel(String label) {
+    return 'Режим на емисията: $label';
+  }
+
+  @override
+  String videoAuthorSemanticLabel(String displayName) {
+    return 'Автор на видеото: $displayName';
+  }
+
+  @override
+  String get videoAuthorAvatarSemanticLabel => 'Аватар на автора';
+
+  @override
   String get feedForYouEmpty =>
       'Твоят фийд „За теб“ е празен.\nРазгледай видеа и последвай творци, за да го оформиш.';
 

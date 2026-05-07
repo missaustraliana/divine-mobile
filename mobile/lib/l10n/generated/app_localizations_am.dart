@@ -3883,6 +3883,19 @@ class AppLocalizationsAm extends AppLocalizations {
   String get feedModeFollowing => 'እየተከተሉ';
 
   @override
+  String feedModeSemanticLabel(String label) {
+    return 'የፊድ ሁነታ: $label';
+  }
+
+  @override
+  String videoAuthorSemanticLabel(String displayName) {
+    return 'የቪድዮ ፈጣሪ: $displayName';
+  }
+
+  @override
+  String get videoAuthorAvatarSemanticLabel => 'የፈጣሪ ፎቶ';
+
+  @override
   String get feedForYouEmpty =>
       'የእርስዎ ለአንተ ምግብ ባዶ ነው።\nቪዲዮዎችን ያስሱ እና ለመቅረጽ ፈጣሪዎችን ይከተሉ።';
 

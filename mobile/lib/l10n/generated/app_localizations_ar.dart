@@ -3928,6 +3928,19 @@ class AppLocalizationsAr extends AppLocalizations {
   String get feedModeFollowing => 'المتابَعون';
 
   @override
+  String feedModeSemanticLabel(String label) {
+    return 'وضع الموجز: $label';
+  }
+
+  @override
+  String videoAuthorSemanticLabel(String displayName) {
+    return 'صانع الفيديو: $displayName';
+  }
+
+  @override
+  String get videoAuthorAvatarSemanticLabel => 'صورة رمز صانع المحتوى';
+
+  @override
   String get feedForYouEmpty =>
       'خلاصة لك فارغة.\nاستكشف المقاطع واتبع صناع المحتوى لتخصيصها.';
 

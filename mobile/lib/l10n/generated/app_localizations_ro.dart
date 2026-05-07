@@ -4092,6 +4092,19 @@ class AppLocalizationsRo extends AppLocalizations {
   String get feedModeFollowing => 'Urmăresc';
 
   @override
+  String feedModeSemanticLabel(String label) {
+    return 'Mod flux: $label';
+  }
+
+  @override
+  String videoAuthorSemanticLabel(String displayName) {
+    return 'Autor videoclip: $displayName';
+  }
+
+  @override
+  String get videoAuthorAvatarSemanticLabel => 'Avatar autor';
+
+  @override
   String get feedForYouEmpty =>
       'Feedul tău Pentru tine este gol.\nExplorează videoclipuri și urmărește creatori pentru a-l modela.';
 

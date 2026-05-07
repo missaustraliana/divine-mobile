@@ -3950,6 +3950,19 @@ class AppLocalizationsTr extends AppLocalizations {
   String get feedModeFollowing => 'Takip';
 
   @override
+  String feedModeSemanticLabel(String label) {
+    return 'Akış modu: $label';
+  }
+
+  @override
+  String videoAuthorSemanticLabel(String displayName) {
+    return 'Video yazarı: $displayName';
+  }
+
+  @override
+  String get videoAuthorAvatarSemanticLabel => 'Yazar avatarı';
+
+  @override
   String get feedForYouEmpty =>
       'Sana Özel akışın boş.\nVideolar keşfet ve içerik üreticileri takip ederek akışını şekillendir.';
 

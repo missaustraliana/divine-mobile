@@ -4077,6 +4077,19 @@ class AppLocalizationsPl extends AppLocalizations {
   String get feedModeFollowing => 'Obserwowane';
 
   @override
+  String feedModeSemanticLabel(String label) {
+    return 'Tryb kanału: $label';
+  }
+
+  @override
+  String videoAuthorSemanticLabel(String displayName) {
+    return 'Autor filmu: $displayName';
+  }
+
+  @override
+  String get videoAuthorAvatarSemanticLabel => 'Awatar autora';
+
+  @override
   String get feedForYouEmpty =>
       'Twój kanał Dla Ciebie jest pusty.\nOdkrywaj filmy i obserwuj twórców, aby go ukształtować.';
 
