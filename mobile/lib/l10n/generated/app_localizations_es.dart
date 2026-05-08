@@ -5223,6 +5223,23 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String get inboxCollabInviteCardUntitledVideo => 'Video sin título';
+
+  @override
+  String get clickableTextViewVideoLink => 'Ver video';
+
+  @override
+  String get messageExternalLinkDialogTitle => '¿Abrir enlace externo?';
+
+  @override
+  String messageExternalLinkDialogBody(String url) {
+    return 'Este enlace lleva a un sitio externo y puede no ser seguro:\n\n$url';
+  }
+
+  @override
+  String get messageExternalLinkDialogOpen => 'Abrir';
+
+  @override
   String get inboxCollabInviteAcceptButton => 'Aceptar';
 
   @override
