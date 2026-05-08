@@ -7030,6 +7030,14 @@ class AppLocalizationsRo extends AppLocalizations {
   String get videoMetadataPublishVideoHint => 'Publică videoclipul în feed';
 
   @override
+  String get videoMetadataShareReplyToFeedTitle =>
+      'Distribuie și în feedul meu';
+
+  @override
+  String get videoMetadataShareReplyToFeedSubtitle =>
+      'Oprit păstrează acest videoclip doar în firul de comentarii.';
+
+  @override
   String get videoMetadataFormNotReadyHint =>
       'Completează formularul pentru a activa';
 
@@ -7136,4 +7144,33 @@ class AppLocalizationsRo extends AppLocalizations {
 
   @override
   String get badgesRecipientWaitingStatus => 'Se așteaptă destinatarul';
+
+  @override
+  String get commentsRecordVideoButtonLabel => 'Înregistrează comentariu video';
+
+  @override
+  String get commentsOpenVideoLabel => 'Deschide comentariul video';
+
+  @override
+  String get commentsMuteVideoReplyLabel =>
+      'Dezactivează sunetul răspunsului video';
+
+  @override
+  String get commentsUnmuteVideoReplyLabel =>
+      'Activează sunetul răspunsului video';
+
+  @override
+  String get commentsOpenReplyParentLabel =>
+      'Deschide videoclipul la care răspunde';
+
+  @override
+  String get commentsReplyParentSectionTitle => 'Ca răspuns la';
+
+  @override
+  String commentsReplyParentLabel(String target) {
+    return 'Răspuns la $target';
+  }
+
+  @override
+  String get commentsReplyParentFallbackLabel => 'Răspuns la videoclip';
 }

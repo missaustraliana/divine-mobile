@@ -6944,6 +6944,13 @@ class AppLocalizationsDe extends AppLocalizations {
   String get videoMetadataPublishVideoHint => 'Video im Feed veröffentlichen';
 
   @override
+  String get videoMetadataShareReplyToFeedTitle => 'Auch in meinem Feed teilen';
+
+  @override
+  String get videoMetadataShareReplyToFeedSubtitle =>
+      'Aus bedeutet, dass dieses Video nur im Kommentar-Thread bleibt.';
+
+  @override
   String get videoMetadataFormNotReadyHint =>
       'Fülle das Formular aus, um es zu aktivieren';
 
@@ -7049,4 +7056,32 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get badgesRecipientWaitingStatus => 'Wartet auf Empfänger';
+
+  @override
+  String get commentsRecordVideoButtonLabel => 'Videokommentar aufnehmen';
+
+  @override
+  String get commentsOpenVideoLabel => 'Videokommentar öffnen';
+
+  @override
+  String get commentsMuteVideoReplyLabel => 'Videoantwort stummschalten';
+
+  @override
+  String get commentsUnmuteVideoReplyLabel =>
+      'Stummschaltung der Videoantwort aufheben';
+
+  @override
+  String get commentsOpenReplyParentLabel =>
+      'Video öffnen, auf das hier geantwortet wird';
+
+  @override
+  String get commentsReplyParentSectionTitle => 'Als Antwort auf';
+
+  @override
+  String commentsReplyParentLabel(String target) {
+    return 'Antwort auf $target';
+  }
+
+  @override
+  String get commentsReplyParentFallbackLabel => 'Antwort auf Video';
 }

@@ -6832,6 +6832,13 @@ class AppLocalizationsTr extends AppLocalizations {
   String get videoMetadataPublishVideoHint => 'Videoyu akışa yayınla';
 
   @override
+  String get videoMetadataShareReplyToFeedTitle => 'Akışımda da paylaş';
+
+  @override
+  String get videoMetadataShareReplyToFeedSubtitle =>
+      'Kapalı olduğunda bu video yalnızca yorum dizisinde kalır.';
+
+  @override
   String get videoMetadataFormNotReadyHint =>
       'Etkinleştirmek için formu doldurun';
 
@@ -6936,4 +6943,30 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get badgesRecipientWaitingStatus => 'Alıcı bekleniyor';
+
+  @override
+  String get commentsRecordVideoButtonLabel => 'Video yorum kaydet';
+
+  @override
+  String get commentsOpenVideoLabel => 'Video yorumu aç';
+
+  @override
+  String get commentsMuteVideoReplyLabel => 'Video yanıtını sessize al';
+
+  @override
+  String get commentsUnmuteVideoReplyLabel => 'Video yanıtının sesini aç';
+
+  @override
+  String get commentsOpenReplyParentLabel => 'Bunun yanıt verdiği videoyu aç';
+
+  @override
+  String get commentsReplyParentSectionTitle => 'Yanıt olarak';
+
+  @override
+  String commentsReplyParentLabel(String target) {
+    return '$target için yanıt';
+  }
+
+  @override
+  String get commentsReplyParentFallbackLabel => 'Videoya yanıt';
 }

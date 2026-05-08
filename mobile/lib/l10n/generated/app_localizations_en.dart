@@ -6850,6 +6850,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get videoMetadataPublishVideoHint => 'Publish video to feed';
 
   @override
+  String get videoMetadataShareReplyToFeedTitle => 'Also share to my feed';
+
+  @override
+  String get videoMetadataShareReplyToFeedSubtitle =>
+      'Off keeps this video only in the comment thread.';
+
+  @override
   String get videoMetadataFormNotReadyHint => 'Fill out the form to enable';
 
   @override
@@ -6952,4 +6959,30 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get badgesRecipientWaitingStatus => 'Waiting for recipient';
+
+  @override
+  String get commentsRecordVideoButtonLabel => 'Record video comment';
+
+  @override
+  String get commentsOpenVideoLabel => 'Open video comment';
+
+  @override
+  String get commentsMuteVideoReplyLabel => 'Mute video reply';
+
+  @override
+  String get commentsUnmuteVideoReplyLabel => 'Unmute video reply';
+
+  @override
+  String get commentsOpenReplyParentLabel => 'Open video this replies to';
+
+  @override
+  String get commentsReplyParentSectionTitle => 'In reply to';
+
+  @override
+  String commentsReplyParentLabel(String target) {
+    return 'Reply to $target';
+  }
+
+  @override
+  String get commentsReplyParentFallbackLabel => 'Reply to video';
 }

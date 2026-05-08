@@ -185,36 +185,101 @@ class VideosRepository {
         _funnelcakeApiClient != null &&
         _funnelcakeApiClient.isAvailable) {
       try {
-        final response = await _funnelcakeApiClient.getHomeFeed(
-          pubkey: effectiveUserPubkey,
+        return await _fetchVisibleHomeVideosFromStatsApi(
+          userPubkey: effectiveUserPubkey,
           limit: limit,
-          before: until,
+          until: until,
         );
-
-        final videos = _transformVideoStats(response.videos);
-        final hydratedVideos = await _hydrateVideosWithBulkStats(videos);
-        return (videos: hydratedVideos, rawBody: response.rawBody);
       } on FunnelcakeException {
         // Fall through to Nostr
       }
     }
 
-    // Nostr fallback — skip when authors list is empty (fast-path startup
-    // before follow list is ready).
-    if (authors.isEmpty) return (videos: <VideoEvent>[], rawBody: null);
-
-    final filter = Filter(
-      kinds: [_videoKind],
+    return _fetchVisibleHomeVideosFromRelays(
       authors: authors,
       limit: limit,
       until: until,
     );
+  }
 
-    final events = await _nostrClient.queryEvents([filter]);
+  Future<({List<VideoEvent> videos, String? rawBody})>
+  _fetchVisibleHomeVideosFromStatsApi({
+    required String userPubkey,
+    required int limit,
+    int? until,
+  }) async {
+    var cursor = until;
+    final visible = <VideoEvent>[];
+    final seenIds = <String>{};
+    String? rawBody;
 
-    final videos = _transformAndFilter(events);
-    final hydratedVideos = await _hydrateVideosWithBulkStats(videos);
-    return (videos: hydratedVideos, rawBody: null);
+    // Intentionally walk until we have enough visible videos or the upstream
+    // feed is exhausted. A hard page cap caused premature EOF on reply-dense
+    // feeds by hiding visible videos behind reply-only raw pages.
+    while (visible.length < limit) {
+      final response = await _funnelcakeApiClient!.getHomeFeed(
+        pubkey: userPubkey,
+        limit: limit,
+        before: cursor,
+      );
+
+      final videos = _transformVideoStats(response.videos);
+      final hydratedVideos = await _hydrateVideosWithBulkStats(videos);
+      _appendUniqueVideos(visible, hydratedVideos, seenIds: seenIds);
+      rawBody ??= response.rawBody;
+      if (response.videos.length < limit || !response.hasMore) break;
+
+      final nextCursor =
+          response.nextCursor ?? _cursorBeforeOldestStats(response.videos);
+      if (nextCursor == null || nextCursor == cursor) break;
+      cursor = nextCursor;
+    }
+
+    return (
+      videos: visible.take(limit).toList(),
+      rawBody: rawBody,
+    );
+  }
+
+  Future<({List<VideoEvent> videos, String? rawBody})>
+  _fetchVisibleHomeVideosFromRelays({
+    required List<String> authors,
+    required int limit,
+    int? until,
+  }) async {
+    // Nostr fallback — skip when authors list is empty (fast-path startup
+    // before follow list is ready).
+    if (authors.isEmpty) return (videos: <VideoEvent>[], rawBody: null);
+
+    var cursor = until;
+    final visible = <VideoEvent>[];
+    final seenIds = <String>{};
+
+    while (visible.length < limit) {
+      final filter = Filter(
+        kinds: [_videoKind],
+        authors: authors,
+        limit: limit,
+        until: cursor,
+      );
+
+      final events = await _nostrClient.queryEvents([filter]);
+      if (events.isEmpty) break;
+
+      final videos = _transformAndFilter(events);
+      _appendUniqueVideos(
+        visible,
+        await _hydrateVideosWithBulkStats(videos),
+        seenIds: seenIds,
+      );
+      if (events.length < limit) break;
+
+      final nextCursor = _cursorBeforeOldestEvent(events);
+      if (nextCursor == null || nextCursor == cursor) break;
+      cursor = nextCursor;
+    }
+
+    return (videos: visible.take(limit).toList(), rawBody: null);
   }
 
   Future<List<VideoEvent>> _hydrateVideosWithBulkStats(
@@ -520,12 +585,10 @@ class VideosRepository {
     // 1. Try Funnelcake API first
     if (_funnelcakeApiClient != null && _funnelcakeApiClient.isAvailable) {
       try {
-        final videoStats = await _funnelcakeApiClient.getRecentVideos(
+        final videos = await _fetchVisibleRecentVideosFromStatsApi(
           limit: limit,
-          before: until,
+          until: until,
         );
-
-        final videos = _transformVideoStats(videoStats);
         if (until == null) {
           _inMemoryFeedCache?.set('latest', HomeFeedResult(videos: videos));
         }
@@ -536,15 +599,66 @@ class VideosRepository {
     }
 
     // 2. Nostr fallback
-    final filter = Filter(kinds: [_videoKind], limit: limit, until: until);
-
-    final events = await _nostrClient.queryEvents([filter]);
-
-    final videos = _transformAndFilter(events);
+    final videos = await _fetchVisibleRecentVideosFromRelays(
+      limit: limit,
+      until: until,
+    );
     if (until == null) {
       _inMemoryFeedCache?.set('latest', HomeFeedResult(videos: videos));
     }
     return videos;
+  }
+
+  Future<List<VideoEvent>> _fetchVisibleRecentVideosFromStatsApi({
+    required int limit,
+    int? until,
+  }) async {
+    var cursor = until;
+    final visible = <VideoEvent>[];
+    final seenIds = <String>{};
+
+    while (visible.length < limit) {
+      final videoStats = await _funnelcakeApiClient!.getRecentVideos(
+        limit: limit,
+        before: cursor,
+      );
+
+      final videos = _transformVideoStats(videoStats);
+      _appendUniqueVideos(visible, videos, seenIds: seenIds);
+
+      if (videoStats.length < limit) break;
+
+      final nextCursor = _cursorBeforeOldestStats(videoStats);
+      if (nextCursor == null || nextCursor == cursor) break;
+      cursor = nextCursor;
+    }
+
+    return visible.take(limit).toList();
+  }
+
+  Future<List<VideoEvent>> _fetchVisibleRecentVideosFromRelays({
+    required int limit,
+    int? until,
+  }) async {
+    var cursor = until;
+    final visible = <VideoEvent>[];
+    final seenIds = <String>{};
+
+    while (visible.length < limit) {
+      final filter = Filter(kinds: [_videoKind], limit: limit, until: cursor);
+      final events = await _nostrClient.queryEvents([filter]);
+      if (events.isEmpty) break;
+
+      final videos = _transformAndFilter(events);
+      _appendUniqueVideos(visible, videos, seenIds: seenIds);
+      if (events.length < limit) break;
+
+      final nextCursor = _cursorBeforeOldestEvent(events);
+      if (nextCursor == null || nextCursor == cursor) break;
+      cursor = nextCursor;
+    }
+
+    return visible.take(limit).toList();
   }
 
   /// Fetches popular videos sorted by engagement score.
@@ -929,6 +1043,8 @@ class VideosRepository {
     final videos = <VideoEvent>[];
 
     for (final stats in videoStatsList) {
+      if (_isReplyOnlyVideoStats(stats)) continue;
+
       final video = stats.toVideoEvent();
 
       // Block filter - check pubkey
@@ -975,6 +1091,7 @@ class VideosRepository {
         ? NIP71VideoKinds.isAcceptableVideoKind(event.kind)
         : NIP71VideoKinds.isVideoKind(event.kind);
     if (!isSupported) return null;
+    if (_isReplyOnlyVideoEvent(event)) return null;
 
     // Block filter - check pubkey before parsing for efficiency
     if (!ignoreBlockFilter && (_blockFilter?.call(event.pubkey) ?? false)) {
@@ -994,6 +1111,70 @@ class VideosRepository {
     if (video.isExpired) return null;
 
     return _applyContentPreferences(video);
+  }
+
+  bool _isReplyOnlyVideoEvent(Event event) {
+    if (event.kind != _videoKind) return false;
+    var hasRootTag = false;
+    var hasParentTag = false;
+    var isFeedVisibleReply = false;
+
+    for (final rawTag in event.tags) {
+      final tag = rawTag as List<dynamic>;
+      if (tag.length < 2) continue;
+      final tagName = tag[0] as String;
+      if (tagName == 'E' || tagName == 'A') {
+        hasRootTag = true;
+      } else if (tagName == 'e' || tagName == 'a') {
+        hasParentTag = true;
+      } else if (tagName == videoReplyVisibilityTagName &&
+          tag[1] == videoReplyVisibilityFeedValue) {
+        isFeedVisibleReply = true;
+      }
+    }
+
+    return hasRootTag && hasParentTag && !isFeedVisibleReply;
+  }
+
+  bool _isReplyOnlyVideoStats(VideoStats stats) {
+    if (stats.kind != _videoKind) return false;
+    // rawTags is first-occurrence-only, which is sufficient here because this
+    // filter only needs boolean presence checks for reply/feed-visibility tags.
+    final tags = stats.rawTags;
+    final hasRootTag =
+        (tags['E']?.isNotEmpty ?? false) || (tags['A']?.isNotEmpty ?? false);
+    final hasParentTag =
+        (tags['e']?.isNotEmpty ?? false) || (tags['a']?.isNotEmpty ?? false);
+    final isFeedVisibleReply =
+        tags[videoReplyVisibilityTagName] == videoReplyVisibilityFeedValue;
+    return hasRootTag && hasParentTag && !isFeedVisibleReply;
+  }
+
+  int? _cursorBeforeOldestEvent(List<Event> events) {
+    if (events.isEmpty) return null;
+    final oldest = events
+        .map((event) => event.createdAt)
+        .reduce((a, b) => a < b ? a : b);
+    return oldest - 1;
+  }
+
+  void _appendUniqueVideos(
+    List<VideoEvent> target,
+    List<VideoEvent> incoming, {
+    required Set<String> seenIds,
+  }) {
+    for (final video in incoming) {
+      if (!seenIds.add(video.id)) continue;
+      target.add(video);
+    }
+  }
+
+  int? _cursorBeforeOldestStats(List<VideoStats> stats) {
+    if (stats.isEmpty) return null;
+    final oldest = stats
+        .map((stat) => stat.createdAt.millisecondsSinceEpoch ~/ 1000)
+        .reduce((a, b) => a < b ? a : b);
+    return oldest - 1;
   }
 
   VideoEvent? _applyContentPreferences(VideoEvent video) {

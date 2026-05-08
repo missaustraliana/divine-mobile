@@ -6930,6 +6930,13 @@ class AppLocalizationsFil extends AppLocalizations {
   String get videoMetadataPublishVideoHint => 'I-publish ang video sa feed';
 
   @override
+  String get videoMetadataShareReplyToFeedTitle => 'Ibahagi rin sa feed ko';
+
+  @override
+  String get videoMetadataShareReplyToFeedSubtitle =>
+      'Kapag naka-off, sa thread lang ng komento mananatili ang video na ito.';
+
+  @override
   String get videoMetadataFormNotReadyHint => 'Punan ang form para ma-enable';
 
   @override
@@ -7033,4 +7040,31 @@ class AppLocalizationsFil extends AppLocalizations {
 
   @override
   String get badgesRecipientWaitingStatus => 'Waiting for recipient';
+
+  @override
+  String get commentsRecordVideoButtonLabel => 'Mag-record ng video comment';
+
+  @override
+  String get commentsOpenVideoLabel => 'Buksan ang video comment';
+
+  @override
+  String get commentsMuteVideoReplyLabel => 'I-mute ang video reply';
+
+  @override
+  String get commentsUnmuteVideoReplyLabel => 'I-unmute ang video reply';
+
+  @override
+  String get commentsOpenReplyParentLabel =>
+      'Buksan ang video na nire-replyan nito';
+
+  @override
+  String get commentsReplyParentSectionTitle => 'Reply sa video';
+
+  @override
+  String commentsReplyParentLabel(String target) {
+    return 'Reply kay $target';
+  }
+
+  @override
+  String get commentsReplyParentFallbackLabel => 'Reply sa video';
 }

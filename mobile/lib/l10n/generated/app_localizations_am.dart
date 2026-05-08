@@ -6714,6 +6714,13 @@ class AppLocalizationsAm extends AppLocalizations {
   String get videoMetadataPublishVideoHint => 'ለመመገብ ቪዲዮ ያትሙ';
 
   @override
+  String get videoMetadataShareReplyToFeedTitle => 'በፊዴ ላይም አጋራ';
+
+  @override
+  String get videoMetadataShareReplyToFeedSubtitle =>
+      'ሲጠፋ ይህ ቪዲዮ በአስተያየት ክር ውስጥ ብቻ ይቀራል።';
+
+  @override
   String get videoMetadataFormNotReadyHint => 'ለማንቃት ቅጹን ይሙሉ';
 
   @override
@@ -6812,4 +6819,30 @@ class AppLocalizationsAm extends AppLocalizations {
 
   @override
   String get badgesRecipientWaitingStatus => 'ተቀባይን በመጠባበቅ ላይ';
+
+  @override
+  String get commentsRecordVideoButtonLabel => 'የቪዲዮ አስተያየት ቅረጽ';
+
+  @override
+  String get commentsOpenVideoLabel => 'የቪዲዮ አስተያየት ክፈት';
+
+  @override
+  String get commentsMuteVideoReplyLabel => 'የቪዲዮ ምላሽን ዝም አድርግ';
+
+  @override
+  String get commentsUnmuteVideoReplyLabel => 'የቪዲዮ ምላሽን ድምጽ አስጀምር';
+
+  @override
+  String get commentsOpenReplyParentLabel => 'ይህ የሚመልስበትን ቪዲዮ ክፈት';
+
+  @override
+  String get commentsReplyParentSectionTitle => 'ምላሽ ለ';
+
+  @override
+  String commentsReplyParentLabel(String target) {
+    return 'ምላሽ ለ $target';
+  }
+
+  @override
+  String get commentsReplyParentFallbackLabel => 'ምላሽ ለ ቪዲዮ';
 }

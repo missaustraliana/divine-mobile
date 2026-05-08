@@ -7011,6 +7011,14 @@ class AppLocalizationsPl extends AppLocalizations {
   String get videoMetadataPublishVideoHint => 'Opublikuj wideo w feedzie';
 
   @override
+  String get videoMetadataShareReplyToFeedTitle =>
+      'Udostępnij też w moim feedzie';
+
+  @override
+  String get videoMetadataShareReplyToFeedSubtitle =>
+      'Wyłączenie sprawia, że ten film zostaje tylko w wątku komentarzy.';
+
+  @override
   String get videoMetadataFormNotReadyHint => 'Wypełnij formularz, aby włączyć';
 
   @override
@@ -7114,4 +7122,31 @@ class AppLocalizationsPl extends AppLocalizations {
 
   @override
   String get badgesRecipientWaitingStatus => 'Oczekiwanie na odbiorcę';
+
+  @override
+  String get commentsRecordVideoButtonLabel => 'Nagraj komentarz wideo';
+
+  @override
+  String get commentsOpenVideoLabel => 'Otwórz komentarz wideo';
+
+  @override
+  String get commentsMuteVideoReplyLabel => 'Wycisz odpowiedź wideo';
+
+  @override
+  String get commentsUnmuteVideoReplyLabel => 'Włącz dźwięk odpowiedzi wideo';
+
+  @override
+  String get commentsOpenReplyParentLabel =>
+      'Otwórz film, na który to odpowiada';
+
+  @override
+  String get commentsReplyParentSectionTitle => 'W odpowiedzi na';
+
+  @override
+  String commentsReplyParentLabel(String target) {
+    return 'Odpowiedź na $target';
+  }
+
+  @override
+  String get commentsReplyParentFallbackLabel => 'Odpowiedź na film';
 }

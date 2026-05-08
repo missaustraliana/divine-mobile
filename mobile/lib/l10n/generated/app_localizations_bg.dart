@@ -6936,6 +6936,13 @@ class AppLocalizationsBg extends AppLocalizations {
   String get videoMetadataPublishVideoHint => 'Публикувай видео във фийда';
 
   @override
+  String get videoMetadataShareReplyToFeedTitle => 'Сподели и в моя поток';
+
+  @override
+  String get videoMetadataShareReplyToFeedSubtitle =>
+      'Изключено означава, че това видео остава само в нишката с коментари.';
+
+  @override
   String get videoMetadataFormNotReadyHint =>
       'Попълни формата, за да продължиш';
 
@@ -7042,4 +7049,31 @@ class AppLocalizationsBg extends AppLocalizations {
 
   @override
   String get badgesRecipientWaitingStatus => 'Очаква получателя';
+
+  @override
+  String get commentsRecordVideoButtonLabel => 'Запис на видео коментар';
+
+  @override
+  String get commentsOpenVideoLabel => 'Отвори видео коментара';
+
+  @override
+  String get commentsMuteVideoReplyLabel => 'Заглуши видео отговора';
+
+  @override
+  String get commentsUnmuteVideoReplyLabel => 'Пусни звука на видео отговора';
+
+  @override
+  String get commentsOpenReplyParentLabel =>
+      'Отвори видеото, към което е този отговор';
+
+  @override
+  String get commentsReplyParentSectionTitle => 'В отговор на';
+
+  @override
+  String commentsReplyParentLabel(String target) {
+    return 'Отговор на $target';
+  }
+
+  @override
+  String get commentsReplyParentFallbackLabel => 'Отговор на видео';
 }

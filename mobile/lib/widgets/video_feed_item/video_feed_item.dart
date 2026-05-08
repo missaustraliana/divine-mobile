@@ -55,6 +55,7 @@ import 'package:openvine/widgets/video_feed_item/subtitle_overlay.dart';
 import 'package:openvine/widgets/video_feed_item/video_error_overlay.dart';
 import 'package:openvine/widgets/video_feed_item/video_follow_button.dart';
 import 'package:openvine/widgets/video_metrics_tracker.dart';
+import 'package:openvine/widgets/video_reply_parent_link.dart';
 import 'package:openvine/widgets/video_thumbnail_widget.dart';
 import 'package:unified_logger/unified_logger.dart';
 import 'package:video_player/video_player.dart';
@@ -479,6 +480,9 @@ class _VideoFeedItemState extends ConsumerState<VideoFeedItem> {
     final likesRepository = ref.read(likesRepositoryProvider);
     final commentsRepository = ref.read(commentsRepositoryProvider);
     final repostsRepository = ref.read(repostsRepositoryProvider);
+    final showVideoReplies = ref.read(
+      isFeatureEnabledProvider(FeatureFlag.videoReplies),
+    );
 
     // Build addressable ID for reposts if video has a d-tag (vineId)
     final addressableId = widget.video.addressableId;
@@ -490,6 +494,7 @@ class _VideoFeedItemState extends ConsumerState<VideoFeedItem> {
       commentsRepository: commentsRepository,
       repostsRepository: repostsRepository,
       addressableId: addressableId,
+      includeVideoReplies: showVideoReplies,
       initialLikeCount: widget.video.nostrLikeCount != null
           ? widget.video.totalLikes
           : null,
@@ -1694,6 +1699,14 @@ class VideoOverlayActions extends ConsumerWidget {
                         if (video.hasCollaborators) ...[
                           const SizedBox(height: 4),
                           CollaboratorAvatarRow(video: video),
+                        ],
+                        if (video.isVideoReply) ...[
+                          const SizedBox(height: 4),
+                          VideoReplyParentLink(
+                            video: video,
+                            variant: VideoReplyParentLinkVariant.overlay,
+                            onInteracted: onInteracted,
+                          ),
                         ],
                         // Inspired-by attribution row (if video credits another creator)
                         if (video.hasInspiredBy) ...[

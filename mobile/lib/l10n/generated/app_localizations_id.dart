@@ -6830,6 +6830,13 @@ class AppLocalizationsId extends AppLocalizations {
   String get videoMetadataPublishVideoHint => 'Publikasikan video ke feed';
 
   @override
+  String get videoMetadataShareReplyToFeedTitle => 'Bagikan juga ke feed saya';
+
+  @override
+  String get videoMetadataShareReplyToFeedSubtitle =>
+      'Jika dimatikan, video ini hanya tetap di utas komentar.';
+
+  @override
   String get videoMetadataFormNotReadyHint => 'Isi formulir untuk mengaktifkan';
 
   @override
@@ -6933,4 +6940,30 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get badgesRecipientWaitingStatus => 'Menunggu penerima';
+
+  @override
+  String get commentsRecordVideoButtonLabel => 'Rekam komentar video';
+
+  @override
+  String get commentsOpenVideoLabel => 'Buka komentar video';
+
+  @override
+  String get commentsMuteVideoReplyLabel => 'Bisukan balasan video';
+
+  @override
+  String get commentsUnmuteVideoReplyLabel => 'Aktifkan suara balasan video';
+
+  @override
+  String get commentsOpenReplyParentLabel => 'Buka video yang dibalas ini';
+
+  @override
+  String get commentsReplyParentSectionTitle => 'Menanggapi';
+
+  @override
+  String commentsReplyParentLabel(String target) {
+    return 'Balas $target';
+  }
+
+  @override
+  String get commentsReplyParentFallbackLabel => 'Balas video';
 }

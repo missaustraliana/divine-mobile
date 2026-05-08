@@ -6791,6 +6791,13 @@ class AppLocalizationsAr extends AppLocalizations {
   String get videoMetadataPublishVideoHint => 'نشر الفيديو في الخلاصة';
 
   @override
+  String get videoMetadataShareReplyToFeedTitle => 'شارك أيضًا في موجزي';
+
+  @override
+  String get videoMetadataShareReplyToFeedSubtitle =>
+      'إيقافه يبقي هذا الفيديو داخل سلسلة التعليقات فقط.';
+
+  @override
   String get videoMetadataFormNotReadyHint => 'أكمل النموذج للتفعيل';
 
   @override
@@ -6892,4 +6899,30 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get badgesRecipientWaitingStatus => 'بانتظار المستلم';
+
+  @override
+  String get commentsRecordVideoButtonLabel => 'سجّل تعليق فيديو';
+
+  @override
+  String get commentsOpenVideoLabel => 'افتح تعليق الفيديو';
+
+  @override
+  String get commentsMuteVideoReplyLabel => 'اكتم رد الفيديو';
+
+  @override
+  String get commentsUnmuteVideoReplyLabel => 'ألغِ كتم رد الفيديو';
+
+  @override
+  String get commentsOpenReplyParentLabel => 'افتح الفيديو الذي يرد عليه هذا';
+
+  @override
+  String get commentsReplyParentSectionTitle => 'ردًا على';
+
+  @override
+  String commentsReplyParentLabel(String target) {
+    return 'رد على $target';
+  }
+
+  @override
+  String get commentsReplyParentFallbackLabel => 'رد على فيديو';
 }

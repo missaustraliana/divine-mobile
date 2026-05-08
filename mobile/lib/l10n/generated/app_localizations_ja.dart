@@ -6577,6 +6577,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get videoMetadataPublishVideoHint => 'フィードに動画を公開';
 
   @override
+  String get videoMetadataShareReplyToFeedTitle => '自分のフィードにも共有';
+
+  @override
+  String get videoMetadataShareReplyToFeedSubtitle =>
+      'オフにすると、この動画はコメントスレッド内にのみ表示されます。';
+
+  @override
   String get videoMetadataFormNotReadyHint => '有効にするにはフォームを入力してください';
 
   @override
@@ -6675,4 +6682,30 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get badgesRecipientWaitingStatus => '受信者の承認待ち';
+
+  @override
+  String get commentsRecordVideoButtonLabel => '動画コメントを録画';
+
+  @override
+  String get commentsOpenVideoLabel => '動画コメントを開く';
+
+  @override
+  String get commentsMuteVideoReplyLabel => '動画返信をミュート';
+
+  @override
+  String get commentsUnmuteVideoReplyLabel => '動画返信のミュートを解除';
+
+  @override
+  String get commentsOpenReplyParentLabel => '返信先の動画を開く';
+
+  @override
+  String get commentsReplyParentSectionTitle => '返信先';
+
+  @override
+  String commentsReplyParentLabel(String target) {
+    return '$target への返信';
+  }
+
+  @override
+  String get commentsReplyParentFallbackLabel => '動画への返信';
 }
