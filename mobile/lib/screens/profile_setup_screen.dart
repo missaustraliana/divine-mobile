@@ -32,9 +32,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 /// Maps an [AvatarUploadError] case to its localized snackbar string.
 ///
-/// Categorization happens in the bloc (see `_classifyUploadError`); the UI
-/// just picks the right l10n key. Keeping this here colocates UI copy with
-/// the screen that shows it.
+/// The bloc classifies upload failures; the UI just picks the right l10n key.
+/// Keeping this here colocates UI copy with the screen that shows it.
 String profileSetupUploadErrorMessage(
   AppLocalizations l10n,
   AvatarUploadError error,

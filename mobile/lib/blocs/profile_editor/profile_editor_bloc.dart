@@ -128,7 +128,7 @@ class ProfileEditorBloc extends Bloc<ProfileEditorEvent, ProfileEditorState> {
       emit(
         state.copyWith(
           pendingAvatarStatus: PendingAvatarStatus.failed,
-          avatarUploadError: _classifyUploadError(error.toString()),
+          avatarUploadError: AvatarUploadError.generic,
         ),
       );
       return;
@@ -165,49 +165,23 @@ class ProfileEditorBloc extends Bloc<ProfileEditorEvent, ProfileEditorState> {
     emit(
       state.copyWith(
         pendingAvatarStatus: PendingAvatarStatus.failed,
-        avatarUploadError: _classifyUploadError(errorMessage),
+        avatarUploadError: _mapUploadFailureReason(result.failureReason),
       ),
     );
   }
 
-  /// Maps a raw upload-error message to an [AvatarUploadError] case so the
-  /// UI can show a granular localized snackbar without the bloc needing to
-  /// know about l10n. Mirrors the categorization the screen used to do
-  /// inline; lifting it to the bloc keeps the UI thin and testable.
-  AvatarUploadError _classifyUploadError(String rawMessage) {
-    final lower = rawMessage.toLowerCase();
-
-    if (lower.contains('network') ||
-        lower.contains('connection') ||
-        lower.contains('cannot connect') ||
-        lower.contains('timeout')) {
-      return AvatarUploadError.network;
-    }
-
-    if (lower.contains('auth') ||
-        lower.contains('401') ||
-        lower.contains('403')) {
-      return AvatarUploadError.auth;
-    }
-
-    if (lower.contains('file too large') ||
-        lower.contains('payload too large') ||
-        lower.contains('413') ||
-        lower.contains('size')) {
-      return AvatarUploadError.fileTooLarge;
-    }
-
-    if (lower.contains('server error') ||
-        lower.contains('server') ||
-        lower.contains('unavailable') ||
-        lower.contains('500') ||
-        lower.contains('502') ||
-        lower.contains('503') ||
-        lower.contains('504')) {
-      return AvatarUploadError.server;
-    }
-
-    return AvatarUploadError.generic;
+  /// Maps the upload-service failure classification into the bloc's UI-facing
+  /// avatar error enum.
+  AvatarUploadError _mapUploadFailureReason(
+    BlossomUploadFailureReason? failureReason,
+  ) {
+    return switch (failureReason ?? BlossomUploadFailureReason.unknown) {
+      BlossomUploadFailureReason.network => AvatarUploadError.network,
+      BlossomUploadFailureReason.auth => AvatarUploadError.auth,
+      BlossomUploadFailureReason.fileTooLarge => AvatarUploadError.fileTooLarge,
+      BlossomUploadFailureReason.server => AvatarUploadError.server,
+      BlossomUploadFailureReason.unknown => AvatarUploadError.generic,
+    };
   }
 
   void _onProfilePictureUploadCleared(

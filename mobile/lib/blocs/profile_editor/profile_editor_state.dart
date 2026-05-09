@@ -53,7 +53,7 @@ enum ProfileEditorError {
 
 /// Categorization of avatar upload failures for l10n-friendly UI messaging.
 ///
-/// The bloc maps the raw error to one of these cases at the catch site, and
+/// The bloc maps the upload-service failure reason to one of these cases, and
 /// the UI layer maps each case to a localized snackbar string. Enum cases
 /// rather than error strings keep state l10n-clean (per `error_handling.md`)
 /// while preserving the granular failure messaging the existing UI shows.

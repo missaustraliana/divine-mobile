@@ -1959,6 +1959,7 @@ void main() {
             (_) async => const BlossomUploadResult(
               success: false,
               errorMessage: 'Server error (503): unavailable',
+              failureReason: BlossomUploadFailureReason.server,
             ),
           );
         },
@@ -2009,7 +2010,7 @@ void main() {
       );
 
       blocTest<ProfileEditorBloc, ProfileEditorState>(
-        'classifies network error from "timeout" message',
+        'maps network failureReason to AvatarUploadError.network',
         setUp: () {
           when(
             () => mockBlossomUploadService.uploadImageBytes(
@@ -2022,6 +2023,7 @@ void main() {
             (_) async => const BlossomUploadResult(
               success: false,
               errorMessage: 'Connection timeout',
+              failureReason: BlossomUploadFailureReason.network,
             ),
           );
         },
@@ -2041,7 +2043,7 @@ void main() {
       );
 
       blocTest<ProfileEditorBloc, ProfileEditorState>(
-        'classifies auth error from "401" message',
+        'maps auth failureReason to AvatarUploadError.auth',
         setUp: () {
           when(
             () => mockBlossomUploadService.uploadImageBytes(
@@ -2054,6 +2056,7 @@ void main() {
             (_) async => const BlossomUploadResult(
               success: false,
               errorMessage: 'Upload rejected: 401 Unauthorized',
+              failureReason: BlossomUploadFailureReason.auth,
             ),
           );
         },
@@ -2073,7 +2076,7 @@ void main() {
       );
 
       blocTest<ProfileEditorBloc, ProfileEditorState>(
-        'classifies fileTooLarge from "413" message',
+        'maps fileTooLarge failureReason to AvatarUploadError.fileTooLarge',
         setUp: () {
           when(
             () => mockBlossomUploadService.uploadImageBytes(
@@ -2086,6 +2089,7 @@ void main() {
             (_) async => const BlossomUploadResult(
               success: false,
               errorMessage: 'Payload too large (413)',
+              failureReason: BlossomUploadFailureReason.fileTooLarge,
             ),
           );
         },
@@ -2105,7 +2109,7 @@ void main() {
       );
 
       blocTest<ProfileEditorBloc, ProfileEditorState>(
-        'falls back to generic when message does not match any category',
+        'maps unknown failureReason to AvatarUploadError.generic',
         setUp: () {
           when(
             () => mockBlossomUploadService.uploadImageBytes(
@@ -2118,6 +2122,7 @@ void main() {
             (_) async => const BlossomUploadResult(
               success: false,
               errorMessage: 'something weird happened',
+              failureReason: BlossomUploadFailureReason.unknown,
             ),
           );
         },
@@ -2132,6 +2137,39 @@ void main() {
             'avatarUploadError',
             AvatarUploadError.generic,
           ),
+        ],
+        errors: () => [isA<Exception>()],
+      );
+
+      blocTest<ProfileEditorBloc, ProfileEditorState>(
+        'unexpected thrown upload exception falls back to generic',
+        setUp: () {
+          when(
+            () => mockBlossomUploadService.uploadImageBytes(
+              bytes: any(named: 'bytes'),
+              filename: any(named: 'filename'),
+              nostrPubkey: any(named: 'nostrPubkey'),
+              mimeType: any(named: 'mimeType'),
+            ),
+          ).thenThrow(Exception('socket exploded'));
+        },
+        build: createBloc,
+        act: (bloc) => bloc.add(
+          ProfilePictureUploadRequested(pubkey: testPubkey, bytes: testBytes),
+        ),
+        skip: 1,
+        expect: () => [
+          isA<ProfileEditorState>()
+              .having(
+                (s) => s.pendingAvatarStatus,
+                'pendingAvatarStatus',
+                PendingAvatarStatus.failed,
+              )
+              .having(
+                (s) => s.avatarUploadError,
+                'avatarUploadError',
+                AvatarUploadError.generic,
+              ),
         ],
         errors: () => [isA<Exception>()],
       );
