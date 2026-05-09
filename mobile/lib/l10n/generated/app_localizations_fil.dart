@@ -7075,4 +7075,19 @@ class AppLocalizationsFil extends AppLocalizations {
 
   @override
   String get commentsReplyParentFallbackLabel => 'Reply sa video';
+
+  @override
+  String verifiedAccountChipSemanticLabel(String platform, String identity) {
+    return 'Na-verify na $platform account: $identity';
+  }
+
+  @override
+  String get profileEditVerifiedAccountsTitle => 'Mga na-verify na account';
+
+  @override
+  String get profileEditGetVerifiedCta => 'Magpa-verify';
+
+  @override
+  String get profileEditGetVerifiedSubtitle =>
+      'I-link ang iyong mga social media account para malaman ng mga tao na ikaw talaga ito.';
 }
