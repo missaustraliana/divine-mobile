@@ -625,9 +625,9 @@ class _ProfileSetupScreenViewState
                                                   onTap: isUploadingImage
                                                       ? null
                                                       : () =>
-                                                          _showImageUrlSheet(
-                                                            context,
-                                                          ),
+                                                            _showImageUrlSheet(
+                                                              context,
+                                                            ),
                                                   child: Container(
                                                     width: 40,
                                                     height: 40,
