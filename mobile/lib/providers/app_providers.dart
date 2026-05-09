@@ -1981,10 +1981,12 @@ Future<ContentReportingService> contentReportingService(Ref ref) async {
   final nostrService = ref.watch(nostrServiceProvider);
   final authService = ref.watch(authServiceProvider);
   final prefs = ref.watch(sharedPreferencesProvider);
+  final env = ref.watch(currentEnvironmentProvider);
   final service = ContentReportingService(
     nostrService: nostrService,
     authService: authService,
     prefs: prefs,
+    moderationRelayUrl: env.relayUrl,
   );
 
   // Initialize the service to enable reporting
