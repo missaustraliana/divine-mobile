@@ -5169,8 +5169,8 @@ class AppLocalizationsFil extends AppLocalizations {
   String get categoryWrestling => 'Wrestling';
 
   @override
-  String get profileSetupUploadSuccess =>
-      'Matagumpay na na-upload ang profile picture!';
+  String get profileSetupUploadStaged =>
+      'Na-upload na — i-tap ang I-save para ilapat';
 
   @override
   String inboxReportedUser(String displayName) {

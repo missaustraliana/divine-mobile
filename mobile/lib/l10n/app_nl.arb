@@ -2454,7 +2454,7 @@
     "libraryWebUnavailableDescription": "Concepten en clips worden op je apparaat opgeslagen. Open Divine op je telefoon om ze te beheren.",
     "libraryWebUnavailableHeadline": "Bibliotheek is beschikbaar in de mobiele app",
     "notificationFollowBack": "Terugvolgen",
-    "profileSetupUploadSuccess": "Profielfoto succesvol geüpload!",
+    "profileSetupUploadStaged": "Geüpload — tik op Opslaan om toe te passen",
     "proofmodeCheckAiGenerated": "Controleren of AI-gegenereerd",
     "dmSendFailedMessage": "Bericht kon niet worden verzonden",
     "dmSendFailedRetry": "Opnieuw",

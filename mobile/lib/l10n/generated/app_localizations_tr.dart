@@ -5091,8 +5091,8 @@ class AppLocalizationsTr extends AppLocalizations {
   String get categoryWrestling => 'Güreş';
 
   @override
-  String get profileSetupUploadSuccess =>
-      'Profil fotoğrafı başarıyla yüklendi!';
+  String get profileSetupUploadStaged =>
+      'Yüklendi — uygulamak için Kaydet\'e dokunun';
 
   @override
   String inboxReportedUser(String displayName) {

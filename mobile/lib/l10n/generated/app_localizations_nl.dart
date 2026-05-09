@@ -5128,7 +5128,8 @@ class AppLocalizationsNl extends AppLocalizations {
   String get categoryWrestling => 'Worstelen';
 
   @override
-  String get profileSetupUploadSuccess => 'Profielfoto succesvol geüpload!';
+  String get profileSetupUploadStaged =>
+      'Geüpload — tik op Opslaan om toe te passen';
 
   @override
   String inboxReportedUser(String displayName) {

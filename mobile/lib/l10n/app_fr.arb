@@ -2454,7 +2454,7 @@
     "libraryWebUnavailableDescription": "Les brouillons et clips sont enregistrés sur ton appareil : ouvre Divine sur ton téléphone pour les gérer.",
     "libraryWebUnavailableHeadline": "La bibliothèque est dans l’appli mobile",
     "notificationFollowBack": "Suivre en retour",
-    "profileSetupUploadSuccess": "Photo de profil importée avec succès !",
+    "profileSetupUploadStaged": "Importée — touchez Enregistrer pour appliquer",
     "proofmodeCheckAiGenerated": "Vérifier si généré par IA",
     "dmSendFailedMessage": "Impossible d'envoyer le message",
     "dmSendFailedRetry": "Réessayer",

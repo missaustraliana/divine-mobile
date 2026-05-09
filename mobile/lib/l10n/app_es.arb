@@ -2462,7 +2462,7 @@
     "libraryWebUnavailableDescription": "Los borradores y clips se guardan en tu dispositivo; abre Divine en el teléfono para gestionarlos.",
     "libraryWebUnavailableHeadline": "La biblioteca está en la app móvil",
     "notificationFollowBack": "Seguir de vuelta",
-    "profileSetupUploadSuccess": "¡Foto de perfil subida con éxito!",
+    "profileSetupUploadStaged": "Subida — toca Guardar para aplicar",
     "proofmodeCheckAiGenerated": "Verificar si fue generado por IA",
     "dmSendFailedMessage": "No se pudo enviar el mensaje",
     "dmSendFailedRetry": "Reintentar",

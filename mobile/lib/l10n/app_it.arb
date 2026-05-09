@@ -2454,7 +2454,7 @@
     "libraryWebUnavailableDescription": "Bozze e clip sono salvate sul dispositivo: apri Divine sul telefono per gestirle.",
     "libraryWebUnavailableHeadline": "La libreria è nell’app mobile",
     "notificationFollowBack": "Segui a tua volta",
-    "profileSetupUploadSuccess": "Foto profilo caricata con successo!",
+    "profileSetupUploadStaged": "Caricata — tocca Salva per applicare",
     "proofmodeCheckAiGenerated": "Verifica se generato dall'IA",
     "dmSendFailedMessage": "Impossibile inviare il messaggio",
     "dmSendFailedRetry": "Riprova",

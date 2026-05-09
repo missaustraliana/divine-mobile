@@ -5107,7 +5107,8 @@ class AppLocalizationsSv extends AppLocalizations {
   String get categoryWrestling => 'Brottning';
 
   @override
-  String get profileSetupUploadSuccess => 'Profilbilden laddades upp!';
+  String get profileSetupUploadStaged =>
+      'Uppladdad — tryck på Spara för att tillämpa';
 
   @override
   String inboxReportedUser(String displayName) {

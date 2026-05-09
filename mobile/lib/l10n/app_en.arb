@@ -2628,7 +2628,10 @@
   "categoryVlogging": "Vlogging",
   "categoryWrestling": "Wrestling",
 
-  "profileSetupUploadSuccess": "Profile picture uploaded successfully!",
+  "profileSetupUploadStaged": "Uploaded — tap Save to apply",
+  "@profileSetupUploadStaged": {
+    "description": "Snackbar shown after a profile picture upload succeeds on the profile edit screen. The new picture is staged in the form but not yet published; the user must tap Save for it to take effect."
+  },
   "profileSetupSendRequest": "Send request",
 
   "inboxReportedUser": "Reported {displayName}",

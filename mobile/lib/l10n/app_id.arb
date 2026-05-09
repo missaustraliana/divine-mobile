@@ -2453,7 +2453,7 @@
     "libraryWebUnavailableDescription": "Draf dan klip disimpan di perangkatmu — buka Divine di ponsel untuk mengelolanya.",
     "libraryWebUnavailableHeadline": "Perpustakaan ada di aplikasi seluler",
     "notificationFollowBack": "Ikuti balik",
-    "profileSetupUploadSuccess": "Foto profil berhasil diunggah!",
+    "profileSetupUploadStaged": "Diunggah — ketuk Simpan untuk menerapkan",
     "proofmodeCheckAiGenerated": "Periksa apakah dibuat oleh AI",
     "dmSendFailedMessage": "Pesan gagal dikirim",
     "dmSendFailedRetry": "Coba Lagi",

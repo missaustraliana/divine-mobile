@@ -9080,11 +9080,11 @@ abstract class AppLocalizations {
   /// **'Wrestling'**
   String get categoryWrestling;
 
-  /// No description provided for @profileSetupUploadSuccess.
+  /// Snackbar shown after a profile picture upload succeeds on the profile edit screen. The new picture is staged in the form but not yet published; the user must tap Save for it to take effect.
   ///
   /// In en, this message translates to:
-  /// **'Profile picture uploaded successfully!'**
-  String get profileSetupUploadSuccess;
+  /// **'Uploaded — tap Save to apply'**
+  String get profileSetupUploadStaged;
 
   /// No description provided for @inboxReportedUser.
   ///

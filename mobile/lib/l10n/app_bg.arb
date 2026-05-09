@@ -2405,7 +2405,7 @@
     "categoryVlog": "Влог",
     "categoryVlogging": "Влогове",
     "categoryWrestling": "Борба",
-    "profileSetupUploadSuccess": "Профилната снимка е качена успешно!",
+    "profileSetupUploadStaged": "Качено — натисни Запази, за да приложиш",
     "inboxReportedUser": "Докладвано {displayName}",
     "@inboxReportedUser": {
         "placeholders": {

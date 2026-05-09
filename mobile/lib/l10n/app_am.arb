@@ -2531,7 +2531,7 @@
     "categoryVlog": "ቪሎግ",
     "categoryVlogging": "ቭሎግ ማድረግ",
     "categoryWrestling": "ትግል",
-    "profileSetupUploadSuccess": "የመገለጫ ስዕል በተሳካ ሁኔታ ተሰቅሏል!",
+    "profileSetupUploadStaged": "ተሰቅሏል — ለመተግበር አስቀምጥን ጠቅ ያድርጉ",
     "inboxReportedUser": "ሪፖርት ተደርጓል {displayName}",
     "@inboxReportedUser": {
         "placeholders": {
