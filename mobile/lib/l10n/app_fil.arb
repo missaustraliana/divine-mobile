@@ -1362,7 +1362,7 @@
     "categoryVlog": "Vlog",
     "categoryVlogging": "Vlogging",
     "categoryWrestling": "Wrestling",
-    "profileSetupUploadSuccess": "Matagumpay na na-upload ang profile picture!",
+    "profileSetupUploadStaged": "Na-upload na — i-tap ang I-save para ilapat",
     "dmSendFailedMessage": "Hindi naipadala ang message",
     "dmSendFailedRetry": "Subukan ulit",
     "dmSendPartialMessage": "Naipadala, pero hindi nag-sync sa iba mong device",
