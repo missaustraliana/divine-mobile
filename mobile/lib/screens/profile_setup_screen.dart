@@ -622,10 +622,12 @@ class _ProfileSetupScreenViewState
                                                 const SizedBox(width: 12),
                                                 // URL input button
                                                 GestureDetector(
-                                                  onTap: () =>
-                                                      _showImageUrlSheet(
-                                                        context,
-                                                      ),
+                                                  onTap: isUploadingImage
+                                                      ? null
+                                                      : () =>
+                                                          _showImageUrlSheet(
+                                                            context,
+                                                          ),
                                                   child: Container(
                                                     width: 40,
                                                     height: 40,

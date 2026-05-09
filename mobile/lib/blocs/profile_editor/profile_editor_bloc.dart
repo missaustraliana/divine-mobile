@@ -65,10 +65,9 @@ class ProfileEditorBloc extends Bloc<ProfileEditorEvent, ProfileEditorState> {
     on<ExternalNip05Changed>(_onExternalNip05Changed);
     on<InitialExternalNip05Set>(_onInitialExternalNip05Set);
     on<UsernameRechecked>(_onUsernameRechecked);
-    // Drop concurrent uploads: if a second pick fires while the first is
-    // still uploading, the first's result is discarded. Last-write-wins
-    // matches user expectations and avoids racy `pendingPictureUrl`
-    // assignments.
+    // Drop concurrent upload requests while one is already in flight.
+    // The UI disables avatar-source actions during upload; this prevents a
+    // second file/bytes pick from interleaving if a caller dispatches anyway.
     on<ProfilePictureUploadRequested>(
       _onProfilePictureUploadRequested,
       transformer: droppable(),
@@ -200,6 +199,14 @@ class ProfileEditorBloc extends Bloc<ProfileEditorEvent, ProfileEditorState> {
     ProfilePictureUrlSet event,
     Emitter<ProfileEditorState> emit,
   ) {
+    if (state.pendingAvatarStatus == PendingAvatarStatus.uploading) {
+      Log.info(
+        'Ignoring ProfilePictureUrlSet received while avatar upload is in flight',
+        name: 'ProfileEditorBloc',
+      );
+      return;
+    }
+
     final trimmed = event.url.trim();
     if (trimmed.isEmpty) {
       emit(

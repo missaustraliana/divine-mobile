@@ -2410,6 +2410,17 @@ void main() {
           );
         },
       );
+
+      blocTest<ProfileEditorBloc, ProfileEditorState>(
+        'ProfilePictureUrlSet while uploading is ignored',
+        build: createBloc,
+        seed: () => const ProfileEditorState(
+          pendingAvatarStatus: PendingAvatarStatus.uploading,
+          persistedPictureUrl: testPersistedUrl,
+        ),
+        act: (bloc) => bloc.add(const ProfilePictureUrlSet(testStagedUrl)),
+        expect: () => const <ProfileEditorState>[],
+      );
     });
   });
 }
