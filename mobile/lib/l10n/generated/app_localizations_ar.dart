@@ -3928,6 +3928,14 @@ class AppLocalizationsAr extends AppLocalizations {
   String get notificationsViewProfilesSemanticLabel => 'عرض الملفات الشخصية';
 
   @override
+  String notificationsVideoThumbnailFor(String title) {
+    return 'صورة مصغرة لفيديو $title';
+  }
+
+  @override
+  String get notificationsVideoThumbnail => 'صورة مصغرة للفيديو';
+
+  @override
   String notificationsLoadingType(String type) {
     return 'جارٍ تحميل إشعارات $type...';
   }

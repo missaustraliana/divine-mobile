@@ -3777,6 +3777,14 @@ class AppLocalizationsJa extends AppLocalizations {
   String get notificationsViewProfilesSemanticLabel => 'プロフィールを開く';
 
   @override
+  String notificationsVideoThumbnailFor(String title) {
+    return '$titleの動画サムネイル';
+  }
+
+  @override
+  String get notificationsVideoThumbnail => '動画のサムネイル';
+
+  @override
   String notificationsLoadingType(String type) {
     return '$typeの通知を読み込み中...';
   }

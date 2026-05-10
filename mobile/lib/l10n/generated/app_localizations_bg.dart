@@ -4015,6 +4015,14 @@ class AppLocalizationsBg extends AppLocalizations {
   String get notificationsViewProfilesSemanticLabel => 'Преглед на профили';
 
   @override
+  String notificationsVideoThumbnailFor(String title) {
+    return 'Миниатюра на видео за $title';
+  }
+
+  @override
+  String get notificationsVideoThumbnail => 'Миниатюра на видео';
+
+  @override
   String notificationsLoadingType(String type) {
     return 'Зареждат се $type известия...';
   }

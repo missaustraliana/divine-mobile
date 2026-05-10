@@ -3940,6 +3940,14 @@ class AppLocalizationsId extends AppLocalizations {
   String get notificationsViewProfilesSemanticLabel => 'Lihat profil';
 
   @override
+  String notificationsVideoThumbnailFor(String title) {
+    return 'Thumbnail video untuk $title';
+  }
+
+  @override
+  String get notificationsVideoThumbnail => 'Thumbnail video';
+
+  @override
   String notificationsLoadingType(String type) {
     return 'Memuat notifikasi $type...';
   }

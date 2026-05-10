@@ -4030,6 +4030,14 @@ class AppLocalizationsFr extends AppLocalizations {
   String get notificationsViewProfilesSemanticLabel => 'Voir les profils';
 
   @override
+  String notificationsVideoThumbnailFor(String title) {
+    return 'Miniature de la vidéo $title';
+  }
+
+  @override
+  String get notificationsVideoThumbnail => 'Miniature de la vidéo';
+
+  @override
   String notificationsLoadingType(String type) {
     return 'Chargement des notifications $type...';
   }

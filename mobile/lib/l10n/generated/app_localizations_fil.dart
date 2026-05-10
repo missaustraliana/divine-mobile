@@ -4028,6 +4028,14 @@ class AppLocalizationsFil extends AppLocalizations {
       'Tingnan ang mga profile';
 
   @override
+  String notificationsVideoThumbnailFor(String title) {
+    return 'Thumbnail ng video para sa $title';
+  }
+
+  @override
+  String get notificationsVideoThumbnail => 'Thumbnail ng video';
+
+  @override
   String notificationsLoadingType(String type) {
     return 'Nilo-load ang $type na notifications...';
   }

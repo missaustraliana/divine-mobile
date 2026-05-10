@@ -3792,6 +3792,14 @@ class AppLocalizationsKo extends AppLocalizations {
   String get notificationsViewProfilesSemanticLabel => '프로필 보기';
 
   @override
+  String notificationsVideoThumbnailFor(String title) {
+    return '$title 동영상 썸네일';
+  }
+
+  @override
+  String get notificationsVideoThumbnail => '동영상 썸네일';
+
+  @override
   String notificationsLoadingType(String type) {
     return '$type 알림을 불러오는 중...';
   }

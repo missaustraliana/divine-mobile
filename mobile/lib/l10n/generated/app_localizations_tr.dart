@@ -3950,6 +3950,14 @@ class AppLocalizationsTr extends AppLocalizations {
   String get notificationsViewProfilesSemanticLabel => 'Profilleri görüntüle';
 
   @override
+  String notificationsVideoThumbnailFor(String title) {
+    return '$title için video küçük resmi';
+  }
+
+  @override
+  String get notificationsVideoThumbnail => 'Video küçük resmi';
+
+  @override
   String notificationsLoadingType(String type) {
     return '$type bildirimleri yükleniyor...';
   }

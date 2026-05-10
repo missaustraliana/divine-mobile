@@ -3967,6 +3967,14 @@ class AppLocalizationsSv extends AppLocalizations {
   String get notificationsViewProfilesSemanticLabel => 'Visa profiler';
 
   @override
+  String notificationsVideoThumbnailFor(String title) {
+    return 'Videominiatyr för $title';
+  }
+
+  @override
+  String get notificationsVideoThumbnail => 'Videominiatyr';
+
+  @override
   String notificationsLoadingType(String type) {
     return 'Läser in $type-aviseringar...';
   }
