@@ -1494,6 +1494,21 @@ class AppLocalizationsPt extends AppLocalizations {
   String get videoActionShowSubtitles => 'Mostrar legendas';
 
   @override
+  String get videoEngagementLikersTitle => 'Curtido por';
+
+  @override
+  String get videoEngagementRepostersTitle => 'Repostado por';
+
+  @override
+  String get videoEngagementLikersEmpty => 'Ainda sem curtidas';
+
+  @override
+  String get videoEngagementRepostersEmpty => 'Ainda sem reposts';
+
+  @override
+  String get videoEngagementLoadFailed => 'Não foi possível carregar a lista';
+
+  @override
   String get videoOverlayOpenMetadataFromTitle => 'Abrir detalhes do vídeo';
 
   @override

@@ -1512,6 +1512,21 @@ class AppLocalizationsRo extends AppLocalizations {
   String get videoActionShowSubtitles => 'Arată subtitrările';
 
   @override
+  String get videoEngagementLikersTitle => 'Apreciat de';
+
+  @override
+  String get videoEngagementRepostersTitle => 'Repostat de';
+
+  @override
+  String get videoEngagementLikersEmpty => 'Niciun like încă';
+
+  @override
+  String get videoEngagementRepostersEmpty => 'Niciun repost încă';
+
+  @override
+  String get videoEngagementLoadFailed => 'Lista nu a putut fi încărcată';
+
+  @override
   String get videoOverlayOpenMetadataFromTitle =>
       'Deschide detaliile videoclipului';
 

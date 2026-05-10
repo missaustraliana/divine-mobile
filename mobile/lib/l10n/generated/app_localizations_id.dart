@@ -1452,6 +1452,21 @@ class AppLocalizationsId extends AppLocalizations {
   String get videoActionShowSubtitles => 'Tampilkan subtitle';
 
   @override
+  String get videoEngagementLikersTitle => 'Disukai oleh';
+
+  @override
+  String get videoEngagementRepostersTitle => 'Direpost oleh';
+
+  @override
+  String get videoEngagementLikersEmpty => 'Belum ada suka';
+
+  @override
+  String get videoEngagementRepostersEmpty => 'Belum ada repost';
+
+  @override
+  String get videoEngagementLoadFailed => 'Tidak dapat memuat daftar';
+
+  @override
   String get videoOverlayOpenMetadataFromTitle => 'Buka detail video';
 
   @override

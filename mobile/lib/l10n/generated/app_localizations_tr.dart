@@ -1459,6 +1459,21 @@ class AppLocalizationsTr extends AppLocalizations {
   String get videoActionShowSubtitles => 'Altyazıları göster';
 
   @override
+  String get videoEngagementLikersTitle => 'Beğenenler';
+
+  @override
+  String get videoEngagementRepostersTitle => 'Repost edenler';
+
+  @override
+  String get videoEngagementLikersEmpty => 'Henüz beğeni yok';
+
+  @override
+  String get videoEngagementRepostersEmpty => 'Henüz repost yok';
+
+  @override
+  String get videoEngagementLoadFailed => 'Liste yüklenemedi';
+
+  @override
   String get videoOverlayOpenMetadataFromTitle => 'Video detaylarını aç';
 
   @override
