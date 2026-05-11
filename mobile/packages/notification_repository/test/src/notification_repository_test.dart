@@ -6,7 +6,6 @@ import 'package:db_client/db_client.dart';
 import 'package:funnelcake_api_client/funnelcake_api_client.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:models/models.dart';
-import 'package:nostr_client/nostr_client.dart';
 import 'package:notification_repository/notification_repository.dart';
 import 'package:profile_repository/profile_repository.dart';
 import 'package:test/test.dart';
@@ -17,13 +16,10 @@ class _MockProfileRepository extends Mock implements ProfileRepository {}
 
 class _MockNotificationsDao extends Mock implements NotificationsDao {}
 
-class _MockNostrClient extends Mock implements NostrClient {}
-
 void main() {
   late _MockFunnelcakeApiClient funnelcakeApiClient;
   late _MockProfileRepository profileRepository;
   late _MockNotificationsDao notificationsDao;
-  late _MockNostrClient nostrClient;
   late NotificationRepository repository;
 
   const userPubkey = 'user1234567890abcdef';
@@ -32,7 +28,6 @@ void main() {
     funnelcakeApiClient = _MockFunnelcakeApiClient();
     profileRepository = _MockProfileRepository();
     notificationsDao = _MockNotificationsDao();
-    nostrClient = _MockNostrClient();
     when(
       () => funnelcakeApiClient.notificationsUri(
         pubkey: any(named: 'pubkey'),
@@ -64,7 +59,6 @@ void main() {
       profileRepository: profileRepository,
       notificationsDao: notificationsDao,
       userPubkey: userPubkey,
-      nostrClient: nostrClient,
     );
   });
 
@@ -185,7 +179,6 @@ void main() {
           profileRepository: profileRepository,
           notificationsDao: notificationsDao,
           userPubkey: userPubkey,
-          nostrClient: nostrClient,
           authHeadersProvider: (url, method) async {
             signedUrl = url;
             signedMethod = method;
@@ -215,7 +208,6 @@ void main() {
           profileRepository: profileRepository,
           notificationsDao: notificationsDao,
           userPubkey: userPubkey,
-          nostrClient: nostrClient,
           authHeadersProvider: (url, method) async {
             signedUrl = url;
             return {'Authorization': 'Nostr test-token'};
@@ -335,7 +327,6 @@ void main() {
             profileRepository: profileRepository,
             notificationsDao: notificationsDao,
             userPubkey: userPubkey,
-            nostrClient: nostrClient,
             authHeadersProvider: (url, method) async {
               signedUrl = url;
               return {'Authorization': 'Nostr test-token'};
@@ -372,7 +363,6 @@ void main() {
             profileRepository: profileRepository,
             notificationsDao: notificationsDao,
             userPubkey: userPubkey,
-            nostrClient: nostrClient,
             authHeadersProvider: (url, method) async {
               signedUrl = url;
               return {'Authorization': 'Nostr test-token'};
@@ -997,10 +987,72 @@ void main() {
           ),
         );
       });
+
+      test(
+        'rolls back the optimistic snapshot when authHeadersProvider throws',
+        () async {
+          // authHeadersProvider returns headers for GET (initial refresh)
+          // but throws on POST (the mark-read call). The rollback boundary
+          // must cover this failure mode — pre-fix it didn't, so the
+          // optimistic isRead=true flip stayed live with no server write.
+          repository = NotificationRepository(
+            funnelcakeApiClient: funnelcakeApiClient,
+            profileRepository: profileRepository,
+            notificationsDao: notificationsDao,
+            userPubkey: userPubkey,
+            authHeadersProvider: (url, method) async {
+              if (method == 'POST') {
+                throw Exception('signer unavailable');
+              }
+              return {'Authorization': 'Nostr test-token'};
+            },
+          );
+
+          stubProfiles({
+            'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+          });
+          stubNotifications([makeNotification()], unreadCount: 1);
+          await repository.refresh();
+
+          final loadedId =
+              (await repository.watchSnapshot().first).items.first.id;
+          expect(await repository.watchUnreadCount().first, equals(1));
+
+          await expectLater(
+            repository.markAsRead([loadedId]),
+            throwsA(isA<Exception>()),
+          );
+
+          expect(
+            await repository.watchUnreadCount().first,
+            equals(1),
+            reason:
+                'Auth-header failure must roll back the optimistic flip — '
+                'the snapshot should return to its pre-call state.',
+          );
+          verifyNever(
+            () => funnelcakeApiClient.markNotificationsRead(
+              pubkey: any(named: 'pubkey'),
+              notificationIds: any(named: 'notificationIds'),
+              authHeaders: any(named: 'authHeaders'),
+            ),
+          );
+        },
+      );
     });
 
     group('markAllAsRead', () {
-      test('calls API and DAO', () async {
+      test('calls API and DAO when there are unread items', () async {
+        // Seed the snapshot with an unread item so markAllAsRead's
+        // early-return guard (skip when nothing is unread) does not fire.
+        stubProfiles({
+          'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+        });
+        stubNotifications([
+          makeNotification(),
+        ], unreadCount: 1);
+        await repository.refresh();
+
         when(
           () => funnelcakeApiClient.markNotificationsRead(
             pubkey: any(named: 'pubkey'),
@@ -1021,6 +1073,51 @@ void main() {
         ).called(1);
         verify(() => notificationsDao.markAllAsRead()).called(1);
       });
+
+      test(
+        'rolls back the optimistic snapshot when authHeadersProvider throws',
+        () async {
+          repository = NotificationRepository(
+            funnelcakeApiClient: funnelcakeApiClient,
+            profileRepository: profileRepository,
+            notificationsDao: notificationsDao,
+            userPubkey: userPubkey,
+            authHeadersProvider: (url, method) async {
+              if (method == 'POST') {
+                throw Exception('signer unavailable');
+              }
+              return {'Authorization': 'Nostr test-token'};
+            },
+          );
+
+          stubProfiles({
+            'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+          });
+          stubNotifications([makeNotification()], unreadCount: 1);
+          await repository.refresh();
+
+          expect(await repository.watchUnreadCount().first, equals(1));
+
+          await expectLater(
+            repository.markAllAsRead(),
+            throwsA(isA<Exception>()),
+          );
+
+          expect(
+            await repository.watchUnreadCount().first,
+            equals(1),
+            reason:
+                'Auth-header failure must roll back the optimistic flip — '
+                'the snapshot should return to its pre-call state.',
+          );
+          verifyNever(
+            () => funnelcakeApiClient.markNotificationsRead(
+              pubkey: any(named: 'pubkey'),
+              authHeaders: any(named: 'authHeaders'),
+            ),
+          );
+        },
+      );
     });
 
     group('authHeadersProvider', () {
@@ -1202,6 +1299,395 @@ void main() {
         expect(actor.type, equals(NotificationKind.likeComment));
         expect(actor.targetEventId, equals('comment_evt_id'));
       });
+    });
+
+    group('reactive snapshot', () {
+      setUp(() {
+        when(
+          () => funnelcakeApiClient.markNotificationsRead(
+            pubkey: any(named: 'pubkey'),
+            notificationIds: any(named: 'notificationIds'),
+            authHeaders: any(named: 'authHeaders'),
+          ),
+        ).thenAnswer(
+          (_) async => const MarkReadResponse(success: true, markedCount: 1),
+        );
+        when(
+          () => notificationsDao.markAsRead(any()),
+        ).thenAnswer((_) async => true);
+        when(() => notificationsDao.markAllAsRead()).thenAnswer((_) async => 0);
+      });
+
+      test('seeds watchSnapshot with NotificationPage.empty', () async {
+        await expectLater(
+          repository.watchSnapshot().take(1),
+          emitsInOrder([NotificationPage.empty]),
+        );
+      });
+
+      test('watchUnreadCount starts at 0', () async {
+        await expectLater(
+          repository.watchUnreadCount().take(1),
+          emitsInOrder([0]),
+        );
+      });
+
+      test('emits snapshot after refresh', () async {
+        stubProfiles({
+          'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+        });
+        stubNotifications([
+          makeNotification(),
+        ], unreadCount: 1);
+
+        await repository.refresh();
+
+        final snapshot = await repository.watchSnapshot().first;
+        expect(snapshot.items, hasLength(1));
+        expect(snapshot.items.first.isRead, isFalse);
+      });
+
+      test('watchUnreadCount derives from consolidated visible list', () async {
+        stubProfiles({
+          'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+        });
+        stubNotifications([
+          makeNotification(),
+        ], unreadCount: 5);
+
+        await repository.refresh();
+
+        // Server reported 5, but the consolidated visible list has 1
+        // unread item — watchUnreadCount returns the post-consolidation
+        // count, not the server count.
+        expect(await repository.watchUnreadCount().first, equals(1));
+      });
+
+      test('markAsRead optimistically flips matching items', () async {
+        stubProfiles({
+          'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+        });
+        stubNotifications([
+          makeNotification(),
+        ], unreadCount: 1);
+        await repository.refresh();
+        final loadedId = repository.watchSnapshot().first.then(
+          (s) => s.items.first.id,
+        );
+        final id = await loadedId;
+
+        final counts = <int>[];
+        final sub = repository.watchUnreadCount().listen(counts.add);
+
+        await repository.markAsRead([id]);
+        await sub.cancel();
+
+        expect(counts.last, equals(0));
+      });
+
+      test('markAsRead rolls back snapshot when API throws', () async {
+        stubProfiles({
+          'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+        });
+        stubNotifications([
+          makeNotification(),
+        ], unreadCount: 1);
+        await repository.refresh();
+        final loadedId =
+            (await repository.watchSnapshot().first).items.first.id;
+
+        when(
+          () => funnelcakeApiClient.markNotificationsRead(
+            pubkey: any(named: 'pubkey'),
+            notificationIds: any(named: 'notificationIds'),
+            authHeaders: any(named: 'authHeaders'),
+          ),
+        ).thenThrow(const FunnelcakeException('boom'));
+
+        await expectLater(
+          repository.markAsRead([loadedId]),
+          throwsA(isA<FunnelcakeException>()),
+        );
+
+        // Rollback restores the pre-write snapshot.
+        expect(await repository.watchUnreadCount().first, equals(1));
+      });
+
+      test('markAllAsRead is a no-op when nothing is unread', () async {
+        await repository.markAllAsRead();
+
+        verifyNever(
+          () => funnelcakeApiClient.markNotificationsRead(
+            pubkey: any(named: 'pubkey'),
+            authHeaders: any(named: 'authHeaders'),
+          ),
+        );
+      });
+
+      test('markAllAsRead optimistically zeros every unread item', () async {
+        stubProfiles({
+          'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+          'pubkey_bob': makeProfile('pubkey_bob', displayName: 'Bob'),
+        });
+        stubNotifications([
+          makeNotification(),
+          makeNotification(
+            id: 'n2',
+            sourcePubkey: 'pubkey_bob',
+            referencedEventId: 'video_other',
+          ),
+        ], unreadCount: 2);
+        await repository.refresh();
+        expect(await repository.watchUnreadCount().first, equals(2));
+
+        await repository.markAllAsRead();
+
+        expect(await repository.watchUnreadCount().first, equals(0));
+      });
+
+      test('markAllAsRead rolls back when API throws', () async {
+        stubProfiles({
+          'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+        });
+        stubNotifications([
+          makeNotification(),
+        ], unreadCount: 1);
+        await repository.refresh();
+
+        when(
+          () => funnelcakeApiClient.markNotificationsRead(
+            pubkey: any(named: 'pubkey'),
+            authHeaders: any(named: 'authHeaders'),
+          ),
+        ).thenThrow(const FunnelcakeException('boom'));
+
+        await expectLater(
+          repository.markAllAsRead(),
+          throwsA(isA<FunnelcakeException>()),
+        );
+
+        // Rollback restores the pre-write snapshot.
+        expect(await repository.watchUnreadCount().first, equals(1));
+      });
+
+      test(
+        'acceptRealtime enriches, prepends, and increments unread',
+        () async {
+          stubProfiles({
+            'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+          });
+
+          await repository.acceptRealtime(makeNotification());
+
+          expect(await repository.watchUnreadCount().first, equals(1));
+        },
+      );
+
+      test('acceptRealtime dedupes against existing snapshot items', () async {
+        stubProfiles({
+          'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+        });
+        stubNotifications([
+          makeNotification(),
+        ], unreadCount: 1);
+        await repository.refresh();
+        final beforeItems =
+            (await repository.watchSnapshot().first).items.length;
+
+        // Same id — should be a no-op.
+        await repository.acceptRealtime(makeNotification());
+
+        // Snapshot's item count is unchanged because the realtime event
+        // was deduped against the existing item id.
+        final afterItems =
+            (await repository.watchSnapshot().first).items.length;
+        expect(afterItems, equals(beforeItems));
+      });
+
+      test(
+        'acceptRealtime merges a second actor into an existing '
+        '$VideoNotification group (same videoEventId + type)',
+        () async {
+          stubProfiles({
+            'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+            'pubkey_bob': makeProfile('pubkey_bob', displayName: 'Bob'),
+          });
+          // Initial fetch: one like from Alice on video_default. Becomes a
+          // VideoNotification with totalCount: 1, actors: [Alice].
+          stubNotifications([
+            makeNotification(id: 'first', createdAt: DateTime(2025, 3)),
+          ], unreadCount: 1);
+          await repository.refresh();
+
+          // Mark as read so we can verify the merge flips isRead back.
+          await repository.markAllAsRead();
+
+          final laterTimestamp = DateTime(2025, 6);
+          // Realtime arrival: a like from Bob on the same video.
+          await repository.acceptRealtime(
+            makeNotification(
+              id: 'second',
+              sourcePubkey: 'pubkey_bob',
+              createdAt: laterTimestamp,
+            ),
+          );
+
+          final page = await repository.watchSnapshot().first;
+          expect(
+            page.items,
+            hasLength(1),
+            reason:
+                'Same (videoEventId, type) should merge into the existing '
+                'row instead of prepending a duplicate.',
+          );
+
+          final merged = page.items.single as VideoNotification;
+          expect(merged.totalCount, equals(2));
+          expect(merged.actors, hasLength(2));
+          expect(
+            merged.actors.first.pubkey,
+            equals('pubkey_bob'),
+            reason: 'New actor is prepended at the front of the stack.',
+          );
+          expect(merged.actors[1].pubkey, equals('pubkey_alice'));
+          expect(merged.isRead, isFalse);
+          expect(merged.timestamp, equals(laterTimestamp));
+
+          // watchUnreadCount reflects the un-read flip.
+          expect(await repository.watchUnreadCount().first, equals(1));
+        },
+      );
+
+      test(
+        'acceptRealtime caps merged actors at the group display limit',
+        () async {
+          stubProfiles({
+            'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+            'pubkey_bob': makeProfile('pubkey_bob', displayName: 'Bob'),
+            'pubkey_carol': makeProfile('pubkey_carol', displayName: 'Carol'),
+            'pubkey_dave': makeProfile('pubkey_dave', displayName: 'Dave'),
+          });
+          // Initial fetch: three likes on the same video — fills the actor
+          // stack to the display cap.
+          stubNotifications([
+            makeNotification(id: 'n_alice', createdAt: DateTime(2024, 1, 3)),
+            makeNotification(
+              id: 'n_bob',
+              sourcePubkey: 'pubkey_bob',
+              createdAt: DateTime(2024, 1, 2),
+            ),
+            makeNotification(
+              id: 'n_carol',
+              sourcePubkey: 'pubkey_carol',
+              createdAt: DateTime(2024),
+            ),
+          ], unreadCount: 3);
+          await repository.refresh();
+
+          await repository.acceptRealtime(
+            makeNotification(
+              id: 'n_dave',
+              sourcePubkey: 'pubkey_dave',
+              createdAt: DateTime(2024, 1, 4),
+            ),
+          );
+
+          final merged =
+              (await repository.watchSnapshot().first).items.single
+                  as VideoNotification;
+          expect(merged.totalCount, equals(4));
+          expect(
+            merged.actors,
+            hasLength(3),
+            reason:
+                'Displayed actor stack stays bounded even though totalCount '
+                'continues to grow.',
+          );
+          expect(merged.actors.first.pubkey, equals('pubkey_dave'));
+        },
+      );
+
+      test(
+        'acceptRealtime dedupes a WS arrival whose id matches a REST '
+        "item's sourceEventId",
+        () async {
+          // REST raws carry the Nostr event id in `sourceEventId` (server's
+          // UUID lives in `id`). WS raws — built by the realtime bridge —
+          // carry the Nostr event id in `id`. Without the cross-path check
+          // the same logical Nostr event accepted via WS after REST would
+          // inflate the snapshot and the unread count.
+          stubProfiles({
+            'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+          });
+          stubNotifications([
+            makeNotification(
+              id: 'server-uuid-1',
+              sourceEventId: 'nostr-evt-1',
+              referencedEventId: 'video_a',
+            ),
+          ], unreadCount: 1);
+          await repository.refresh();
+
+          final beforeItems =
+              (await repository.watchSnapshot().first).items.length;
+          expect(await repository.watchUnreadCount().first, equals(1));
+
+          // Same Nostr event arriving over WS — bridge sets both `id` and
+          // `sourceEventId` to the Nostr event id.
+          await repository.acceptRealtime(
+            makeNotification(
+              id: 'nostr-evt-1',
+              sourceEventId: 'nostr-evt-1',
+              referencedEventId: 'video_a',
+              createdAt: DateTime(2025, 6),
+            ),
+          );
+
+          final afterItems =
+              (await repository.watchSnapshot().first).items.length;
+          expect(afterItems, equals(beforeItems));
+          expect(
+            await repository.watchUnreadCount().first,
+            equals(1),
+            reason:
+                'Cross-path duplicate must not bump the unread count or the '
+                'visible item count.',
+          );
+        },
+      );
+
+      test(
+        'acceptRealtime prepends a $VideoNotification when no existing '
+        'group matches by videoEventId + type',
+        () async {
+          stubProfiles({
+            'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+            'pubkey_bob': makeProfile('pubkey_bob', displayName: 'Bob'),
+          });
+          stubNotifications([
+            makeNotification(id: 'first', referencedEventId: 'video_a'),
+          ], unreadCount: 1);
+          await repository.refresh();
+
+          // Different videoEventId — must not merge.
+          await repository.acceptRealtime(
+            makeNotification(
+              id: 'second',
+              sourcePubkey: 'pubkey_bob',
+              referencedEventId: 'video_b',
+              createdAt: DateTime(2025, 6),
+            ),
+          );
+
+          final items = (await repository.watchSnapshot().first).items;
+          expect(items, hasLength(2));
+          expect(
+            (items.first as VideoNotification).videoEventId,
+            equals('video_b'),
+            reason: 'New, non-matching item is prepended.',
+          );
+        },
+      );
     });
   });
 }
