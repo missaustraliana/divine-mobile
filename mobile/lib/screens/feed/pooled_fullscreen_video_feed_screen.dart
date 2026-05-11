@@ -623,9 +623,12 @@ class _FullscreenFeedContentState extends ConsumerState<FullscreenFeedContent>
       child: MultiBlocListener(
         listeners: [
           // Sync volume when hardware buttons change system volume.
+          // Also forward to the web feed so the in-pause mute toggle in
+          // the paused overlay reaches WebVideoPlayer instances.
           BlocListener<VideoVolumeCubit, VideoVolumeState>(
             listener: (_, state) {
               _controller?.setVolume(state.volume);
+              _webFeedKey.currentState?.setVolume(state.volume);
             },
           ),
           // Initialize controller when videos first become available
@@ -835,6 +838,10 @@ class _FullscreenFeedContentState extends ConsumerState<FullscreenFeedContent>
                           widget.webControllerFactory ??
                           defaultWebVideoPlayerControllerFactory,
                       authHeaderProvider: webAuthHeaderProvider,
+                      initialVolume: context
+                          .read<VideoVolumeCubit>()
+                          .state
+                          .volume,
                       onActiveVideoChanged: (video, index) {
                         _pagePosition.value = index.toDouble();
                         _resumeAutoAdvanceAfterSwipe();
@@ -1284,9 +1291,6 @@ class _PooledFullscreenItemContentState
                   children: [
                     if (player != null)
                       PausedVideoPlayOverlay(
-                        // Mute toggle intentionally omitted: the popover in
-                        // the app bar's customActions slot is now the sole
-                        // entry point, matching the home feed.
                         player: player,
                         firstFrameFuture:
                             videoController?.waitUntilFirstFrameRendered,
