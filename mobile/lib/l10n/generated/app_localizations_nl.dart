@@ -6609,6 +6609,24 @@ class AppLocalizationsNl extends AppLocalizations {
       'Geselecteerde clip splitsen';
 
   @override
+  String get videoEditorExtractAudioLabel => 'Audio extraheren';
+
+  @override
+  String get videoEditorClipAudioTitle => 'Clip-audio';
+
+  @override
+  String get videoEditorExtractAudioFromClipSemanticLabel =>
+      'Audio uit clip extraheren en origineel dempen';
+
+  @override
+  String get videoEditorExtractAudioNoLocalFile =>
+      'Kan audio niet extraheren: clip is niet lokaal beschikbaar.';
+
+  @override
+  String get videoEditorExtractAudioFailed =>
+      'Kon audio niet extraheren. Probeer het opnieuw.';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'Bewerken van tijdlijn voltooien';
 

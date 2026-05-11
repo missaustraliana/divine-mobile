@@ -6514,6 +6514,24 @@ class AppLocalizationsAr extends AppLocalizations {
   String get videoEditorSplitSelectedClipSemanticLabel => 'تقسيم المقطع المحدد';
 
   @override
+  String get videoEditorExtractAudioLabel => 'استخراج الصوت';
+
+  @override
+  String get videoEditorClipAudioTitle => 'صوت المقطع';
+
+  @override
+  String get videoEditorExtractAudioFromClipSemanticLabel =>
+      'استخراج الصوت من المقطع وكتم الصوت الأصلي';
+
+  @override
+  String get videoEditorExtractAudioNoLocalFile =>
+      'لا يمكن استخراج الصوت: المقطع غير متاح محليًا.';
+
+  @override
+  String get videoEditorExtractAudioFailed =>
+      'تعذّر استخراج الصوت. يرجى المحاولة مجددًا.';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'إنهاء تحرير الجدول الزمني';
 

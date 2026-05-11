@@ -6727,6 +6727,24 @@ class AppLocalizationsPl extends AppLocalizations {
       'Podziel wybrany klip';
 
   @override
+  String get videoEditorExtractAudioLabel => 'Wyodrębnij dźwięk';
+
+  @override
+  String get videoEditorClipAudioTitle => 'Dźwięk klipu';
+
+  @override
+  String get videoEditorExtractAudioFromClipSemanticLabel =>
+      'Wyodrębnij dźwięk z klipu i wycisz oryginał';
+
+  @override
+  String get videoEditorExtractAudioNoLocalFile =>
+      'Nie można wyodrębnić audio: klip nie jest dostępny lokalnie.';
+
+  @override
+  String get videoEditorExtractAudioFailed =>
+      'Nie udało się wyodrębnić audio. Spróbuj ponownie.';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'Zakończ edycję osi czasu';
 

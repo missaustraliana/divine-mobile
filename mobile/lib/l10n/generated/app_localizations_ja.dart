@@ -6303,6 +6303,23 @@ class AppLocalizationsJa extends AppLocalizations {
   String get videoEditorSplitSelectedClipSemanticLabel => '選択したクリップを分割';
 
   @override
+  String get videoEditorExtractAudioLabel => '音声を抽出';
+
+  @override
+  String get videoEditorClipAudioTitle => 'クリップ音声';
+
+  @override
+  String get videoEditorExtractAudioFromClipSemanticLabel =>
+      'クリップから音声を抽出してオリジナルをミュート';
+
+  @override
+  String get videoEditorExtractAudioNoLocalFile =>
+      '音声を抽出できません：クリップがローカルで利用できません。';
+
+  @override
+  String get videoEditorExtractAudioFailed => '音声を抽出できませんでした。もう一度お試しください。';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel => 'タイムライン編集を終了';
 
   @override

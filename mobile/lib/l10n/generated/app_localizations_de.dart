@@ -6662,6 +6662,24 @@ class AppLocalizationsDe extends AppLocalizations {
       'Ausgewählten Clip teilen';
 
   @override
+  String get videoEditorExtractAudioLabel => 'Audio extrahieren';
+
+  @override
+  String get videoEditorClipAudioTitle => 'Clip-Audio';
+
+  @override
+  String get videoEditorExtractAudioFromClipSemanticLabel =>
+      'Audio aus Clip extrahieren und Original stummschalten';
+
+  @override
+  String get videoEditorExtractAudioNoLocalFile =>
+      'Audio kann nicht extrahiert werden: Clip ist lokal nicht verfügbar.';
+
+  @override
+  String get videoEditorExtractAudioFailed =>
+      'Audio konnte nicht extrahiert werden. Bitte erneut versuchen.';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'Timeline-Bearbeitung abschließen';
 

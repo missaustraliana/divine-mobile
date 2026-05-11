@@ -6647,6 +6647,24 @@ class AppLocalizationsEs extends AppLocalizations {
       'Dividir clip seleccionado';
 
   @override
+  String get videoEditorExtractAudioLabel => 'Extraer audio';
+
+  @override
+  String get videoEditorClipAudioTitle => 'Audio del clip';
+
+  @override
+  String get videoEditorExtractAudioFromClipSemanticLabel =>
+      'Extraer audio del clip y silenciar el original';
+
+  @override
+  String get videoEditorExtractAudioNoLocalFile =>
+      'No se puede extraer el audio: el clip no está disponible localmente.';
+
+  @override
+  String get videoEditorExtractAudioFailed =>
+      'No se pudo extraer el audio. Por favor, inténtalo de nuevo.';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'Terminar edición de la línea de tiempo';
 

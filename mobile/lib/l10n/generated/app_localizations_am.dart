@@ -6437,6 +6437,23 @@ class AppLocalizationsAm extends AppLocalizations {
   String get videoEditorSplitSelectedClipSemanticLabel => 'የተመረጠውን ቅንጥብ ክፈል።';
 
   @override
+  String get videoEditorExtractAudioLabel => 'ኦዲዮ ያውጡ';
+
+  @override
+  String get videoEditorClipAudioTitle => 'ክሊፕ ኦዲዮ';
+
+  @override
+  String get videoEditorExtractAudioFromClipSemanticLabel =>
+      'ከቅንጥብ ኦዲዮ ያውጡ እና ኦሪጅናሉን ያጥፉ';
+
+  @override
+  String get videoEditorExtractAudioNoLocalFile =>
+      'ድምፅ ማዎጣት አልተቻለም፤ ቅንጥቡ በሀገር ዉስጥ አይገኝም።';
+
+  @override
+  String get videoEditorExtractAudioFailed => 'ድምፅ ማዎጣት አልተቻለም። እንደገና ሞክር።';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'የጊዜ መስመር አርትዖትን ጨርስ';
 

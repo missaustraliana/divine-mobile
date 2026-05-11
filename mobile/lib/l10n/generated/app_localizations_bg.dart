@@ -6648,6 +6648,24 @@ class AppLocalizationsBg extends AppLocalizations {
       'Разделете избрания клип';
 
   @override
+  String get videoEditorExtractAudioLabel => 'Извличане на аудио';
+
+  @override
+  String get videoEditorClipAudioTitle => 'Аудио от клип';
+
+  @override
+  String get videoEditorExtractAudioFromClipSemanticLabel =>
+      'Извлечи аудио от клип и заглуши оригинала';
+
+  @override
+  String get videoEditorExtractAudioNoLocalFile =>
+      'Не може да се извлече аудио: клипът не е наличен локално.';
+
+  @override
+  String get videoEditorExtractAudioFailed =>
+      'Не можа да се извлече аудио. Моля, опитайте отново.';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'Завършете редактирането на времевата линия';
 
