@@ -2452,6 +2452,30 @@ abstract class AppLocalizations {
   /// **'{count, plural, =1{1 collaborator} other{{count} collaborators}}. Tap to view profile.'**
   String videoCollaboratorCountLabel(int count);
 
+  /// Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending'**
+  String get videoCollaboratorPendingDecoration;
+
+  /// Screen reader label for a dimmed pending collaborator avatar on the creator's own video.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending collaborator'**
+  String get videoCollaboratorPendingSemanticLabel;
+
+  /// Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.
+  ///
+  /// In en, this message translates to:
+  /// **'{label} ({pending} pending)'**
+  String videoCollaboratorWithPendingSuffix(String label, int pending);
+
+  /// Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.
+  ///
+  /// In en, this message translates to:
+  /// **'{name}. Tap to view profile.'**
+  String profileChipTapHint(String name);
+
   /// No description provided for @listAttributionFallback.
   ///
   /// In en, this message translates to:
