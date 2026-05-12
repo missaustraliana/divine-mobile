@@ -54,16 +54,47 @@ class EmailVerificationCubit extends Cubit<EmailVerificationState> {
   String? _pendingVerifier;
   String? _pendingInviteCode;
 
+  /// Cubit-internal backoff counter for [_schedulePoll]. Lives outside
+  /// state because the UI never reads it — analogous to [_pollTimer] and
+  /// [_pendingDeviceCode]. See `rules/state_management.md` "No Mutable
+  /// Instance Variables in BLoC" for the exception this falls under.
+  int _pollTickIndex = 0;
+
   /// Reset the static completed device code tracking.
   /// Only for use in tests to ensure test isolation.
   @visibleForTesting
   static void resetCompletedDeviceCode() => _completedDeviceCode = null;
 
-  /// Polling interval duration
-  static const _pollInterval = Duration(seconds: 3);
-
   /// Polling timeout duration (15 minutes)
   static const _pollingTimeout = Duration(minutes: 15);
+
+  /// Bounded exponential backoff schedule for the verification poll.
+  ///
+  /// Reasons for the specific shape:
+  /// - First two ticks at 3 s preserve snappy UX for users who click the
+  ///   email link within a few seconds.
+  /// - Subsequent ticks grow until they hit the 30 s cap, so a user who
+  ///   never clicks costs roughly 33 polls over the 15-min window instead
+  ///   of the 300 polls a fixed 3 s interval would issue.
+  @visibleForTesting
+  static const pollBackoffSchedule = <Duration>[
+    Duration(seconds: 3),
+    Duration(seconds: 3),
+    Duration(seconds: 5),
+    Duration(seconds: 8),
+    Duration(seconds: 13),
+    Duration(seconds: 21),
+  ];
+
+  @visibleForTesting
+  static const pollBackoffCap = Duration(seconds: 30);
+
+  static Duration _delayForTick(int tickIndex) {
+    if (tickIndex < pollBackoffSchedule.length) {
+      return pollBackoffSchedule[tickIndex];
+    }
+    return pollBackoffCap;
+  }
 
   /// Start polling for email verification
   void startPolling({
@@ -97,11 +128,27 @@ class EmailVerificationCubit extends Cubit<EmailVerificationState> {
     _pollTimer?.cancel();
     _timeoutTimer?.cancel();
 
-    // Start periodic polling
-    _pollTimer = Timer.periodic(_pollInterval, (_) => _poll());
+    _pollTickIndex = 0;
+    _schedulePoll();
 
     // Set timeout to stop polling after 15 minutes
     _timeoutTimer = Timer(_pollingTimeout, _onTimeout);
+  }
+
+  void _schedulePoll() {
+    final delay = _delayForTick(_pollTickIndex);
+    _pollTimer = Timer(delay, () async {
+      _pollTickIndex++;
+      await _poll();
+      // Continue only while we still have a pending verification. _cleanup()
+      // (called on success, terminal failure, or close) nulls
+      // _pendingDeviceCode, which stops the recursion cleanly. Using the
+      // pending state — not _pollTimer — as the guard keeps intent explicit
+      // and survives future cleanup paths that forget to clear the timer.
+      if (!isClosed && _pendingDeviceCode != null) {
+        _schedulePoll();
+      }
+    });
   }
 
   /// Emit a failure state from outside the cubit (e.g., token verification).
@@ -461,6 +508,7 @@ class EmailVerificationCubit extends Cubit<EmailVerificationState> {
     _pollTimer = null;
     _timeoutTimer?.cancel();
     _timeoutTimer = null;
+    _pollTickIndex = 0;
     _pendingDeviceCode = null;
     _pendingVerifier = null;
     _pendingInviteCode = null;

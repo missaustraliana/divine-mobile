@@ -187,6 +187,19 @@ class NostrClient {
   /// Tracks whether dispose() has been called
   bool _isDisposed = false;
 
+  /// Completes the first time [initialize] finishes, so consumers can await
+  /// readiness without polling `hasKeys`. `NostrClient` is one-shot — after
+  /// `dispose()` a fresh instance is constructed for the next session, so
+  /// this completer is final.
+  final Completer<void> _readyCompleter = Completer<void>();
+
+  /// Resolves the first time [initialize] completes. Returns the same
+  /// resolved future on subsequent reads.
+  ///
+  /// Use this from Riverpod providers or services that need to react to
+  /// "signer is ready" without busy-polling `hasKeys` — see #3352.
+  Future<void> get ready => _readyCompleter.future;
+
   /// Public key of the client
   String get publicKey => _nostr.publicKey;
 
@@ -210,10 +223,23 @@ class NostrClient {
   /// This must be called before using the client to ensure relay connections
   /// are established. Also refreshes the public key from the signer to ensure
   /// the client has the correct key. Can be called multiple times safely.
+  ///
+  /// On failure, [ready] resolves with the same error so consumers awaiting
+  /// readiness fail fast instead of hanging until a wall-clock timeout.
   Future<void> initialize() async {
-    // Refresh public key from signer - signer is the single source of truth
-    await _nostr.refreshPublicKey();
-    await _relayManager.initialize();
+    try {
+      // Signer is the single source of truth for the public key.
+      await _nostr.refreshPublicKey();
+      await _relayManager.initialize();
+      if (!_readyCompleter.isCompleted) {
+        _readyCompleter.complete();
+      }
+    } catch (e, st) {
+      if (!_readyCompleter.isCompleted) {
+        _readyCompleter.completeError(e, st);
+      }
+      rethrow;
+    }
   }
 
   /// Optional observer for tracking statistics (subscriptions, events)
@@ -1093,6 +1119,13 @@ class NostrClient {
   ///
   /// Closes all subscriptions, disconnects from relays, and cleans up
   /// internal state. After calling this, the client should not be used.
+  ///
+  /// If [initialize] never completed, [ready] is left pending forever — the
+  /// provider/service tree that holds this client should rebuild against a
+  /// new instance after dispose, so a stale awaiter on [ready] would be
+  /// reading against the wrong identity anyway. Callers that await [ready]
+  /// must check [isDisposed] (or their own ownership signal) before using
+  /// the client.
   Future<void> dispose() async {
     await closeAllSubscriptions();
     await _relayManager.dispose();

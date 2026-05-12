@@ -2492,6 +2492,97 @@ void main() {
 
         expect(client.hasKeys, isFalse);
       });
+
+      test('ready completes after initialize() succeeds', () async {
+        when(() => mockNostr.refreshPublicKey()).thenAnswer((_) async {});
+        when(() => mockRelayManager.initialize()).thenAnswer((_) async {});
+
+        // ready must be pending before initialize().
+        var resolved = false;
+        unawaited(client.ready.then((_) => resolved = true));
+        await Future<void>.delayed(Duration.zero);
+        expect(resolved, isFalse);
+
+        await client.initialize();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(resolved, isTrue);
+      });
+
+      test('ready stays resolved on a second initialize() call', () async {
+        when(() => mockNostr.refreshPublicKey()).thenAnswer((_) async {});
+        when(() => mockRelayManager.initialize()).thenAnswer((_) async {});
+
+        await client.initialize();
+        // Second call must not throw "Future already completed".
+        await client.initialize();
+
+        // Reading ready a second time must still resolve normally.
+        await client.ready;
+      });
+
+      test(
+        'ready stays pending when dispose() runs before initialize() — the '
+        'surrounding provider rebuilds with a fresh client and a fresh future',
+        () async {
+          when(() => mockNostr.unsubscribe(any())).thenReturn(null);
+
+          final readyFuture = client.ready;
+          await client.dispose();
+
+          // Pending — short timeout proves no completion in either direction.
+          await expectLater(
+            readyFuture.timeout(
+              const Duration(milliseconds: 50),
+              onTimeout: () =>
+                  throw StateError('intentional timeout — ready is pending'),
+            ),
+            throwsA(
+              isA<StateError>().having(
+                (e) => e.message,
+                'message',
+                contains('intentional timeout'),
+              ),
+            ),
+          );
+          expect(client.isDisposed, isTrue);
+        },
+      );
+
+      test(
+        'ready completes with error when refreshPublicKey() throws',
+        () async {
+          final boom = StateError('refresh failed');
+          when(() => mockNostr.refreshPublicKey()).thenThrow(boom);
+
+          // Attach the ready listener before initialize() so completeError
+          // has a handler — otherwise the test zone treats it as unhandled.
+          final readyExpectation = expectLater(
+            client.ready,
+            throwsA(same(boom)),
+          );
+
+          await expectLater(client.initialize(), throwsA(same(boom)));
+          await readyExpectation;
+        },
+      );
+
+      test(
+        'ready completes with error when relayManager.initialize() throws',
+        () async {
+          final boom = StateError('relay init failed');
+          when(() => mockNostr.refreshPublicKey()).thenAnswer((_) async {});
+          when(() => mockRelayManager.initialize()).thenThrow(boom);
+
+          final readyExpectation = expectLater(
+            client.ready,
+            throwsA(same(boom)),
+          );
+
+          await expectLater(client.initialize(), throwsA(same(boom)));
+          await readyExpectation;
+        },
+      );
     });
 
     group('relay convenience properties', () {
