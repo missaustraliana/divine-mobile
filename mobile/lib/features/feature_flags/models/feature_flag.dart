@@ -2,11 +2,13 @@
 // ABOUTME: Provides type-safe flag definitions with display names and descriptions
 
 enum FeatureFlag {
-  newCameraUI('New Camera UI', 'Enhanced camera interface with new controls'),
-  enhancedVideoPlayer(
-    'Enhanced Video Player',
-    'Improved video playback engine with better performance',
+  nativeFeedPlayer(
+    'Native Feed Player',
+    'Use the native platform video player in the feed (iOS, Android, macOS). '
+        'Disable to fall back to the legacy pooled player. '
+        'Has no effect on web.',
   ),
+  newCameraUI('New Camera UI', 'Enhanced camera interface with new controls'),
   enhancedAnalytics(
     'Enhanced Analytics',
     'Detailed usage tracking and insights',
@@ -60,10 +62,13 @@ enum FeatureFlag {
     'Show Nostr relay configuration and diagnostics in Settings. '
         'Changing relays can break publishing and discovery — only turn '
         'this on if you know what you are doing.',
-  )
+  ),
   ;
 
-  const FeatureFlag(this.displayName, this.description);
+  const FeatureFlag(
+    this.displayName,
+    this.description,
+  );
 
   final String displayName;
   final String description;

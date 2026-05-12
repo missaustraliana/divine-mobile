@@ -1133,6 +1133,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get videoPlayerEditVideoTooltip => 'Editar video';
 
   @override
+  String get videoPlayerTapHint =>
+      'Toca para reproducir o pausar. Toca dos veces para dar me gusta.';
+
+  @override
   String get videoSettingsMenuOpen => 'Abrir configuración de reproducción';
 
   @override

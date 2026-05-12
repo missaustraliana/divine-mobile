@@ -1095,6 +1095,10 @@ class AppLocalizationsId extends AppLocalizations {
   String get videoPlayerEditVideoTooltip => 'Ubah video';
 
   @override
+  String get videoPlayerTapHint =>
+      'Ketuk untuk memutar atau menjeda. Ketuk dua kali untuk menyukai.';
+
+  @override
   String get videoSettingsMenuOpen => 'Buka pengaturan pemutaran';
 
   @override

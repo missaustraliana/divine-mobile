@@ -1097,6 +1097,10 @@ class AppLocalizationsTr extends AppLocalizations {
   String get videoPlayerEditVideoTooltip => 'Videoyu düzenle';
 
   @override
+  String get videoPlayerTapHint =>
+      'Oynatmak veya duraklatmak için dokunun. Beğenmek için çift dokunun.';
+
+  @override
   String get videoSettingsMenuOpen => 'Oynatma ayarlarını aç';
 
   @override

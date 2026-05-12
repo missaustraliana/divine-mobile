@@ -533,6 +533,7 @@
   "videoPlayerUnmute": "Unmute video",
   "videoPlayerEditVideo": "Edit video",
   "videoPlayerEditVideoTooltip": "Edit video",
+  "videoPlayerTapHint": "Tap to play or pause. Double tap to like.",
   "videoSettingsMenuOpen": "Open playback settings",
   "@videoSettingsMenuOpen": {
     "description": "Semantic label for the More button in the home feed top bar that opens the playback-settings popover."

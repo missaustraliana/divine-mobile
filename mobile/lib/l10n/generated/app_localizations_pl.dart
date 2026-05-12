@@ -1138,6 +1138,10 @@ class AppLocalizationsPl extends AppLocalizations {
   String get videoPlayerEditVideoTooltip => 'Edytuj film';
 
   @override
+  String get videoPlayerTapHint =>
+      'Dotknij, aby odtworzyć lub wstrzymać. Dotknij dwukrotnie, aby polubić.';
+
+  @override
   String get videoSettingsMenuOpen => 'Otwórz ustawienia odtwarzania';
 
   @override

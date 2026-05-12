@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:infinite_video_feed/infinite_video_feed.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:models/models.dart';
@@ -30,6 +31,7 @@ import 'package:openvine/services/media_auth_interceptor.dart';
 import 'package:openvine/services/media_viewer_auth_service.dart';
 import 'package:openvine/widgets/branded_loading_indicator.dart';
 import 'package:openvine/widgets/video_feed_item/actions/actions.dart';
+import 'package:openvine/widgets/video_feed_item/feed_videos.dart';
 import 'package:openvine/widgets/video_feed_item/moderated_content_overlay.dart';
 import 'package:openvine/widgets/video_feed_item/video_feed_item.dart';
 import 'package:openvine/widgets/web_video_feed.dart';
@@ -273,6 +275,10 @@ void main() {
     late _MockVideoVolumeCubit videoVolumeCubit;
 
     setUpAll(() {
+      // This suite validates pooled controller behavior; force the widget
+      // to stay on the pooled/native fallback path regardless of host OS.
+      InfiniteVideoFeed.debugIsSupportedOverride = false;
+
       registerFallbackValue(const FullscreenFeedStarted());
       registerFallbackValue(const FullscreenFeedIndexChanged(0));
       registerFallbackValue(const FullscreenFeedLoadMoreRequested());
@@ -306,6 +312,10 @@ void main() {
     tearDown(() async {
       await stateController.close();
       await PlayerPool.reset();
+    });
+
+    tearDownAll(() {
+      InfiniteVideoFeed.debugIsSupportedOverride = null;
     });
 
     List<VideoEvent> createTestVideos({int count = 3}) {
@@ -576,6 +586,68 @@ void main() {
           expect(find.text('home-sentinel'), findsOneWidget);
         },
       );
+
+      group('native-player branch', () {
+        setUp(() {
+          InfiniteVideoFeed.debugIsSupportedOverride = true;
+        });
+
+        tearDown(() {
+          InfiniteVideoFeed.debugIsSupportedOverride = false;
+        });
+
+        testWidgets('renders FeedVideos + InfiniteVideoFeed when supported', (
+          tester,
+        ) async {
+          final videos = createTestVideos();
+
+          await tester.pumpWidget(
+            buildSubject(
+              state: FullscreenFeedState(
+                status: FullscreenFeedStatus.ready,
+                videos: videos,
+              ),
+              additionalOverrides: [
+                isFeatureEnabledProvider(
+                  FeatureFlag.nativeFeedPlayer,
+                ).overrideWithValue(true),
+              ],
+            ),
+          );
+          await tester.pump();
+
+          expect(find.byType(FeedVideos), findsOneWidget);
+          expect(find.byType(InfiniteVideoFeed), findsOneWidget);
+          expect(find.byType(PooledVideoFeed), findsNothing);
+          expect(find.byType(WebVideoFeed), findsNothing);
+        });
+
+        testWidgets(
+          'renders PooledVideoFeed when supported but flag is off',
+          (tester) async {
+            final videos = createTestVideos();
+
+            await tester.pumpWidget(
+              buildSubject(
+                state: FullscreenFeedState(
+                  status: FullscreenFeedStatus.ready,
+                  videos: videos,
+                ),
+                additionalOverrides: [
+                  isFeatureEnabledProvider(
+                    FeatureFlag.nativeFeedPlayer,
+                  ).overrideWithValue(false),
+                ],
+              ),
+            );
+            await tester.pump();
+
+            expect(find.byType(PooledVideoFeed), findsOneWidget);
+            expect(find.byType(InfiniteVideoFeed), findsNothing);
+            expect(find.byType(WebVideoFeed), findsNothing);
+          },
+        );
+      });
 
       testWidgets('resumes playback when app resumes on current route', (
         tester,

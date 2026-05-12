@@ -2020,6 +2020,12 @@ abstract class AppLocalizations {
   /// **'Edit video'**
   String get videoPlayerEditVideoTooltip;
 
+  /// No description provided for @videoPlayerTapHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to play or pause. Double tap to like.'**
+  String get videoPlayerTapHint;
+
   /// Semantic label for the More button in the home feed top bar that opens the playback-settings popover.
   ///
   /// In en, this message translates to:

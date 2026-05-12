@@ -1051,6 +1051,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get videoPlayerEditVideoTooltip => '영상 편집';
 
   @override
+  String get videoPlayerTapHint => '탭하여 재생하거나 일시정지하세요. 이중 탭으로 좋아요.';
+
+  @override
   String get videoSettingsMenuOpen => '재생 설정 열기';
 
   @override

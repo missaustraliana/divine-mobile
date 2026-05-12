@@ -1110,6 +1110,10 @@ class AppLocalizationsSv extends AppLocalizations {
   String get videoPlayerEditVideoTooltip => 'Redigera video';
 
   @override
+  String get videoPlayerTapHint =>
+      'Tryck för att spela eller pausa. Dubbeltryck för att gilla.';
+
+  @override
   String get videoSettingsMenuOpen => 'Öppna uppspelningsinställningar';
 
   @override

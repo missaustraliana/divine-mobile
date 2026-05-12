@@ -3,7 +3,6 @@
 // ABOUTME: Uses FullscreenFeedBloc for state management
 
 import 'dart:async';
-import 'dart:ui' show lerpDouble;
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, listEquals;
@@ -11,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:infinite_video_feed/infinite_video_feed.dart'
+    show InfiniteVideoFeed, VideoErrorType;
 import 'package:models/models.dart';
 import 'package:openvine/blocs/fullscreen_feed/fullscreen_feed_bloc.dart';
 import 'package:openvine/blocs/video_interactions/video_interactions_bloc.dart';
@@ -22,6 +23,7 @@ import 'package:openvine/features/feature_flags/models/feature_flag.dart';
 import 'package:openvine/features/feature_flags/providers/feature_flag_providers.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/providers/app_providers.dart';
+import 'package:openvine/providers/subtitle_providers.dart';
 import 'package:openvine/router/app_router.dart';
 import 'package:openvine/screens/comments/comments_screen.dart';
 import 'package:openvine/screens/feed/feed_auto_advance_completion_listener.dart';
@@ -34,34 +36,29 @@ import 'package:openvine/services/feed_performance_tracker.dart';
 import 'package:openvine/services/openvine_media_cache.dart';
 import 'package:openvine/services/view_event_publisher.dart';
 import 'package:openvine/utils/pooled_player_logger.dart';
+import 'package:openvine/utils/scroll_driven_opacity.dart';
 import 'package:openvine/widgets/branded_loading_indicator.dart';
 import 'package:openvine/widgets/pooled_video_metrics_tracker.dart';
 import 'package:openvine/widgets/video_feed_item/content_warning_helpers.dart';
 import 'package:openvine/widgets/video_feed_item/double_tap_heart_overlay.dart';
+import 'package:openvine/widgets/video_feed_item/feed_videos.dart';
 import 'package:openvine/widgets/video_feed_item/moderated_content_overlay.dart';
 import 'package:openvine/widgets/video_feed_item/paused_video_play_overlay.dart';
 import 'package:openvine/widgets/video_feed_item/pooled_video_error_overlay.dart';
+import 'package:openvine/widgets/video_feed_item/subtitle_overlay.dart';
 import 'package:openvine/widgets/video_feed_item/video_author_info_section.dart';
 import 'package:openvine/widgets/video_feed_item/video_feed_item.dart';
 import 'package:openvine/widgets/video_feed_item/video_player_subtitle_layer.dart';
 import 'package:openvine/widgets/web_video_auth_header_provider.dart';
 import 'package:openvine/widgets/web_video_feed.dart';
 import 'package:openvine/widgets/web_video_player.dart';
-import 'package:pooled_video_player/pooled_video_player.dart';
+import 'package:pooled_video_player/pooled_video_player.dart'
+    as pvp
+    show VideoErrorType;
+import 'package:pooled_video_player/pooled_video_player.dart'
+    hide VideoErrorType;
 import 'package:unified_logger/unified_logger.dart';
 import 'package:video_player/video_player.dart';
-
-// Scroll-fraction constants for overlay opacity during page transitions.
-//
-// Opacity is scroll-driven: it changes continuously as the page scrolls,
-// tracking the finger position rather than running on a separate timer.
-// A small transition band around each threshold gives a smooth cross-fade.
-const double _kOverlayFullOpacityThreshold = 0.1; // fully visible below 10 %
-const double _kOverlayHideThreshold = 0.5; // fully hidden above 50 %
-const double _kOverlayDimmedOpacity = 0.5; // opacity while in the dim band
-// Half-width of the smooth cross-fade zone around each threshold.
-// e.g. 0.03 → full↔dim transition spans 7 %–13 %, dim↔hidden spans 47 %–53 %.
-const double _kOverlayFadeHalfWidth = 0.03;
 
 @visibleForTesting
 Alignment fullscreenVideoMediaAlignment({required bool isPortrait}) {
@@ -83,33 +80,6 @@ double fullscreenContainedVideoTopInset({
   // down to avoid overlapping with it.
   if (hasHeader) return 0;
   return isPortrait ? 0 : safeAreaTop + DiVineAppBarStyle.defaultStyle.height;
-}
-
-/// Maps [distance] (0–1 fraction scrolled away from an item) to overlay
-/// opacity using smooth linear interpolation around each threshold.
-double _scrollDrivenOpacity(double distance) {
-  const dimLo = _kOverlayFullOpacityThreshold - _kOverlayFadeHalfWidth;
-  const dimHi = _kOverlayFullOpacityThreshold + _kOverlayFadeHalfWidth;
-  const hideLo = _kOverlayHideThreshold - _kOverlayFadeHalfWidth;
-  const hideHi = _kOverlayHideThreshold + _kOverlayFadeHalfWidth;
-
-  if (distance <= dimLo) return 1.0;
-  if (distance <= dimHi) {
-    return lerpDouble(
-      1.0,
-      _kOverlayDimmedOpacity,
-      (distance - dimLo) / (dimHi - dimLo),
-    )!;
-  }
-  if (distance <= hideLo) return _kOverlayDimmedOpacity;
-  if (distance <= hideHi) {
-    return lerpDouble(
-      _kOverlayDimmedOpacity,
-      0.0,
-      (distance - hideLo) / (hideHi - hideLo),
-    )!;
-  }
-  return 0.0;
 }
 
 /// Arguments for navigating to PooledFullscreenVideoFeedScreen.
@@ -345,6 +315,7 @@ class _FullscreenFeedContentState extends ConsumerState<FullscreenFeedContent>
   late final ValueNotifier<double> _pagePosition;
   final _feedKey = GlobalKey<PooledVideoFeedState>();
   final _webFeedKey = GlobalKey<WebVideoFeedState>();
+  final _feedVideosKey = GlobalKey<FeedVideosState>();
 
   /// Feed-scoped Auto playback state; exposed to descendants via
   /// `BlocProvider.value` in [build].
@@ -411,6 +382,10 @@ class _FullscreenFeedContentState extends ConsumerState<FullscreenFeedContent>
   void _initializeControllerIfNeeded({bool triggerRebuild = false}) {
     if (kIsWeb) return; // Skip media_kit controller on web
     if (_controller != null) return;
+    if (InfiniteVideoFeed.isSupported &&
+        ref.read(isFeatureEnabledProvider(.nativeFeedPlayer))) {
+      return;
+    }
 
     final state = context.read<FullscreenFeedBloc>().state;
     if (!state.hasPooledVideos) return;
@@ -466,6 +441,13 @@ class _FullscreenFeedContentState extends ConsumerState<FullscreenFeedContent>
       if (targetIndex == webFeedState.currentIndex) return;
 
       unawaited(webFeedState.animateToPage(targetIndex));
+      return;
+    }
+
+    // New native player path.
+    final feedVideosState = _feedVideosKey.currentState;
+    if (feedVideosState != null) {
+      unawaited(feedVideosState.animateToPage(index));
       return;
     }
 
@@ -827,7 +809,34 @@ class _FullscreenFeedContentState extends ConsumerState<FullscreenFeedContent>
                   horizontalPadding: 8,
                 ),
               ),
-              body: kIsWeb
+              body:
+                  InfiniteVideoFeed.isSupported &&
+                      ref.watch(isFeatureEnabledProvider(.nativeFeedPlayer))
+                  ? FeedVideos(
+                      key: _feedVideosKey,
+                      videos: state.videos,
+                      contextTitle: widget.contextTitle,
+                      currentIndex: state.currentIndex,
+                      shouldPortraitExpand: false,
+                      hasMore: state.canLoadMore,
+                      isLoadingMore: state.isLoadingMore,
+                      onActiveVideoChanged: (video, index) {
+                        _resumeAutoAdvanceAfterSwipe();
+                        FeedPerformanceTracker().startVideoSwipeTracking(
+                          video.id,
+                        );
+                        context.read<FullscreenFeedBloc>().add(
+                          FullscreenFeedIndexChanged(index),
+                        );
+                        widget.onPageChanged?.call(index);
+                      },
+                      onNearEnd: () {
+                        if (state.canLoadMore) {
+                          _triggerLoadMore();
+                        }
+                      },
+                    )
+                  : kIsWeb
                   ? WebVideoFeed(
                       key: _webFeedKey,
                       videos: state.videos
@@ -1131,6 +1140,13 @@ class _PooledFullscreenItemContentState
   int _heartTriggerId = 0;
   bool _contentWarningRevealed = false;
 
+  /// Last error type reported to [VideoPlaybackStatusCubit] for this
+  /// item's video. Dedupes at the call site so `errorBuilder` rebuilds
+  /// (orientation change, parent rebuild) don't schedule a post-frame
+  /// callback every frame. The cubit also dedupes internally, but
+  /// skipping the callback entirely avoids per-frame scheduler churn.
+  VideoErrorType? _lastReportedError;
+
   void _handleDoubleTapLike(TapDownDetails details) {
     final showWarning = shouldShowContentWarningOverlay(
       contentWarningLabels: widget.video.contentWarningLabels,
@@ -1239,16 +1255,26 @@ class _PooledFullscreenItemContentState
             hasHeader: hasHeader,
           ),
           errorBuilder: (context, onRetry, errorType) {
-            // Capture the cubit eagerly so the post-frame callback doesn't
-            // walk the ancestor tree on a potentially-deactivated element.
-            final cubit = context.read<VideoPlaybackStatusCubit>();
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              cubit.report(video.id, playbackStatusFromError(errorType));
-            });
+            // Map pooled_video_player.VideoErrorType to the canonical
+            // infinite_video_feed.VideoErrorType used by playbackStatusFromError
+            // and PooledVideoErrorOverlay.
+            final feedErrorType = _toFeedErrorType(errorType);
+            // Dedupe at the call site so rebuilds don't schedule a
+            // post-frame callback every frame. See _lastReportedError doc.
+            if (_lastReportedError != feedErrorType) {
+              _lastReportedError = feedErrorType;
+              // Capture the cubit eagerly so the post-frame callback doesn't
+              // walk the ancestor tree on a potentially-deactivated element.
+              final cubit = context.read<VideoPlaybackStatusCubit>();
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                cubit.report(video.id, playbackStatusFromError(feedErrorType));
+              });
+            }
             return PooledVideoErrorOverlay(
               video: video,
               onRetry: onRetry,
-              errorType: errorType,
+              errorType: feedErrorType,
             );
           },
           overlayBuilder: (context, videoController, player, feedController) {
@@ -1296,6 +1322,11 @@ class _PooledFullscreenItemContentState
                             videoController?.waitUntilFirstFrameRendered,
                         isVisible: widget.isActive,
                       ),
+                    // Subtitle overlay — needs player position stream
+                    if (video.hasSubtitles && player != null)
+                      Positioned.fill(
+                        child: _SubtitleLayer(video: video, player: player),
+                      ),
                     ValueListenableBuilder<double>(
                       valueListenable: widget.pagePosition,
                       builder: (context, page, _) {
@@ -1309,7 +1340,7 @@ class _PooledFullscreenItemContentState
                           // the hard-cut guard is not needed in fullscreen.
                           isVisible: true,
                           isActive: widget.isActive,
-                          overlayOpacity: _scrollDrivenOpacity(distance),
+                          overlayOpacity: scrollDrivenOpacity(distance),
                           hasBottomNavigation: false,
                           contextTitle: widget.contextTitle,
                           isFullscreen: true,
@@ -1492,3 +1523,43 @@ class _LoadingIndicatorState extends State<_LoadingIndicator> {
     );
   }
 }
+
+/// Streams player position and renders subtitle text for fullscreen feed.
+class _SubtitleLayer extends ConsumerWidget {
+  const _SubtitleLayer({required this.video, required this.player});
+
+  final VideoEvent video;
+  final Player player;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final subtitlesVisible = ref.watch(subtitleVisibilityProvider);
+
+    return StreamBuilder<Duration>(
+      stream: player.stream.position,
+      builder: (context, snapshot) {
+        final positionMs = snapshot.data?.inMilliseconds ?? 0;
+        return Stack(
+          children: [
+            SubtitleOverlay(
+              video: video,
+              positionMs: positionMs,
+              visible: subtitlesVisible,
+              bottomOffset: 180,
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Converts a [pvp.VideoErrorType] from [PooledVideoPlayer]'s error callback
+/// to the canonical [VideoErrorType] from [infinite_video_feed].
+VideoErrorType? _toFeedErrorType(pvp.VideoErrorType? t) => switch (t) {
+  null => null,
+  pvp.VideoErrorType.ageRestricted => VideoErrorType.ageRestricted,
+  pvp.VideoErrorType.forbidden => VideoErrorType.forbidden,
+  pvp.VideoErrorType.notFound => VideoErrorType.notFound,
+  pvp.VideoErrorType.generic => VideoErrorType.generic,
+};

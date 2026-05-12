@@ -1151,6 +1151,10 @@ class AppLocalizationsRo extends AppLocalizations {
   String get videoPlayerEditVideoTooltip => 'Editează videoclipul';
 
   @override
+  String get videoPlayerTapHint =>
+      'Atinge pentru a reda sau întrerupe. Atinge de două ori pentru a aprecia.';
+
+  @override
   String get videoSettingsMenuOpen => 'Deschide setările de redare';
 
   @override
