@@ -14,21 +14,19 @@ import 'package:unified_logger/unified_logger.dart';
 
 /// Reasons for content filtering/reporting.
 ///
-/// Aligned with the 6 design categories for flag/report flows.
+/// Categories for content filtering and report flows.
 enum ContentFilterReason {
-  spam('Spam or unwanted content'),
-  harassment('Harassment, bullying, or threats'),
-  violence('Violent or extremist content'),
-  sexualContent('Sexual or adult content'),
-  copyright('Copyright violation'),
-  falseInformation('Misinformation'),
-  csam('Child safety concern'),
-  aiGenerated('Suspected AI-generated content'),
-  other('Other violation')
-  ;
-
-  const ContentFilterReason(this.description);
-  final String description;
+  spam,
+  harassment,
+  violence,
+  sexualContent,
+  copyright,
+  falseInformation,
+  childSafety,
+  csam,
+  underageUser,
+  aiGenerated,
+  other,
 }
 
 /// Content severity levels for filtering
@@ -603,8 +601,12 @@ class ContentModerationService with NostrListServiceMixin {
         baseMessage = 'This content may violate copyright';
       case ContentFilterReason.falseInformation:
         baseMessage = 'This content may contain misinformation';
+      case ContentFilterReason.childSafety:
+        baseMessage = 'This content raises child safety concerns';
       case ContentFilterReason.csam:
-        baseMessage = 'This content violates child safety policies';
+        baseMessage = 'This content depicts child sexual abuse';
+      case ContentFilterReason.underageUser:
+        baseMessage = 'This account holder appears to be underage';
       case ContentFilterReason.aiGenerated:
         baseMessage = 'This content may be AI-generated';
       case ContentFilterReason.other:

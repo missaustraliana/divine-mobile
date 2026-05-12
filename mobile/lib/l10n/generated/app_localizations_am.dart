@@ -4410,10 +4410,25 @@ class AppLocalizationsAm extends AppLocalizations {
   String get reportReasonFalseInfoSubtitle => 'አሳሳች ወይም የውሸት ማስታወቂያዎች';
 
   @override
-  String get reportReasonCsam => 'የልጅ ደህንነት ጥሰት';
+  String get reportReasonChildSafety => 'Child Safety Violation';
 
   @override
-  String get reportReasonCsamSubtitle => 'ህፃናትን የሚበዘብዝ ወይም አደጋ ላይ የሚጥል ይዘት';
+  String get reportReasonChildSafetySubtitle =>
+      'General concerns about minors\' safety';
+
+  @override
+  String get reportReasonCsam => 'Child Sexual Abuse';
+
+  @override
+  String get reportReasonCsamSubtitle =>
+      'Content depicting sexual abuse of minors';
+
+  @override
+  String get reportReasonUnderageUser => 'User Appears Under 16';
+
+  @override
+  String get reportReasonUnderageUserSubtitle =>
+      'Account holder appears to be underage';
 
   @override
   String get reportReasonAiGenerated => 'በAI የተፈጠረ ይዘት';

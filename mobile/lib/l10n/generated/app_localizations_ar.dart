@@ -4462,10 +4462,25 @@ class AppLocalizationsAr extends AppLocalizations {
   String get reportReasonFalseInfoSubtitle => 'ادعاءات مضللة أو كاذبة';
 
   @override
-  String get reportReasonCsam => 'انتهاك سلامة الأطفال';
+  String get reportReasonChildSafety => 'Child Safety Violation';
 
   @override
-  String get reportReasonCsamSubtitle => 'محتوى يستغل القاصرين أو يعرضهم للخطر';
+  String get reportReasonChildSafetySubtitle =>
+      'General concerns about minors\' safety';
+
+  @override
+  String get reportReasonCsam => 'Child Sexual Abuse';
+
+  @override
+  String get reportReasonCsamSubtitle =>
+      'Content depicting sexual abuse of minors';
+
+  @override
+  String get reportReasonUnderageUser => 'User Appears Under 16';
+
+  @override
+  String get reportReasonUnderageUserSubtitle =>
+      'Account holder appears to be underage';
 
   @override
   String get reportReasonAiGenerated => 'محتوى مُولَّد بالذكاء الاصطناعي';
