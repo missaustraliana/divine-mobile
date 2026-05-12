@@ -2336,6 +2336,10 @@ class AppLocalizationsRo extends AppLocalizations {
       'Toate notificările au fost marcate ca citite';
 
   @override
+  String get notificationSettingsMarkAllAsReadFailed =>
+      'Marcarea tuturor ca citite a eșuat';
+
+  @override
   String get notificationSettingsResetToDefaults =>
       'Setările au fost resetate la valorile implicite';
 

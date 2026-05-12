@@ -2291,6 +2291,10 @@ class AppLocalizationsFil extends AppLocalizations {
       'Lahat ng notification ay namarkahan bilang nabasa';
 
   @override
+  String get notificationSettingsMarkAllAsReadFailed =>
+      'Hindi nagawang markahan lahat bilang nabasa';
+
+  @override
   String get notificationSettingsResetToDefaults =>
       'Naibalik ang mga setting sa default';
 

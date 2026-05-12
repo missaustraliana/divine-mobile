@@ -2325,6 +2325,10 @@ class AppLocalizationsPl extends AppLocalizations {
       'Wszystkie powiadomienia oznaczone jako przeczytane';
 
   @override
+  String get notificationSettingsMarkAllAsReadFailed =>
+      'Nie udało się oznaczyć wszystkich jako przeczytane';
+
+  @override
   String get notificationSettingsResetToDefaults =>
       'Ustawienia zresetowane do domyślnych';
 

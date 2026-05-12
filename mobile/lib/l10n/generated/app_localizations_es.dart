@@ -2278,6 +2278,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'Todas las notificaciones marcadas como leídas';
 
   @override
+  String get notificationSettingsMarkAllAsReadFailed =>
+      'No se pudieron marcar todas como leídas';
+
+  @override
   String get notificationSettingsResetToDefaults =>
       'Ajustes restablecidos a los valores predeterminados';
 

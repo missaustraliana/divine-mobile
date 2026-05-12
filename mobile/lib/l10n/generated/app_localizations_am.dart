@@ -2210,6 +2210,10 @@ class AppLocalizationsAm extends AppLocalizations {
       'ሁሉም ማሳወቂያዎች እንደተነበቡ ምልክት ተደርጎባቸዋል';
 
   @override
+  String get notificationSettingsMarkAllAsReadFailed =>
+      'ሁሉንም እንደተነበቡ ለማመልከት አልተሳካም';
+
+  @override
   String get notificationSettingsResetToDefaults =>
       'ቅንብሮች ወደ ነባሪዎች ዳግም ተጀምረዋል።';
 

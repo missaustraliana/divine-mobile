@@ -2291,6 +2291,10 @@ class AppLocalizationsBg extends AppLocalizations {
       'Всички известия са маркирани като прочетени';
 
   @override
+  String get notificationSettingsMarkAllAsReadFailed =>
+      'Неуспешно маркиране на всички като прочетени';
+
+  @override
   String get notificationSettingsResetToDefaults =>
       'Настройките се нулират до стойностите по подразбиране';
 

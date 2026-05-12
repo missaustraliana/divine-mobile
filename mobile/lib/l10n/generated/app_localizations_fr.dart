@@ -2285,6 +2285,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Toutes les notifications marquées comme lues';
 
   @override
+  String get notificationSettingsMarkAllAsReadFailed =>
+      'Échec du marquage de toutes comme lues';
+
+  @override
   String get notificationSettingsResetToDefaults =>
       'Réglages réinitialisés par défaut';
 

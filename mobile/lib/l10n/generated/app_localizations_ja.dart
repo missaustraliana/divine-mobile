@@ -2135,6 +2135,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get notificationSettingsAllMarkedAsRead => 'すべての通知を既読にしたよ';
 
   @override
+  String get notificationSettingsMarkAllAsReadFailed => 'すべて既読にできなかったよ';
+
+  @override
   String get notificationSettingsResetToDefaults => '設定を既定値にリセットしたよ';
 
   @override
