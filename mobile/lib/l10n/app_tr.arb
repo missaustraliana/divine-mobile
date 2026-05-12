@@ -474,7 +474,6 @@
     "videoPlayerUnmute": "Videonun sesini aç",
     "videoPlayerEditVideo": "Videoyu düzenle",
     "videoPlayerEditVideoTooltip": "Videoyu düzenle",
-    "videoPlayerTapHint": "Oynatmak veya duraklatmak için dokunun. Beğenmek için çift dokunun.",
     "contentWarningLabel": "İçerik Uyarısı",
     "contentWarningNudity": "Çıplaklık",
     "contentWarningSexualContent": "Cinsel İçerik",
@@ -563,35 +562,6 @@
         "placeholders": {
             "count": {
                 "type": "int"
-            }
-        }
-    },
-    "videoCollaboratorPendingDecoration": "Pending",
-    "@videoCollaboratorPendingDecoration": {
-        "description": "Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted."
-    },
-    "videoCollaboratorPendingSemanticLabel": "Pending collaborator",
-    "@videoCollaboratorPendingSemanticLabel": {
-        "description": "Screen reader label for a dimmed pending collaborator avatar on the creator's own video."
-    },
-    "videoCollaboratorWithPendingSuffix": "{label} ({pending} pending)",
-    "@videoCollaboratorWithPendingSuffix": {
-        "description": "Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.",
-        "placeholders": {
-            "label": {
-                "type": "String"
-            },
-            "pending": {
-                "type": "int"
-            }
-        }
-    },
-    "profileChipTapHint": "{name}. Tap to view profile.",
-    "@profileChipTapHint": {
-        "description": "Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.",
-        "placeholders": {
-            "name": {
-                "type": "String"
             }
         }
     },
@@ -3393,21 +3363,7 @@
     "bugReportExpectedBehaviorHint": "Bunun yerine ne olmalıydı?",
     "bugReportDiagnosticsNotice": "Cihaz bilgileri ve günlükler otomatik olarak eklenecek.",
     "bugReportSuccessMessage": "Teşekkürler! Raporunu aldık ve Divine'i daha iyi yapmak için kullanacağız.",
-    "bugReportAttachImages": "Attach images",
-  "bugReportImagesCount": "{count} of {max} images selected",
-  "@bugReportImagesCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      },
-      "max": {
-        "type": "int"
-      }
-    }
-  },
-  "bugReportRemoveImage": "Remove image",
-  "bugReportUploadFailed": "We couldn't upload the selected image. Try again or send the report without it.",
-  "bugReportSendFailed": "Hata raporu gönderilemedi. Lütfen daha sonra tekrar dene.",
+    "bugReportSendFailed": "Hata raporu gönderilemedi. Lütfen daha sonra tekrar dene.",
     "bugReportFailedWithError": "Hata raporu gönderilemedi: {error}",
     "@bugReportFailedWithError": {
         "placeholders": {
@@ -3603,5 +3559,81 @@
             }
         }
     },
-    "notificationsVideoThumbnail": "Video küçük resmi"
+    "notificationsVideoThumbnail": "Video küçük resmi",
+    "videoPlayerTapHint": "Oynatmak veya duraklatmak için dokunun. Beğenmek için çift dokunun.",
+    "videoCollaboratorPendingDecoration": "Pending",
+    "@videoCollaboratorPendingDecoration": {
+        "description": "Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted."
+    },
+    "videoCollaboratorPendingSemanticLabel": "Pending collaborator",
+    "@videoCollaboratorPendingSemanticLabel": {
+        "description": "Screen reader label for a dimmed pending collaborator avatar on the creator's own video."
+    },
+    "videoCollaboratorWithPendingSuffix": "{label} ({pending} pending)",
+    "@videoCollaboratorWithPendingSuffix": {
+        "description": "Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.",
+        "placeholders": {
+            "label": {
+                "type": "String"
+            },
+            "pending": {
+                "type": "int"
+            }
+        }
+    },
+    "profileChipTapHint": "{name}. Tap to view profile.",
+    "@profileChipTapHint": {
+        "description": "Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.",
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
+    "bugReportAttachImages": "Attach images",
+    "bugReportImagesCount": "{count} of {max} images selected",
+    "@bugReportImagesCount": {
+        "placeholders": {
+            "count": {
+                "type": "int"
+            },
+            "max": {
+                "type": "int"
+            }
+        }
+    },
+    "bugReportRemoveImage": "Remove image",
+    "bugReportUploadFailed": "We couldn't upload the selected image. Try again or send the report without it.",
+    "@profileSetupUploadFailedGeneric": {
+        "placeholders": {
+            "error": {
+                "type": "Object"
+            }
+        }
+    },
+    "videoMetadataEditCoverTitle": "Kapağı düzenle",
+    "videoMetadataEditCoverCloseSemanticLabel": "Kapak düzenleyicisini kapat",
+    "videoMetadataEditCoverConfirmSemanticLabel": "Kapak seçimini onayla",
+    "videoMetadataEditCoverStripSemanticLabel": "Kapak karesi seçmek için videoda gezin",
+    "userPickerRemoveSelectionSemantics": "{name} kaldır",
+    "@userPickerRemoveSelectionSemantics": {
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
+    "videoMetadataEditCoverFailedSnackbar": "Kapak güncellenemedi. Tekrar dene.",
+    "videoMetadataEditCoverSuccessAnnouncement": "Kapak güncellendi",
+    "videoMetadataTagsPickerSearchHint": "Etiket ara veya ekle",
+    "videoMetadataTagsPickerEmptyHint": "İnsanların videonu keşfetmesi için etiket ekle",
+    "videoMetadataTagsPickerNoResults": "Eşleşen etiket yok",
+    "videoMetadataTagsPickerAddTag": "\"#{tag}\" ekle",
+    "@videoMetadataTagsPickerAddTag": {
+        "placeholders": {
+            "tag": {
+                "type": "String"
+            }
+        }
+    }
 }

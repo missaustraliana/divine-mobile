@@ -208,9 +208,14 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
     final rawTitle = title ?? state.title;
     final rawDescription = description ?? state.description;
 
-    // Trim for storage (but after hashtag extraction)
+    // Trim for storage (but after hashtag extraction). Truncate by
+    // grapheme clusters via `characters` so we never split inside a
+    // surrogate pair or combining sequence (emoji, flags, etc.).
     final cleanedTitle = rawTitle.trim();
-    final cleanedDescription = rawDescription.trim();
+    final trimmedDescription = rawDescription.trim();
+    final cleanedDescription = trimmedDescription.characters
+        .take(VideoEditorConstants.descriptionLimit)
+        .toString();
     const tagLimit = VideoEditorConstants.tagLimit;
 
     // Only extract hashtags when text changes, not when tags are manually edited
@@ -321,54 +326,15 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
 
   // === COLLABORATORS & INSPIRED BY ===
 
-  /// Maximum number of collaborators allowed per video.
-  static const int maxCollaborators = 5;
-
-  /// Add a collaborator pubkey to the pending verification set.
-  ///
-  /// Enforces a maximum of [maxCollaborators] total (confirmed + pending).
-  void addPendingCollaborator(String pubkey) {
-    final total =
-        state.collaboratorPubkeys.length +
-        state.pendingCollaboratorPubkeys.length;
-    if (total >= maxCollaborators) return;
-    if (state.collaboratorPubkeys.contains(pubkey)) return;
-    if (state.pendingCollaboratorPubkeys.contains(pubkey)) return;
-    state = state.copyWith(
-      pendingCollaboratorPubkeys: {...state.pendingCollaboratorPubkeys, pubkey},
-    );
-  }
-
-  /// Confirm a pending collaborator after successful verification.
-  ///
-  /// Moves the pubkey from [pendingCollaboratorPubkeys] to
-  /// [collaboratorPubkeys].
-  void confirmCollaborator(String pubkey) {
-    if (!state.pendingCollaboratorPubkeys.contains(pubkey)) return;
-    state = state.copyWith(
-      pendingCollaboratorPubkeys: state.pendingCollaboratorPubkeys
-          .where((p) => p != pubkey)
-          .toSet(),
-      collaboratorPubkeys: {...state.collaboratorPubkeys, pubkey},
-    );
-    triggerAutosave();
-  }
-
-  /// Remove a pubkey from the pending verification set.
-  void removePendingCollaborator(String pubkey) {
-    state = state.copyWith(
-      pendingCollaboratorPubkeys: state.pendingCollaboratorPubkeys
-          .where((p) => p != pubkey)
-          .toSet(),
-    );
-  }
-
   /// Add a collaborator pubkey to the video.
   ///
   /// Enforces a maximum of [maxCollaborators] collaborators.
   /// Silently ignores duplicates.
   void addCollaborator(String pubkey) {
-    if (state.collaboratorPubkeys.length >= maxCollaborators) return;
+    if (state.collaboratorPubkeys.length >=
+        VideoEditorConstants.maxCollaborators) {
+      return;
+    }
     if (state.collaboratorPubkeys.contains(pubkey)) return;
     state = state.copyWith(
       collaboratorPubkeys: {...state.collaboratorPubkeys, pubkey},
@@ -522,6 +488,7 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
       proofManifestJson: state.proofManifestJson,
       originalAudioVolume: state.originalAudioVolume,
       customAudioVolume: state.customAudioVolume,
+      thumbnailTimestamp: state.finalRenderedClip?.thumbnailTimestamp,
       videoReplyContext: ref.read(videoReplyContextProvider),
       shareReplyToFeed: state.shareReplyToFeed,
     );
@@ -849,6 +816,34 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
   }
 
   // === RENDERING & PUBLISHING ===
+
+  /// Update thumbnail path for a clip.
+  void updateCover({
+    required String thumbnailPath,
+    required Duration thumbnailTimestamp,
+  }) {
+    final finalRenderedClip = state.finalRenderedClip;
+    if (finalRenderedClip == null) {
+      Log.warning(
+        '⚠️ Cannot update thumbnail - final clip not found',
+        name: 'VideoEditorNotifier',
+        category: .video,
+      );
+      return;
+    }
+    state = state.copyWith(
+      finalRenderedClip: finalRenderedClip.copyWith(
+        thumbnailPath: thumbnailPath,
+        thumbnailTimestamp: thumbnailTimestamp,
+      ),
+    );
+    Log.debug(
+      '🖼️  Updated cover thumbnail',
+      name: 'VideoEditorNotifier',
+      category: .video,
+    );
+    autosaveChanges();
+  }
 
   /// Set the processing state.
   ///

@@ -474,7 +474,6 @@
     "videoPlayerUnmute": "Slå på ljudet för videon",
     "videoPlayerEditVideo": "Redigera video",
     "videoPlayerEditVideoTooltip": "Redigera video",
-    "videoPlayerTapHint": "Tryck för att spela eller pausa. Dubbeltryck för att gilla.",
     "contentWarningLabel": "Innehållsvarning",
     "contentWarningNudity": "Nakenhet",
     "contentWarningSexualContent": "Sexuellt innehåll",
@@ -563,35 +562,6 @@
         "placeholders": {
             "count": {
                 "type": "int"
-            }
-        }
-    },
-    "videoCollaboratorPendingDecoration": "Pending",
-    "@videoCollaboratorPendingDecoration": {
-        "description": "Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted."
-    },
-    "videoCollaboratorPendingSemanticLabel": "Pending collaborator",
-    "@videoCollaboratorPendingSemanticLabel": {
-        "description": "Screen reader label for a dimmed pending collaborator avatar on the creator's own video."
-    },
-    "videoCollaboratorWithPendingSuffix": "{label} ({pending} pending)",
-    "@videoCollaboratorWithPendingSuffix": {
-        "description": "Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.",
-        "placeholders": {
-            "label": {
-                "type": "String"
-            },
-            "pending": {
-                "type": "int"
-            }
-        }
-    },
-    "profileChipTapHint": "{name}. Tap to view profile.",
-    "@profileChipTapHint": {
-        "description": "Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.",
-        "placeholders": {
-            "name": {
-                "type": "String"
             }
         }
     },
@@ -3393,21 +3363,7 @@
     "bugReportExpectedBehaviorHint": "Vad borde ha hänt istället?",
     "bugReportDiagnosticsNotice": "Enhetsinfo och loggar inkluderas automatiskt.",
     "bugReportSuccessMessage": "Tack! Vi har fått din rapport och använder den för att göra Divine bättre.",
-    "bugReportAttachImages": "Attach images",
-  "bugReportImagesCount": "{count} of {max} images selected",
-  "@bugReportImagesCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      },
-      "max": {
-        "type": "int"
-      }
-    }
-  },
-  "bugReportRemoveImage": "Remove image",
-  "bugReportUploadFailed": "We couldn't upload the selected image. Try again or send the report without it.",
-  "bugReportSendFailed": "Kunde inte skicka buggrapporten. Försök igen senare.",
+    "bugReportSendFailed": "Kunde inte skicka buggrapporten. Försök igen senare.",
     "bugReportFailedWithError": "Buggrapport kunde inte skickas: {error}",
     "@bugReportFailedWithError": {
         "placeholders": {
@@ -3603,5 +3559,81 @@
             }
         }
     },
-    "notificationsVideoThumbnail": "Videominiatyr"
+    "notificationsVideoThumbnail": "Videominiatyr",
+    "videoPlayerTapHint": "Tryck för att spela eller pausa. Dubbeltryck för att gilla.",
+    "videoCollaboratorPendingDecoration": "Pending",
+    "@videoCollaboratorPendingDecoration": {
+        "description": "Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted."
+    },
+    "videoCollaboratorPendingSemanticLabel": "Pending collaborator",
+    "@videoCollaboratorPendingSemanticLabel": {
+        "description": "Screen reader label for a dimmed pending collaborator avatar on the creator's own video."
+    },
+    "videoCollaboratorWithPendingSuffix": "{label} ({pending} pending)",
+    "@videoCollaboratorWithPendingSuffix": {
+        "description": "Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.",
+        "placeholders": {
+            "label": {
+                "type": "String"
+            },
+            "pending": {
+                "type": "int"
+            }
+        }
+    },
+    "profileChipTapHint": "{name}. Tap to view profile.",
+    "@profileChipTapHint": {
+        "description": "Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.",
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
+    "bugReportAttachImages": "Attach images",
+    "bugReportImagesCount": "{count} of {max} images selected",
+    "@bugReportImagesCount": {
+        "placeholders": {
+            "count": {
+                "type": "int"
+            },
+            "max": {
+                "type": "int"
+            }
+        }
+    },
+    "bugReportRemoveImage": "Remove image",
+    "bugReportUploadFailed": "We couldn't upload the selected image. Try again or send the report without it.",
+    "@profileSetupUploadFailedGeneric": {
+        "placeholders": {
+            "error": {
+                "type": "Object"
+            }
+        }
+    },
+    "videoMetadataEditCoverTitle": "Redigera omslag",
+    "videoMetadataEditCoverCloseSemanticLabel": "Stäng omslagsredigerare",
+    "videoMetadataEditCoverConfirmSemanticLabel": "Bekräfta omslagsval",
+    "videoMetadataEditCoverStripSemanticLabel": "Sök igenom videon för att välja omslagsbild",
+    "userPickerRemoveSelectionSemantics": "Ta bort {name}",
+    "@userPickerRemoveSelectionSemantics": {
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
+    "videoMetadataEditCoverFailedSnackbar": "Det gick inte att uppdatera omslaget. Försök igen.",
+    "videoMetadataEditCoverSuccessAnnouncement": "Omslag uppdaterat",
+    "videoMetadataTagsPickerSearchHint": "Sök eller lägg till taggar",
+    "videoMetadataTagsPickerEmptyHint": "Lägg till taggar så att andra hittar din video",
+    "videoMetadataTagsPickerNoResults": "Inga matchande taggar",
+    "videoMetadataTagsPickerAddTag": "Lägg till ”#{tag}”",
+    "@videoMetadataTagsPickerAddTag": {
+        "placeholders": {
+            "tag": {
+                "type": "String"
+            }
+        }
+    }
 }

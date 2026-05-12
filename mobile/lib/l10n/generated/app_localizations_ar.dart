@@ -4134,6 +4134,11 @@ class AppLocalizationsAr extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return 'إزالة $name';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => 'Ekibin orada';
 
   @override
@@ -5370,6 +5375,13 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get commonClose => 'إغلاق';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      'تعذر تحديث الغلاف. حاول مرة أخرى.';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement => 'تم تحديث الغلاف';
 
   @override
   String get videoMetadataTags => 'الوسوم';
@@ -7059,4 +7071,33 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get profileEditGetVerifiedSubtitle =>
       'اربط حساباتك على وسائل التواصل ليعرف الناس أنّك أنت فعلًا.';
+
+  @override
+  String get videoMetadataEditCoverTitle => 'تعديل الغلاف';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel => 'إغلاق محرر الغلاف';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel =>
+      'تأكيد اختيار الغلاف';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel =>
+      'التنقل عبر الفيديو لاختيار إطار الغلاف';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => 'ابحث أو أضف وسوماً';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint =>
+      'أضف وسوماً ليكتشف الآخرون فيديوك';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => 'لا توجد وسوم مطابقة';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return 'إضافة \"#$tag\"';
+  }
 }

@@ -16,7 +16,10 @@ class VineBottomSheetHeader extends StatelessWidget {
     this.leading,
     this.trailing,
     this.showDivider = true,
+    this.showDragHandle = true,
     this.padding,
+    this.leadingAction,
+    this.trailingAction,
     super.key,
   });
 
@@ -34,14 +37,29 @@ class VineBottomSheetHeader extends StatelessWidget {
   /// Defaults to true.
   final bool showDivider;
 
+  /// Whether to show the drag handle at the top of the header.
+  ///
+  /// Defaults to true.
+  final bool showDragHandle;
+
   /// Optional padding override for the inner content area.
   ///
   /// Defaults to `EdgeInsetsDirectional.only(start: 24, end: 24, top: 8)`.
   final EdgeInsetsGeometry? padding;
 
+  /// Optional icon button displayed on the left side of the header.
+  final DivineIconButton? leadingAction;
+
+  /// Optional icon button displayed on the right side of the header.
+  final DivineIconButton? trailingAction;
+
   @override
   Widget build(BuildContext context) {
     final hasTitle = title != null && title is! SizedBox;
+    final hasLeadingSlot = leadingAction != null || leading != null;
+    final hasTrailingSlot = trailingAction != null || trailing != null;
+    final hasHeaderRow = hasTitle || hasLeadingSlot || hasTrailingSlot;
+    const placeholder = SizedBox(width: 40, height: 40);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -49,55 +67,56 @@ class VineBottomSheetHeader extends StatelessWidget {
         Padding(
           padding:
               padding ??
-              const EdgeInsetsDirectional.only(start: 24, end: 24, top: 8),
+              (const EdgeInsetsDirectional.only(start: 16, end: 16, top: 8)),
           child: Column(
+            spacing: 20,
             children: [
               // Drag handle
-              Container(
-                width: 64,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: VineTheme.alphaLight25,
-                  borderRadius: BorderRadius.circular(8),
+              if (showDragHandle)
+                Container(
+                  width: 64,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: VineTheme.alphaLight25,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
-              ),
 
-              const SizedBox(height: 20),
+              Padding(
+                padding: .only(bottom: hasHeaderRow ? 14 : 0),
+                child: Row(
+                  mainAxisAlignment: .spaceBetween,
+                  spacing: 12,
+                  children: [
+                    if (leadingAction != null)
+                      leadingAction!
+                    else if (leading != null)
+                      leading!
+                    else if (hasTrailingSlot)
+                      placeholder,
 
-              if (hasTitle)
-                // Title (centered) + optional leading/trailing actions
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 40),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        // Centered title
-                        Center(
+                    if (hasTitle)
+                      Flexible(
+                        child: Center(
                           child: DefaultTextStyle(
                             style: VineTheme.titleMediumFont(),
+                            textAlign: .center,
                             child: title!,
                           ),
                         ),
+                      )
+                    else
+                      const Spacer(),
 
-                        // Leading widget aligned to the center-left
-                        if (leading != null)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: leading,
-                          ),
-
-                        // Trailing widget aligned to the center-right
-                        if (trailing != null)
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: trailing,
-                          ),
-                      ],
-                    ),
-                  ),
+                    if (trailingAction != null)
+                      trailingAction!
+                    else if (trailing != null)
+                      trailing!
+                    else if (hasLeadingSlot)
+                      placeholder,
+                  ],
                 ),
+              ),
             ],
           ),
         ),

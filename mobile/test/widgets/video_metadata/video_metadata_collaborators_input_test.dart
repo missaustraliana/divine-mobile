@@ -4,14 +4,21 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:follow_repository/follow_repository.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:models/models.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/models/video_editor/video_editor_provider_state.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/shared_preferences_provider.dart';
+import 'package:openvine/providers/user_profile_providers.dart';
 import 'package:openvine/providers/video_editor_provider.dart';
 import 'package:openvine/widgets/video_metadata/video_metadata_collaborators_input.dart';
+import 'package:openvine/widgets/video_metadata/video_metadata_selection_tile.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../builders/user_profile_builder.dart';
+
+final AppLocalizations _l10n = lookupAppLocalizations(const Locale('en'));
 
 /// Mock for FollowRepository
 class _MockFollowRepository extends Mock implements FollowRepository {}
@@ -59,6 +66,28 @@ _MockFollowRepository _createMockFollowRepository({
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  group('computeEffectiveCollaboratorResultPubkeys', () {
+    test('preserves unresolved confirmed collaborators', () {
+      final effective = computeEffectiveCollaboratorResultPubkeys(
+        confirmedPubkeys: {'a', 'b'},
+        preselectedPubkeys: {'a'},
+        pickerResultPubkeys: {'a'},
+      );
+
+      expect(effective, equals({'a', 'b'}));
+    });
+
+    test('keeps explicit deselection for loaded collaborators', () {
+      final effective = computeEffectiveCollaboratorResultPubkeys(
+        confirmedPubkeys: {'a', 'b'},
+        preselectedPubkeys: {'a', 'b'},
+        pickerResultPubkeys: {'a'},
+      );
+
+      expect(effective, equals({'a'}));
+    });
+  });
+
   group(VideoMetadataCollaboratorsInput, () {
     late SharedPreferences prefs;
 
@@ -84,10 +113,10 @@ void main() {
         ),
       );
 
-      expect(find.text('Collaborators'), findsOneWidget);
+      expect(find.text(_l10n.videoMetadataCollaboratorsLabel), findsOneWidget);
     });
 
-    testWidgets('displays 0 collaborators count initially', (tester) async {
+    testWidgets('renders $VideoMetadataSelectionTile', (tester) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
@@ -104,13 +133,10 @@ void main() {
         ),
       );
 
-      expect(
-        find.text('0/${VideoEditorNotifier.maxCollaborators} Collaborators'),
-        findsOneWidget,
-      );
+      expect(find.byType(VideoMetadataSelectionTile), findsOneWidget);
     });
 
-    testWidgets('displays collaborator count when collaborators exist', (
+    testWidgets('renders correctly when collaborators exist in state', (
       tester,
     ) async {
       // Use valid 64-character hex pubkeys (Nostr spec)
@@ -124,6 +150,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            sharedPreferencesProvider.overrideWithValue(prefs),
             followRepositoryProvider.overrideWithValue(
               _createMockFollowRepository(),
             ),
@@ -139,10 +166,7 @@ void main() {
         ),
       );
 
-      expect(
-        find.text('2/${VideoEditorNotifier.maxCollaborators} Collaborators'),
-        findsOneWidget,
-      );
+      expect(find.byType(VideoMetadataSelectionTile), findsOneWidget);
     });
 
     testWidgets('renders caret icon', (tester) async {
@@ -193,7 +217,8 @@ void main() {
       for (final element in semanticsWidgets.evaluate()) {
         final widget = element.widget as Semantics;
         if (widget.properties.button == true &&
-            widget.properties.label == 'Invite collaborator') {
+            widget.properties.label ==
+                _l10n.videoMetadataAddCollaboratorSemanticLabel) {
           foundInviteCollaboratorSemantics = true;
           break;
         }
@@ -201,105 +226,41 @@ void main() {
       expect(foundInviteCollaboratorSemantics, isTrue);
     });
 
-    testWidgets('renders help button', (tester) async {
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            sharedPreferencesProvider.overrideWithValue(prefs),
-            followRepositoryProvider.overrideWithValue(
-              _createMockFollowRepository(),
+    testWidgets(
+      'renders $VideoMetadataSelectionTile when max collaborators reached',
+      (tester) async {
+        final state = VideoEditorProviderState(
+          collaboratorPubkeys: {
+            'abcd000000000000000000000000000000000000000000000000000000000000',
+            'abcd000000000000000000000000000000000000000000000000000000000001',
+            'abcd000000000000000000000000000000000000000000000000000000000002',
+            'abcd000000000000000000000000000000000000000000000000000000000003',
+            'abcd000000000000000000000000000000000000000000000000000000000004',
+          },
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              sharedPreferencesProvider.overrideWithValue(prefs),
+              followRepositoryProvider.overrideWithValue(
+                _createMockFollowRepository(),
+              ),
+              videoEditorProvider.overrideWith(
+                () => _MockVideoEditorNotifier(state),
+              ),
+            ],
+            child: const MaterialApp(
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              home: Scaffold(body: VideoMetadataCollaboratorsInput()),
             ),
-          ],
-          child: const MaterialApp(
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            supportedLocales: AppLocalizations.supportedLocales,
-            home: Scaffold(body: VideoMetadataCollaboratorsInput()),
           ),
-        ),
-      );
+        );
 
-      // Should find the info icon button (VideoMetadataHelpButton)
-      // It uses an SVG icon with a tooltip
-      final tooltip = find.byWidgetPredicate(
-        (widget) =>
-            widget is Tooltip && widget.message == 'How collaborators work',
-      );
-      expect(tooltip, findsOneWidget);
-    });
-
-    testWidgets('caret icon color changes when max collaborators reached', (
-      tester,
-    ) async {
-      // Create state with max collaborators using valid 64-char hex pubkeys
-      final maxCollaborators = List.generate(
-        VideoEditorNotifier.maxCollaborators,
-        (i) => 'abcd${i.toString().padLeft(60, '0')}',
-      ).toSet();
-      final state = VideoEditorProviderState(
-        collaboratorPubkeys: maxCollaborators,
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            followRepositoryProvider.overrideWithValue(
-              _createMockFollowRepository(),
-            ),
-            videoEditorProvider.overrideWith(
-              () => _MockVideoEditorNotifier(state),
-            ),
-          ],
-          child: const MaterialApp(
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            supportedLocales: AppLocalizations.supportedLocales,
-            home: Scaffold(body: VideoMetadataCollaboratorsInput()),
-          ),
-        ),
-      );
-
-      // Should show max count
-      expect(
-        find.text(
-          '${VideoEditorNotifier.maxCollaborators}/'
-          '${VideoEditorNotifier.maxCollaborators} Collaborators',
-        ),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets('collaborator chips are rendered when collaborators exist', (
-      tester,
-    ) async {
-      // Use valid 64-character hex pubkeys (Nostr spec)
-      final state = VideoEditorProviderState(
-        collaboratorPubkeys: {
-          '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-          'fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321',
-        },
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            followRepositoryProvider.overrideWithValue(
-              _createMockFollowRepository(),
-            ),
-            videoEditorProvider.overrideWith(
-              () => _MockVideoEditorNotifier(state),
-            ),
-          ],
-          child: const MaterialApp(
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            supportedLocales: AppLocalizations.supportedLocales,
-            home: Scaffold(body: VideoMetadataCollaboratorsInput()),
-          ),
-        ),
-      );
-
-      // Should render chips - we can't directly find _CollaboratorChip
-      // since it's private, but we can look for the Wrap widget
-      expect(find.byType(Wrap), findsOneWidget);
-    });
+        expect(find.byType(VideoMetadataSelectionTile), findsOneWidget);
+      },
+    );
 
     testWidgets('no chips rendered when no collaborators', (tester) async {
       await tester.pumpWidget(
@@ -321,5 +282,87 @@ void main() {
       // Wrap should not be present when no collaborators
       expect(find.byType(Wrap), findsNothing);
     });
+
+    testWidgets('tile value is empty when no collaborators', (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(prefs),
+            followRepositoryProvider.overrideWithValue(
+              _createMockFollowRepository(),
+            ),
+            userProfileReactiveProvider.overrideWith(
+              (ref, pubkey) => Stream<UserProfile?>.value(null),
+            ),
+          ],
+          child: const MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(body: VideoMetadataCollaboratorsInput()),
+          ),
+        ),
+      );
+
+      final tile = tester.widget<VideoMetadataSelectionTile>(
+        find.byType(VideoMetadataSelectionTile),
+      );
+      expect(tile.value, isEmpty);
+    });
+
+    testWidgets(
+      'tile value joins display names of collaborators with profiles',
+      (tester) async {
+        const aliceKey =
+            '1111111111111111111111111111111111111111111111111111111111111111';
+        const bobKey =
+            '2222222222222222222222222222222222222222222222222222222222222222';
+
+        final state = VideoEditorProviderState(
+          collaboratorPubkeys: {aliceKey, bobKey},
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              sharedPreferencesProvider.overrideWithValue(prefs),
+              followRepositoryProvider.overrideWithValue(
+                _createMockFollowRepository(),
+              ),
+              videoEditorProvider.overrideWith(
+                () => _MockVideoEditorNotifier(state),
+              ),
+              userProfileReactiveProvider.overrideWith((ref, pubkey) {
+                final displayName = switch (pubkey) {
+                  aliceKey => 'Alice',
+                  bobKey => 'Bob',
+                  _ => null,
+                };
+                if (displayName == null) {
+                  return Stream<UserProfile?>.value(null);
+                }
+                return Stream<UserProfile?>.value(
+                  UserProfileBuilder(
+                    pubkey: pubkey,
+                    displayName: displayName,
+                  ).build(),
+                );
+              }),
+            ],
+            child: const MaterialApp(
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              home: Scaffold(body: VideoMetadataCollaboratorsInput()),
+            ),
+          ),
+        );
+
+        await tester.pump();
+
+        final tile = tester.widget<VideoMetadataSelectionTile>(
+          find.byType(VideoMetadataSelectionTile),
+        );
+        expect(tile.value, anyOf(equals('Alice, Bob'), equals('Bob, Alice')));
+      },
+    );
   });
 }

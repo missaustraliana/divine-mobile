@@ -4221,6 +4221,11 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return 'Eliminar a $name';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => 'Tu gente está ahí fuera';
 
   @override
@@ -5467,6 +5472,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get commonClose => 'Cerrar';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      'No se pudo actualizar la portada. Inténtalo de nuevo.';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement => 'Portada actualizada';
 
   @override
   String get videoMetadataTags => 'Etiquetas';
@@ -7215,4 +7227,34 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get profileEditGetVerifiedSubtitle =>
       'Conecta tus redes sociales para que sepan que eres tú.';
+
+  @override
+  String get videoMetadataEditCoverTitle => 'Editar portada';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel =>
+      'Cerrar editor de portada';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel =>
+      'Confirmar selección de portada';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel =>
+      'Desliza el video para seleccionar el fotograma de portada';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => 'Buscar o añadir etiquetas';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint =>
+      'Añade etiquetas para que otros descubran tu vídeo';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => 'Sin etiquetas coincidentes';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return 'Añadir «#$tag»';
+  }
 }

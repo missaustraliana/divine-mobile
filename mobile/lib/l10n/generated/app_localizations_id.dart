@@ -4147,6 +4147,11 @@ class AppLocalizationsId extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return 'Hapus $name';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => 'Kru kamu ada di luar sana';
 
   @override
@@ -5394,6 +5399,13 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get commonClose => 'Tutup';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      'Tidak dapat memperbarui sampul. Coba lagi.';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement => 'Sampul diperbarui';
 
   @override
   String get videoMetadataTags => 'Tag';
@@ -7107,4 +7119,33 @@ class AppLocalizationsId extends AppLocalizations {
   @override
   String get profileEditGetVerifiedSubtitle =>
       'Hubungkan akun media sosialmu biar orang tahu ini memang kamu.';
+
+  @override
+  String get videoMetadataEditCoverTitle => 'Edit sampul';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel => 'Tutup editor sampul';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel =>
+      'Konfirmasi pilihan sampul';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel =>
+      'Gulir video untuk memilih bingkai sampul';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => 'Cari atau tambahkan tag';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint =>
+      'Tambahkan tag agar orang menemukan videomu';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => 'Tidak ada tag yang cocok';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return 'Tambahkan \"#$tag\"';
+  }
 }

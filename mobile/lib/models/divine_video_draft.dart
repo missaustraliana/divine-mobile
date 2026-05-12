@@ -45,6 +45,7 @@ class DivineVideoDraft {
     this.shareReplyToFeed = false,
     this.originalAudioVolume = 1.0,
     this.customAudioVolume = 1.0,
+    this.thumbnailTimestamp,
   });
 
   factory DivineVideoDraft.create({
@@ -69,6 +70,7 @@ class DivineVideoDraft {
     bool shareReplyToFeed = false,
     double originalAudioVolume = 1.0,
     double customAudioVolume = 1.0,
+    Duration? thumbnailTimestamp,
   }) {
     final now = DateTime.now();
     return DivineVideoDraft(
@@ -97,6 +99,7 @@ class DivineVideoDraft {
       shareReplyToFeed: shareReplyToFeed,
       originalAudioVolume: originalAudioVolume,
       customAudioVolume: customAudioVolume,
+      thumbnailTimestamp: thumbnailTimestamp,
     );
   }
 
@@ -200,6 +203,9 @@ class DivineVideoDraft {
       originalAudioVolume:
           (json['originalAudioVolume'] as num?)?.toDouble() ?? 1.0,
       customAudioVolume: (json['customAudioVolume'] as num?)?.toDouble() ?? 1.0,
+      thumbnailTimestamp: json['thumbnailTimestamp'] != null
+          ? Duration(milliseconds: json['thumbnailTimestamp'] as int)
+          : null,
     );
   }
 
@@ -270,6 +276,9 @@ class DivineVideoDraft {
   /// Volume level for the custom/added audio track (0.0 to 1.0).
   final double customAudioVolume;
 
+  /// Position in the video used to generate the thumbnail.
+  final Duration? thumbnailTimestamp;
+
   /// Check if this draft has ProofMode data
   bool get hasProofMode => proofManifestJson != null;
 
@@ -322,6 +331,8 @@ class DivineVideoDraft {
     bool? shareReplyToFeed,
     double? originalAudioVolume,
     double? customAudioVolume,
+    Duration? thumbnailTimestamp,
+    bool clearThumbnailTimestamp = false,
     bool skipUpdateLastModified = false,
   }) => DivineVideoDraft(
     id: id ?? this.id,
@@ -363,6 +374,9 @@ class DivineVideoDraft {
     shareReplyToFeed: shareReplyToFeed ?? this.shareReplyToFeed,
     originalAudioVolume: originalAudioVolume ?? this.originalAudioVolume,
     customAudioVolume: customAudioVolume ?? this.customAudioVolume,
+    thumbnailTimestamp: clearThumbnailTimestamp
+        ? null
+        : (thumbnailTimestamp ?? this.thumbnailTimestamp),
   );
 
   static const _sentinel = Object();
@@ -398,6 +412,8 @@ class DivineVideoDraft {
     if (shareReplyToFeed) 'shareReplyToFeed': shareReplyToFeed,
     if (originalAudioVolume != 1.0) 'originalAudioVolume': originalAudioVolume,
     if (customAudioVolume != 1.0) 'customAudioVolume': customAudioVolume,
+    if (thumbnailTimestamp != null)
+      'thumbnailTimestamp': thumbnailTimestamp!.inMilliseconds,
   };
 
   Set<ContentLabel> get contentWarnings => ContentLabel.fromCsv(contentWarning);

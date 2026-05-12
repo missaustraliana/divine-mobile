@@ -3993,6 +3993,11 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return '$name 제거';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => '네 크루는 밖에 있어';
 
   @override
@@ -5212,6 +5217,13 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get commonClose => '닫기';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      '커버를 업데이트하지 못했습니다. 다시 시도하세요.';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement => '커버 업데이트됨';
 
   @override
   String get videoMetadataTags => '태그';
@@ -6859,4 +6871,31 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get profileEditGetVerifiedSubtitle => '소셜 미디어 계정을 연결해서 진짜 너인 걸 알려줘.';
+
+  @override
+  String get videoMetadataEditCoverTitle => '커버 편집';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel => '커버 편집기 닫기';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel => '커버 선택 확인';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel => '커버 프레임 선택을 위해 동영상 탐색';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => '태그 검색 또는 추가';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint =>
+      '사람들이 동영상을 발견할 수 있도록 태그를 추가하세요';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => '일치하는 태그 없음';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return '\"#$tag\" 추가';
+  }
 }

@@ -7334,6 +7334,12 @@ abstract class AppLocalizations {
   /// **'Select {name}'**
   String userPickerSelectSemantics(String name);
 
+  /// Semantic label for the remove button on a selected user chip in the user picker. {name} is the user's display name.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove {name}'**
+  String userPickerRemoveSelectionSemantics(String name);
+
   /// No description provided for @userPickerEmptyFollowListTitle.
   ///
   /// In en, this message translates to:
@@ -9607,6 +9613,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Close'**
   String get commonClose;
+
+  /// Snackbar message shown when saving the chosen cover thumbnail fails on the cover-edit screen. The user can dismiss and try again.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t update the cover. Try again.'**
+  String get videoMetadataEditCoverFailedSnackbar;
+
+  /// Screen-reader announcement spoken after the user confirms a new cover thumbnail and the screen is about to close. Visual users get the screen pop as feedback; this is the audio equivalent.
+  ///
+  /// In en, this message translates to:
+  /// **'Cover updated'**
+  String get videoMetadataEditCoverSuccessAnnouncement;
 
   /// No description provided for @videoMetadataTags.
   ///
@@ -12105,7 +12123,7 @@ abstract class AppLocalizations {
   /// No description provided for @videoMetadataContentWarningLabel.
   ///
   /// In en, this message translates to:
-  /// **'Content Warning'**
+  /// **'Add content warning'**
   String get videoMetadataContentWarningLabel;
 
   /// No description provided for @videoMetadataSelectContentWarningsSemanticLabel.
@@ -12117,7 +12135,7 @@ abstract class AppLocalizations {
   /// No description provided for @videoMetadataContentWarningSelectAllThatApply.
   ///
   /// In en, this message translates to:
-  /// **'Select all that apply to your content'**
+  /// **'Select all that apply'**
   String get videoMetadataContentWarningSelectAllThatApply;
 
   /// No description provided for @videoMetadataContentWarningDoneButton.
@@ -12141,7 +12159,7 @@ abstract class AppLocalizations {
   /// No description provided for @videoMetadataCollaboratorsLabel.
   ///
   /// In en, this message translates to:
-  /// **'Collaborators'**
+  /// **'Add collaborators'**
   String get videoMetadataCollaboratorsLabel;
 
   /// No description provided for @videoMetadataAddCollaboratorSemanticLabel.
@@ -12189,7 +12207,7 @@ abstract class AppLocalizations {
   /// No description provided for @videoMetadataInspiredByLabel.
   ///
   /// In en, this message translates to:
-  /// **'Inspired by'**
+  /// **'Add inspired by'**
   String get videoMetadataInspiredByLabel;
 
   /// No description provided for @videoMetadataSetInspiredBySemanticLabel.
@@ -12575,6 +12593,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Link your social media accounts so people know it\'s really you.'**
   String get profileEditGetVerifiedSubtitle;
+
+  /// No description provided for @videoMetadataEditCoverTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit cover'**
+  String get videoMetadataEditCoverTitle;
+
+  /// No description provided for @videoMetadataEditCoverCloseSemanticLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Close cover editor'**
+  String get videoMetadataEditCoverCloseSemanticLabel;
+
+  /// No description provided for @videoMetadataEditCoverConfirmSemanticLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm cover selection'**
+  String get videoMetadataEditCoverConfirmSemanticLabel;
+
+  /// No description provided for @videoMetadataEditCoverStripSemanticLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Seek through video to select cover frame'**
+  String get videoMetadataEditCoverStripSemanticLabel;
+
+  /// No description provided for @videoMetadataTagsPickerSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search or add tags'**
+  String get videoMetadataTagsPickerSearchHint;
+
+  /// No description provided for @videoMetadataTagsPickerEmptyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Add tags to help people discover your video'**
+  String get videoMetadataTagsPickerEmptyHint;
+
+  /// No description provided for @videoMetadataTagsPickerNoResults.
+  ///
+  /// In en, this message translates to:
+  /// **'No matching tags'**
+  String get videoMetadataTagsPickerNoResults;
+
+  /// No description provided for @videoMetadataTagsPickerAddTag.
+  ///
+  /// In en, this message translates to:
+  /// **'Add \"#{tag}\"'**
+  String videoMetadataTagsPickerAddTag(String tag);
 }
 
 class _AppLocalizationsDelegate

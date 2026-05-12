@@ -17,6 +17,7 @@ import 'package:nostr_sdk/event.dart';
 import 'package:nostr_sdk/event_kind.dart';
 import 'package:nostr_sdk/relay/relay_pool.dart';
 import 'package:openvine/constants/nip71_migration.dart';
+import 'package:openvine/constants/video_editor_constants.dart';
 import 'package:openvine/models/pending_upload.dart';
 import 'package:openvine/models/video_reply_context.dart';
 import 'package:openvine/services/audio_extraction_service.dart';
@@ -451,6 +452,7 @@ class VideoEventPublisher {
     List<String>? hashtags,
     int? expirationTimestamp,
     bool allowAudioReuse = false,
+    Duration? thumbnailTimestamp,
     List<String> collaboratorPubkeys = const [],
     String? inspiredByAddressableId,
     String? inspiredByRelayUrl,
@@ -481,6 +483,7 @@ class VideoEventPublisher {
       selectedAudioRelay: selectedAudioRelay,
       language: language,
       contentWarning: contentWarning,
+      thumbnailTimestamp: thumbnailTimestamp,
       replyContext: replyContext,
       addReplyToFeed: addReplyToFeed,
     );
@@ -492,6 +495,7 @@ class VideoEventPublisher {
     int? expirationTimestamp,
     bool allowAudioReuse = false,
     List<String> collaboratorPubkeys = const [],
+    Duration? thumbnailTimestamp,
     String? inspiredByAddressableId,
     String? inspiredByRelayUrl,
     String? inspiredByNpub,
@@ -716,6 +720,9 @@ class VideoEventPublisher {
           final thumbnailBytes =
               await VideoThumbnailService.extractThumbnailBytes(
                 videoPath: upload.localVideoPath,
+                timestamp:
+                    thumbnailTimestamp ??
+                    VideoEditorConstants.defaultThumbnailExtractTime,
               ).timeout(
                 const Duration(seconds: 10),
                 onTimeout: () {

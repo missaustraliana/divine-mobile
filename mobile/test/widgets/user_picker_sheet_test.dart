@@ -3,9 +3,9 @@
 
 import 'dart:async';
 
+import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:follow_repository/follow_repository.dart';
 import 'package:mocktail/mocktail.dart';
@@ -75,6 +75,7 @@ _MockFollowRepository _createMockFollowRepository({
   );
   when(() => mock.isInitialized).thenReturn(true);
   when(() => mock.followingCount).thenReturn(followingPubkeys.length);
+  when(mock.getMyFollowers).thenAnswer((_) async => followingPubkeys);
   return mock;
 }
 
@@ -99,6 +100,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.allUsers,
                 ),
               ),
@@ -125,6 +127,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.allUsers,
                 ),
               ),
@@ -132,7 +135,12 @@ void main() {
           ),
         );
 
-        expect(find.byIcon(Icons.search), findsOneWidget);
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is DivineIcon && w.icon == DivineIconName.search,
+          ),
+          findsOneWidget,
+        );
       });
 
       testWidgets('"Type a name to search" hint for allUsers mode', (
@@ -153,6 +161,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.allUsers,
                 ),
               ),
@@ -161,6 +170,36 @@ void main() {
         );
 
         expect(find.text('Type a name to search'), findsOneWidget);
+      });
+
+      testWidgets('shows custom searchText in the header when provided', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              profileRepositoryProvider.overrideWithValue(
+                _createMockProfileRepository(),
+              ),
+              followRepositoryProvider.overrideWithValue(
+                _createMockFollowRepository(),
+              ),
+            ],
+            child: const MaterialApp(
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              home: Scaffold(
+                body: UserPickerSheet(
+                  title: 'Title',
+                  searchText: 'Mutual followers',
+                  filterMode: UserPickerFilterMode.allUsers,
+                ),
+              ),
+            ),
+          ),
+        );
+
+        expect(find.text('Mutual followers'), findsOneWidget);
       });
     });
 
@@ -183,6 +222,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.mutualFollowsOnly,
                 ),
               ),
@@ -212,6 +252,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.mutualFollowsOnly,
                 ),
               ),
@@ -243,6 +284,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.mutualFollowsOnly,
                 ),
               ),
@@ -254,6 +296,56 @@ void main() {
 
         expect(find.text('Go back'), findsOneWidget);
       });
+
+      testWidgets(
+        'falls back to local follows when getMyFollowers fails',
+        (tester) async {
+          final profile = UserProfile(
+            pubkey: 'pubkey1',
+            name: 'User One',
+            rawData: const {'name': 'User One'},
+            createdAt: DateTime.now(),
+            eventId: 'event1',
+          );
+
+          final mockFollowRepo = _createMockFollowRepository(
+            followingPubkeys: ['pubkey1'],
+          );
+          when(
+            mockFollowRepo.getMyFollowers,
+          ).thenAnswer((_) async => throw Exception('relay down'));
+
+          final mockProfileRepo = _createMockProfileRepository();
+          when(
+            () => mockProfileRepo.getCachedProfile(pubkey: 'pubkey1'),
+          ).thenAnswer((_) async => profile);
+
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                profileRepositoryProvider.overrideWithValue(mockProfileRepo),
+                followRepositoryProvider.overrideWithValue(mockFollowRepo),
+              ],
+              child: const MaterialApp(
+                localizationsDelegates: AppLocalizations.localizationsDelegates,
+                supportedLocales: AppLocalizations.supportedLocales,
+                home: Scaffold(
+                  body: UserPickerSheet(
+                    title: 'Title',
+                    filterMode: UserPickerFilterMode.mutualFollowsOnly,
+                  ),
+                ),
+              ),
+            ),
+          );
+
+          await tester.pumpAndSettle();
+
+          expect(find.byType(CircularProgressIndicator), findsNothing);
+          expect(find.text('User One'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+      );
 
       testWidgets('displays follow list after loading', (tester) async {
         final followPubkeys = ['pubkey1', 'pubkey2'];
@@ -300,6 +392,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.mutualFollowsOnly,
                 ),
               ),
@@ -347,6 +440,7 @@ void main() {
                 supportedLocales: AppLocalizations.supportedLocales,
                 home: Scaffold(
                   body: UserPickerSheet(
+                    title: 'Title',
                     filterMode: UserPickerFilterMode.mutualFollowsOnly,
                   ),
                 ),
@@ -380,6 +474,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.allUsers,
                 ),
               ),
@@ -409,6 +504,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.allUsers,
                 ),
               ),
@@ -463,6 +559,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.allUsers,
                 ),
               ),
@@ -570,6 +667,7 @@ void main() {
                 supportedLocales: AppLocalizations.supportedLocales,
                 home: Scaffold(
                   body: UserPickerSheet(
+                    title: 'Title',
                     filterMode: UserPickerFilterMode.allUsers,
                   ),
                 ),
@@ -613,6 +711,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.allUsers,
                 ),
               ),
@@ -697,6 +796,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.allUsers,
                 ),
               ),
@@ -752,6 +852,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.allUsers,
                   autoFocus: true,
                 ),
@@ -780,6 +881,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.allUsers,
                 ),
               ),
@@ -789,71 +891,6 @@ void main() {
 
         final textField = tester.widget<TextField>(find.byType(TextField));
         expect(textField.autofocus, isFalse);
-      });
-    });
-
-    group('excludePubkeys', () {
-      testWidgets('shows excluded users as disabled with check icon', (
-        tester,
-      ) async {
-        final followPubkeys = ['pubkey1', 'pubkey2'];
-        final profiles = [
-          UserProfile(
-            pubkey: 'pubkey1',
-            name: 'Already Selected',
-            rawData: const {'name': 'Already Selected'},
-            createdAt: DateTime.now(),
-            eventId: 'event1',
-          ),
-          UserProfile(
-            pubkey: 'pubkey2',
-            name: 'Available User',
-            rawData: const {'name': 'Available User'},
-            createdAt: DateTime.now(),
-            eventId: 'event2',
-          ),
-        ];
-
-        final mockFollowRepo = _createMockFollowRepository(
-          followingPubkeys: followPubkeys,
-        );
-
-        final mockProfileRepo = _createMockProfileRepository();
-        when(
-          () => mockProfileRepo.getCachedProfile(pubkey: 'pubkey1'),
-        ).thenAnswer((_) async => profiles[0]);
-        when(
-          () => mockProfileRepo.getCachedProfile(pubkey: 'pubkey2'),
-        ).thenAnswer((_) async => profiles[1]);
-
-        await tester.pumpWidget(
-          ProviderScope(
-            overrides: [
-              profileRepositoryProvider.overrideWithValue(mockProfileRepo),
-              followRepositoryProvider.overrideWithValue(mockFollowRepo),
-            ],
-            child: const MaterialApp(
-              localizationsDelegates: AppLocalizations.localizationsDelegates,
-              supportedLocales: AppLocalizations.supportedLocales,
-              home: Scaffold(
-                body: UserPickerSheet(
-                  filterMode: UserPickerFilterMode.mutualFollowsOnly,
-                  excludePubkeys: {'pubkey1'},
-                ),
-              ),
-            ),
-          ),
-        );
-
-        await tester.pumpAndSettle();
-
-        // Both users should be visible
-        expect(find.text('Already Selected'), findsOneWidget);
-        expect(find.text('Available User'), findsOneWidget);
-
-        // SVG icons shown for each user (Check.svg for excluded, plus.svg for
-        // available)
-        expect(find.byType(SvgPicture), findsNWidgets(2));
       });
     });
 
@@ -874,6 +911,7 @@ void main() {
                 supportedLocales: AppLocalizations.supportedLocales,
                 home: Scaffold(
                   body: UserPickerSheet(
+                    title: 'Title',
                     filterMode: UserPickerFilterMode.allUsers,
                   ),
                 ),
@@ -907,6 +945,7 @@ void main() {
               supportedLocales: AppLocalizations.supportedLocales,
               home: Scaffold(
                 body: UserPickerSheet(
+                  title: 'Title',
                   filterMode: UserPickerFilterMode.mutualFollowsOnly,
                 ),
               ),

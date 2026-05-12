@@ -3,13 +3,16 @@
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:openvine/constants/video_editor_constants.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
+import 'package:openvine/providers/shared_preferences_provider.dart';
 import 'package:openvine/widgets/video_metadata/modes/capture/video_metadata_capture_app_bar.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../helpers/go_router.dart';
 
@@ -18,8 +21,11 @@ void main() {
 
   group(VideoMetadataCaptureAppBar, () {
     late GoRouter router;
+    late SharedPreferences prefs;
 
-    setUp(() {
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      prefs = await SharedPreferences.getInstance();
       router = GoRouter(
         initialLocation: '/test',
         routes: [
@@ -39,10 +45,13 @@ void main() {
     });
 
     Widget buildTestWidget() {
-      return MaterialApp.router(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        routerConfig: router,
+      return ProviderScope(
+        overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+        child: MaterialApp.router(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          routerConfig: router,
+        ),
       );
     }
 
@@ -61,13 +70,13 @@ void main() {
     testWidgets('renders back button with $DivineIconButton', (tester) async {
       await tester.pumpWidget(buildTestWidget());
 
-      expect(find.byType(DivineIconButton), findsOneWidget);
+      expect(find.byType(DivineIconButton), findsNWidgets(2));
     });
 
     testWidgets('renders back button icon', (tester) async {
       await tester.pumpWidget(buildTestWidget());
 
-      expect(find.byType(SvgPicture), findsOneWidget);
+      expect(find.byType(SvgPicture), findsWidgets);
     });
 
     testWidgets('wraps back button in Hero with correct tag', (tester) async {
@@ -95,14 +104,17 @@ void main() {
       when(() => mockGoRouter.pop<Object?>(any())).thenAnswer((_) async {});
 
       await tester.pumpWidget(
-        MockGoRouterProvider(
-          goRouter: mockGoRouter,
-          child: const MaterialApp(
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            supportedLocales: AppLocalizations.supportedLocales,
-            home: Scaffold(
-              appBar: VideoMetadataCaptureAppBar(),
-              body: Text('Test'),
+        ProviderScope(
+          overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+          child: MockGoRouterProvider(
+            goRouter: mockGoRouter,
+            child: const MaterialApp(
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              home: Scaffold(
+                appBar: VideoMetadataCaptureAppBar(),
+                body: Text('Test'),
+              ),
             ),
           ),
         ),
@@ -112,7 +124,7 @@ void main() {
       // Verify we're showing the app bar
       expect(find.byType(VideoMetadataCaptureAppBar), findsOneWidget);
 
-      await tester.tap(find.byType(DivineIconButton));
+      await tester.tap(find.bySemanticsLabel('Back'));
       await tester.pumpAndSettle();
 
       verify(() => mockGoRouter.pop<Object?>(any())).called(1);

@@ -272,7 +272,6 @@
     "videoPlayerUnmute": "영상 음소거 해제",
     "videoPlayerEditVideo": "영상 편집",
     "videoPlayerEditVideoTooltip": "영상 편집",
-    "videoPlayerTapHint": "탭하여 재생하거나 일시정지하세요. 이중 탭으로 좋아요.",
     "contentWarningLabel": "콘텐츠 경고",
     "contentWarningNudity": "노출",
     "contentWarningSexualContent": "성적 콘텐츠",
@@ -333,35 +332,6 @@
     "videoCollaboratorWithOne": "@{name}님과 함께",
     "videoCollaboratorWithMore": "@{name}님 외 +{count}명과 함께",
     "videoCollaboratorCountLabel": "{count, plural, other{콜라보레이터 {count}명}}. 탭해서 프로필을 보세요.",
-    "videoCollaboratorPendingDecoration": "Pending",
-    "@videoCollaboratorPendingDecoration": {
-        "description": "Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted."
-    },
-    "videoCollaboratorPendingSemanticLabel": "Pending collaborator",
-    "@videoCollaboratorPendingSemanticLabel": {
-        "description": "Screen reader label for a dimmed pending collaborator avatar on the creator's own video."
-    },
-    "videoCollaboratorWithPendingSuffix": "{label} ({pending} pending)",
-    "@videoCollaboratorWithPendingSuffix": {
-        "description": "Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.",
-        "placeholders": {
-            "label": {
-                "type": "String"
-            },
-            "pending": {
-                "type": "int"
-            }
-        }
-    },
-    "profileChipTapHint": "{name}. Tap to view profile.",
-    "@profileChipTapHint": {
-        "description": "Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.",
-        "placeholders": {
-            "name": {
-                "type": "String"
-            }
-        }
-    },
     "listAttributionFallback": "리스트",
     "shareVideoLabel": "영상 공유",
     "sharePostSharedWith": "{recipientName}님과 게시물을 공유했어요",
@@ -2689,21 +2659,7 @@
     "bugReportExpectedBehaviorHint": "원래 어떻게 됐어야 했나요?",
     "bugReportDiagnosticsNotice": "기기 정보와 로그가 자동으로 함께 보내져요.",
     "bugReportSuccessMessage": "고마워요! 신고를 받았어요. Divine을 더 좋게 만드는 데 쓸게요.",
-    "bugReportAttachImages": "Attach images",
-  "bugReportImagesCount": "{count} of {max} images selected",
-  "@bugReportImagesCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      },
-      "max": {
-        "type": "int"
-      }
-    }
-  },
-  "bugReportRemoveImage": "Remove image",
-  "bugReportUploadFailed": "We couldn't upload the selected image. Try again or send the report without it.",
-  "bugReportSendFailed": "버그 신고를 보내지 못했어요. 잠시 후 다시 시도해주세요.",
+    "bugReportSendFailed": "버그 신고를 보내지 못했어요. 잠시 후 다시 시도해주세요.",
     "bugReportFailedWithError": "버그 신고를 보내지 못했어요: {error}",
     "@bugReportFailedWithError": {
         "placeholders": {
@@ -2899,5 +2855,74 @@
             }
         }
     },
-    "notificationsVideoThumbnail": "동영상 썸네일"
+    "notificationsVideoThumbnail": "동영상 썸네일",
+    "videoPlayerTapHint": "탭하여 재생하거나 일시정지하세요. 이중 탭으로 좋아요.",
+    "videoCollaboratorPendingDecoration": "Pending",
+    "@videoCollaboratorPendingDecoration": {
+        "description": "Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted."
+    },
+    "videoCollaboratorPendingSemanticLabel": "Pending collaborator",
+    "@videoCollaboratorPendingSemanticLabel": {
+        "description": "Screen reader label for a dimmed pending collaborator avatar on the creator's own video."
+    },
+    "videoCollaboratorWithPendingSuffix": "{label} ({pending} pending)",
+    "@videoCollaboratorWithPendingSuffix": {
+        "description": "Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.",
+        "placeholders": {
+            "label": {
+                "type": "String"
+            },
+            "pending": {
+                "type": "int"
+            }
+        }
+    },
+    "profileChipTapHint": "{name}. Tap to view profile.",
+    "@profileChipTapHint": {
+        "description": "Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.",
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
+    "bugReportAttachImages": "Attach images",
+    "bugReportImagesCount": "{count} of {max} images selected",
+    "@bugReportImagesCount": {
+        "placeholders": {
+            "count": {
+                "type": "int"
+            },
+            "max": {
+                "type": "int"
+            }
+        }
+    },
+    "bugReportRemoveImage": "Remove image",
+    "bugReportUploadFailed": "We couldn't upload the selected image. Try again or send the report without it.",
+    "videoMetadataEditCoverTitle": "커버 편집",
+    "videoMetadataEditCoverCloseSemanticLabel": "커버 편집기 닫기",
+    "videoMetadataEditCoverConfirmSemanticLabel": "커버 선택 확인",
+    "videoMetadataEditCoverStripSemanticLabel": "커버 프레임 선택을 위해 동영상 탐색",
+    "userPickerRemoveSelectionSemantics": "{name} 제거",
+    "@userPickerRemoveSelectionSemantics": {
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
+    "videoMetadataEditCoverFailedSnackbar": "커버를 업데이트하지 못했습니다. 다시 시도하세요.",
+    "videoMetadataEditCoverSuccessAnnouncement": "커버 업데이트됨",
+    "videoMetadataTagsPickerSearchHint": "태그 검색 또는 추가",
+    "videoMetadataTagsPickerEmptyHint": "사람들이 동영상을 발견할 수 있도록 태그를 추가하세요",
+    "videoMetadataTagsPickerNoResults": "일치하는 태그 없음",
+    "videoMetadataTagsPickerAddTag": "\"#{tag}\" 추가",
+    "@videoMetadataTagsPickerAddTag": {
+        "placeholders": {
+            "tag": {
+                "type": "String"
+            }
+        }
+    }
 }

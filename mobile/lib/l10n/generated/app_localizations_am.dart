@@ -4088,6 +4088,11 @@ class AppLocalizationsAm extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return 'Remove $name';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => 'የእርስዎ ሠራተኞች እዚያ አሉ።';
 
   @override
@@ -5308,6 +5313,13 @@ class AppLocalizationsAm extends AppLocalizations {
 
   @override
   String get commonClose => 'ዝጋ';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      'Couldn\'t update the cover. Try again.';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement => 'Cover updated';
 
   @override
   String get videoMetadataTags => 'መለያዎች';
@@ -6974,4 +6986,32 @@ class AppLocalizationsAm extends AppLocalizations {
   @override
   String get profileEditGetVerifiedSubtitle =>
       'ሰዎች በእርግጥ አንተ መሆንህን እንዲያውቁ የማህበራዊ ሚዲያ መለያዎችህን አገናኝ።';
+
+  @override
+  String get videoMetadataEditCoverTitle => 'Edit cover';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel => 'Close cover editor';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel =>
+      'Confirm cover selection';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel =>
+      'Seek through video to select cover frame';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => 'መለያዎችን ይፈልጉ ወይም ያክሉ';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint => 'ሰዎች ቪዲዮዎን እንዲያገኙ መለያዎችን ያክሉ';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => 'ተዛማጅ መለያዎች የሉም';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return '\"#$tag\" ያክሉ';
+  }
 }

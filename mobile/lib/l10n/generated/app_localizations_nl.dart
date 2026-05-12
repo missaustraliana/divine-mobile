@@ -4191,6 +4191,11 @@ class AppLocalizationsNl extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return '$name verwijderen';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => 'Je crew is daarbuiten';
 
   @override
@@ -5441,6 +5446,13 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get commonClose => 'Sluiten';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      'Kan de cover niet bijwerken. Probeer het opnieuw.';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement => 'Omslag bijgewerkt';
 
   @override
   String get videoMetadataTags => 'Tags';
@@ -7170,4 +7182,33 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get profileEditGetVerifiedSubtitle =>
       'Koppel je social-media-accounts zodat mensen weten dat jij het bent.';
+
+  @override
+  String get videoMetadataEditCoverTitle => 'Omslag bewerken';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel => 'Omslageditor sluiten';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel =>
+      'Omslagselectie bevestigen';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel =>
+      'Door video scrollen om omslagframe te selecteren';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => 'Tags zoeken of toevoegen';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint =>
+      'Voeg tags toe zodat anderen je video ontdekken';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => 'Geen overeenkomende tags';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return '«#$tag» toevoegen';
+  }
 }

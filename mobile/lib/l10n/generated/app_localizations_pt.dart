@@ -4201,6 +4201,11 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return 'Remover $name';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => 'Sua turma está por aí';
 
   @override
@@ -5452,6 +5457,13 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get commonClose => 'Fechar';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      'Não foi possível atualizar a capa. Tente novamente.';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement => 'Capa atualizada';
 
   @override
   String get videoMetadataTags => 'Tags';
@@ -7181,4 +7193,34 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String get profileEditGetVerifiedSubtitle =>
       'Conecte suas redes sociais para que as pessoas saibam que é você mesmo.';
+
+  @override
+  String get videoMetadataEditCoverTitle => 'Editar capa';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel =>
+      'Fechar editor de capa';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel =>
+      'Confirmar seleção de capa';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel =>
+      'Percorra o vídeo para selecionar o quadro de capa';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => 'Pesquisar ou adicionar tags';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint =>
+      'Adiciona tags para que outros descubram o teu vídeo';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => 'Sem tags correspondentes';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return 'Adicionar «#$tag»';
+  }
 }

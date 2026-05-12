@@ -474,7 +474,6 @@
     "videoPlayerUnmute": "Activează sunetul videoclipului",
     "videoPlayerEditVideo": "Editează videoclipul",
     "videoPlayerEditVideoTooltip": "Editează videoclipul",
-    "videoPlayerTapHint": "Atinge pentru a reda sau întrerupe. Atinge de două ori pentru a aprecia.",
     "contentWarningLabel": "Atenționare de conținut",
     "contentWarningNudity": "Nuditate",
     "contentWarningSexualContent": "Conținut sexual",
@@ -563,35 +562,6 @@
         "placeholders": {
             "count": {
                 "type": "int"
-            }
-        }
-    },
-    "videoCollaboratorPendingDecoration": "Pending",
-    "@videoCollaboratorPendingDecoration": {
-        "description": "Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted."
-    },
-    "videoCollaboratorPendingSemanticLabel": "Pending collaborator",
-    "@videoCollaboratorPendingSemanticLabel": {
-        "description": "Screen reader label for a dimmed pending collaborator avatar on the creator's own video."
-    },
-    "videoCollaboratorWithPendingSuffix": "{label} ({pending} pending)",
-    "@videoCollaboratorWithPendingSuffix": {
-        "description": "Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.",
-        "placeholders": {
-            "label": {
-                "type": "String"
-            },
-            "pending": {
-                "type": "int"
-            }
-        }
-    },
-    "profileChipTapHint": "{name}. Tap to view profile.",
-    "@profileChipTapHint": {
-        "description": "Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.",
-        "placeholders": {
-            "name": {
-                "type": "String"
             }
         }
     },
@@ -3393,21 +3363,7 @@
     "bugReportExpectedBehaviorHint": "Ce ar fi trebuit să se întâmple în schimb?",
     "bugReportDiagnosticsNotice": "Informațiile despre dispozitiv și jurnalele vor fi incluse automat.",
     "bugReportSuccessMessage": "Mulțumim! Am primit raportul tău și îl vom folosi ca să facem Divine mai bun.",
-    "bugReportAttachImages": "Attach images",
-  "bugReportImagesCount": "{count} of {max} images selected",
-  "@bugReportImagesCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      },
-      "max": {
-        "type": "int"
-      }
-    }
-  },
-  "bugReportRemoveImage": "Remove image",
-  "bugReportUploadFailed": "We couldn't upload the selected image. Try again or send the report without it.",
-  "bugReportSendFailed": "Trimiterea raportului de bug a eșuat. Încearcă din nou mai târziu.",
+    "bugReportSendFailed": "Trimiterea raportului de bug a eșuat. Încearcă din nou mai târziu.",
     "bugReportFailedWithError": "Trimiterea raportului de bug a eșuat: {error}",
     "@bugReportFailedWithError": {
         "placeholders": {
@@ -3603,5 +3559,81 @@
             }
         }
     },
-    "notificationsVideoThumbnail": "Miniatură video"
+    "notificationsVideoThumbnail": "Miniatură video",
+    "videoPlayerTapHint": "Atinge pentru a reda sau întrerupe. Atinge de două ori pentru a aprecia.",
+    "videoCollaboratorPendingDecoration": "Pending",
+    "@videoCollaboratorPendingDecoration": {
+        "description": "Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted."
+    },
+    "videoCollaboratorPendingSemanticLabel": "Pending collaborator",
+    "@videoCollaboratorPendingSemanticLabel": {
+        "description": "Screen reader label for a dimmed pending collaborator avatar on the creator's own video."
+    },
+    "videoCollaboratorWithPendingSuffix": "{label} ({pending} pending)",
+    "@videoCollaboratorWithPendingSuffix": {
+        "description": "Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.",
+        "placeholders": {
+            "label": {
+                "type": "String"
+            },
+            "pending": {
+                "type": "int"
+            }
+        }
+    },
+    "profileChipTapHint": "{name}. Tap to view profile.",
+    "@profileChipTapHint": {
+        "description": "Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.",
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
+    "bugReportAttachImages": "Attach images",
+    "bugReportImagesCount": "{count} of {max} images selected",
+    "@bugReportImagesCount": {
+        "placeholders": {
+            "count": {
+                "type": "int"
+            },
+            "max": {
+                "type": "int"
+            }
+        }
+    },
+    "bugReportRemoveImage": "Remove image",
+    "bugReportUploadFailed": "We couldn't upload the selected image. Try again or send the report without it.",
+    "@profileSetupUploadFailedGeneric": {
+        "placeholders": {
+            "error": {
+                "type": "Object"
+            }
+        }
+    },
+    "videoMetadataEditCoverTitle": "Editează coperta",
+    "videoMetadataEditCoverCloseSemanticLabel": "Închide editorul de copertă",
+    "videoMetadataEditCoverConfirmSemanticLabel": "Confirmă selecția copertei",
+    "videoMetadataEditCoverStripSemanticLabel": "Parcurge videoclipul pentru a selecta cadrul copertei",
+    "userPickerRemoveSelectionSemantics": "Elimină {name}",
+    "@userPickerRemoveSelectionSemantics": {
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
+    "videoMetadataEditCoverFailedSnackbar": "Coperta nu a putut fi actualizată. Încearcă din nou.",
+    "videoMetadataEditCoverSuccessAnnouncement": "Coperta a fost actualizată",
+    "videoMetadataTagsPickerSearchHint": "Caută sau adaugă etichete",
+    "videoMetadataTagsPickerEmptyHint": "Adaugă etichete pentru ca alții să-ți descopere videoclipul",
+    "videoMetadataTagsPickerNoResults": "Nicio etichetă potrivită",
+    "videoMetadataTagsPickerAddTag": "Adaugă „#{tag}\"",
+    "@videoMetadataTagsPickerAddTag": {
+        "placeholders": {
+            "tag": {
+                "type": "String"
+            }
+        }
+    }
 }

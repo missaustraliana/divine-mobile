@@ -4176,6 +4176,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return 'Remove $name';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => 'Your crew is out there';
 
   @override
@@ -5419,6 +5424,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get commonClose => 'Close';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      'Couldn\'t update the cover. Try again.';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement => 'Cover updated';
 
   @override
   String get videoMetadataTags => 'Tags';
@@ -6861,7 +6873,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get videoMetadataContentWarningLabel => 'Content Warning';
+  String get videoMetadataContentWarningLabel => 'Add content warning';
 
   @override
   String get videoMetadataSelectContentWarningsSemanticLabel =>
@@ -6869,7 +6881,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get videoMetadataContentWarningSelectAllThatApply =>
-      'Select all that apply to your content';
+      'Select all that apply';
 
   @override
   String get videoMetadataContentWarningDoneButton => 'Done';
@@ -6882,7 +6894,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Let others save and reuse this video\'s audio.';
 
   @override
-  String get videoMetadataCollaboratorsLabel => 'Collaborators';
+  String get videoMetadataCollaboratorsLabel => 'Add collaborators';
 
   @override
   String get videoMetadataAddCollaboratorSemanticLabel => 'Invite collaborator';
@@ -6912,7 +6924,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get videoMetadataInspiredByLabel => 'Inspired by';
+  String get videoMetadataInspiredByLabel => 'Add inspired by';
 
   @override
   String get videoMetadataSetInspiredBySemanticLabel => 'Set inspired by';
@@ -7121,4 +7133,33 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get profileEditGetVerifiedSubtitle =>
       'Link your social media accounts so people know it\'s really you.';
+
+  @override
+  String get videoMetadataEditCoverTitle => 'Edit cover';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel => 'Close cover editor';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel =>
+      'Confirm cover selection';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel =>
+      'Seek through video to select cover frame';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => 'Search or add tags';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint =>
+      'Add tags to help people discover your video';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => 'No matching tags';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return 'Add \"#$tag\"';
+  }
 }

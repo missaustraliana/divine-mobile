@@ -474,7 +474,6 @@
     "videoPlayerUnmute": "動画のミュートを解除",
     "videoPlayerEditVideo": "動画を編集",
     "videoPlayerEditVideoTooltip": "動画を編集",
-    "videoPlayerTapHint": "タップで再生・一時停止。ダブルタップでいいね。",
     "contentWarningLabel": "コンテンツ警告",
     "contentWarningNudity": "ヌード",
     "contentWarningSexualContent": "性的コンテンツ",
@@ -563,35 +562,6 @@
         "placeholders": {
             "count": {
                 "type": "int"
-            }
-        }
-    },
-    "videoCollaboratorPendingDecoration": "Pending",
-    "@videoCollaboratorPendingDecoration": {
-        "description": "Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted."
-    },
-    "videoCollaboratorPendingSemanticLabel": "Pending collaborator",
-    "@videoCollaboratorPendingSemanticLabel": {
-        "description": "Screen reader label for a dimmed pending collaborator avatar on the creator's own video."
-    },
-    "videoCollaboratorWithPendingSuffix": "{label} ({pending} pending)",
-    "@videoCollaboratorWithPendingSuffix": {
-        "description": "Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.",
-        "placeholders": {
-            "label": {
-                "type": "String"
-            },
-            "pending": {
-                "type": "int"
-            }
-        }
-    },
-    "profileChipTapHint": "{name}. Tap to view profile.",
-    "@profileChipTapHint": {
-        "description": "Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.",
-        "placeholders": {
-            "name": {
-                "type": "String"
             }
         }
     },
@@ -3393,21 +3363,7 @@
     "bugReportExpectedBehaviorHint": "本来どうなるはずだった?",
     "bugReportDiagnosticsNotice": "デバイス情報とログは自動で添付されるよ。",
     "bugReportSuccessMessage": "ありがとう！レポートを受け取ったよ。Divine をよくするのに使うね。",
-    "bugReportAttachImages": "Attach images",
-  "bugReportImagesCount": "{count} of {max} images selected",
-  "@bugReportImagesCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      },
-      "max": {
-        "type": "int"
-      }
-    }
-  },
-  "bugReportRemoveImage": "Remove image",
-  "bugReportUploadFailed": "We couldn't upload the selected image. Try again or send the report without it.",
-  "bugReportSendFailed": "バグレポートの送信に失敗。あとでもう一回試してみて。",
+    "bugReportSendFailed": "バグレポートの送信に失敗。あとでもう一回試してみて。",
     "bugReportFailedWithError": "バグレポートの送信に失敗: {error}",
     "@bugReportFailedWithError": {
         "placeholders": {
@@ -3603,5 +3559,81 @@
             }
         }
     },
-    "notificationsVideoThumbnail": "動画のサムネイル"
+    "notificationsVideoThumbnail": "動画のサムネイル",
+    "videoPlayerTapHint": "タップで再生・一時停止。ダブルタップでいいね。",
+    "videoCollaboratorPendingDecoration": "Pending",
+    "@videoCollaboratorPendingDecoration": {
+        "description": "Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted."
+    },
+    "videoCollaboratorPendingSemanticLabel": "Pending collaborator",
+    "@videoCollaboratorPendingSemanticLabel": {
+        "description": "Screen reader label for a dimmed pending collaborator avatar on the creator's own video."
+    },
+    "videoCollaboratorWithPendingSuffix": "{label} ({pending} pending)",
+    "@videoCollaboratorWithPendingSuffix": {
+        "description": "Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.",
+        "placeholders": {
+            "label": {
+                "type": "String"
+            },
+            "pending": {
+                "type": "int"
+            }
+        }
+    },
+    "profileChipTapHint": "{name}. Tap to view profile.",
+    "@profileChipTapHint": {
+        "description": "Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.",
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
+    "bugReportAttachImages": "Attach images",
+    "bugReportImagesCount": "{count} of {max} images selected",
+    "@bugReportImagesCount": {
+        "placeholders": {
+            "count": {
+                "type": "int"
+            },
+            "max": {
+                "type": "int"
+            }
+        }
+    },
+    "bugReportRemoveImage": "Remove image",
+    "bugReportUploadFailed": "We couldn't upload the selected image. Try again or send the report without it.",
+    "@profileSetupUploadFailedGeneric": {
+        "placeholders": {
+            "error": {
+                "type": "Object"
+            }
+        }
+    },
+    "videoMetadataEditCoverTitle": "カバーを編集",
+    "videoMetadataEditCoverCloseSemanticLabel": "カバーエディターを閉じる",
+    "videoMetadataEditCoverConfirmSemanticLabel": "カバー選択を確認",
+    "videoMetadataEditCoverStripSemanticLabel": "カバーフレームを選択するために動画をシーク",
+    "userPickerRemoveSelectionSemantics": "{name}を削除",
+    "@userPickerRemoveSelectionSemantics": {
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
+    "videoMetadataEditCoverFailedSnackbar": "カバーを更新できませんでした。もう一度お試しください。",
+    "videoMetadataEditCoverSuccessAnnouncement": "カバーを更新しました",
+    "videoMetadataTagsPickerSearchHint": "タグを検索または追加",
+    "videoMetadataTagsPickerEmptyHint": "タグを追加して動画を見つけてもらおう",
+    "videoMetadataTagsPickerNoResults": "一致するタグがありません",
+    "videoMetadataTagsPickerAddTag": "「#{tag}」を追加",
+    "@videoMetadataTagsPickerAddTag": {
+        "placeholders": {
+            "tag": {
+                "type": "String"
+            }
+        }
+    }
 }

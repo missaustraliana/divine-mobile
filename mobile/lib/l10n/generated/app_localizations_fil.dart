@@ -4234,6 +4234,11 @@ class AppLocalizationsFil extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return 'Remove $name';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => 'Naghihintay sa iyo ang crew mo';
 
   @override
@@ -5489,6 +5494,13 @@ class AppLocalizationsFil extends AppLocalizations {
 
   @override
   String get commonClose => 'Isara';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      'Couldn\'t update the cover. Try again.';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement => 'Cover updated';
 
   @override
   String get videoMetadataTags => 'Mga Tag';
@@ -7224,4 +7236,33 @@ class AppLocalizationsFil extends AppLocalizations {
   @override
   String get profileEditGetVerifiedSubtitle =>
       'I-link ang iyong mga social media account para malaman ng mga tao na ikaw talaga ito.';
+
+  @override
+  String get videoMetadataEditCoverTitle => 'Edit cover';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel => 'Close cover editor';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel =>
+      'Confirm cover selection';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel =>
+      'Seek through video to select cover frame';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => 'Maghanap o magdagdag ng tag';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint =>
+      'Magdagdag ng tag para matuklasan ang video mo';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => 'Walang tugmang tag';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return 'Idagdag ang \"#$tag\"';
+  }
 }

@@ -296,7 +296,7 @@ void main() {
               DateTime.fromMillisecondsSinceEpoch(
                 ts * 1000,
                 isUtc: true,
-              ).toLocal(),
+              ),
             ),
           ),
         );
@@ -353,6 +353,40 @@ void main() {
             const Duration(minutes: 1, seconds: 5, milliseconds: 730),
           ),
           equals('1:05:73'),
+        );
+      });
+    });
+
+    group('formatMinutesSeconds', () {
+      test('formats zero duration', () {
+        expect(
+          TimeFormatter.formatMinutesSeconds(Duration.zero),
+          equals('0:00'),
+        );
+      });
+
+      test('zero-pads seconds, not minutes', () {
+        expect(
+          TimeFormatter.formatMinutesSeconds(
+            const Duration(minutes: 1, seconds: 5),
+          ),
+          equals('1:05'),
+        );
+      });
+
+      test('renders multi-digit minutes without padding', () {
+        expect(
+          TimeFormatter.formatMinutesSeconds(
+            const Duration(minutes: 10, seconds: 5),
+          ),
+          equals('10:05'),
+        );
+      });
+
+      test('wraps minutes at 60', () {
+        expect(
+          TimeFormatter.formatMinutesSeconds(const Duration(minutes: 65)),
+          equals('5:00'),
         );
       });
     });

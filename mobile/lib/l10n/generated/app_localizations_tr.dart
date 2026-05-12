@@ -4157,6 +4157,11 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return '$name kaldır';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => 'Ekibin dışarıda';
 
   @override
@@ -5400,6 +5405,13 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get commonClose => 'Kapat';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      'Kapak güncellenemedi. Tekrar dene.';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement => 'Kapak güncellendi';
 
   @override
   String get videoMetadataTags => 'Etiketler';
@@ -7106,4 +7118,34 @@ class AppLocalizationsTr extends AppLocalizations {
   @override
   String get profileEditGetVerifiedSubtitle =>
       'Sosyal medya hesaplarını bağla ki insanlar gerçekten sen olduğunu bilsin.';
+
+  @override
+  String get videoMetadataEditCoverTitle => 'Kapağı düzenle';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel =>
+      'Kapak düzenleyicisini kapat';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel =>
+      'Kapak seçimini onayla';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel =>
+      'Kapak karesi seçmek için videoda gezin';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => 'Etiket ara veya ekle';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint =>
+      'İnsanların videonu keşfetmesi için etiket ekle';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => 'Eşleşen etiket yok';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return '\"#$tag\" ekle';
+  }
 }

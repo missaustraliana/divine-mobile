@@ -4283,6 +4283,11 @@ class AppLocalizationsPl extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return 'Usuń $name';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => 'Twoja ekipa czeka';
 
   @override
@@ -5552,6 +5557,14 @@ class AppLocalizationsPl extends AppLocalizations {
 
   @override
   String get commonClose => 'Zamknij';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      'Nie udało się zaktualizować okładki. Spróbuj ponownie.';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement =>
+      'Zaktualizowano okładkę';
 
   @override
   String get videoMetadataTags => 'Tagi';
@@ -7288,4 +7301,34 @@ class AppLocalizationsPl extends AppLocalizations {
   @override
   String get profileEditGetVerifiedSubtitle =>
       'Połącz swoje konta w mediach społecznościowych, żeby ludzie wiedzieli, że to naprawdę ty.';
+
+  @override
+  String get videoMetadataEditCoverTitle => 'Edytuj okładkę';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel =>
+      'Zamknij edytor okładki';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel =>
+      'Potwierdź wybór okładki';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel =>
+      'Przewijaj wideo, aby wybrać klatkę okładki';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => 'Szukaj lub dodaj tagi';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint =>
+      'Dodaj tagi, aby inni odkryli Twój film';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => 'Brak pasujących tagów';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return 'Dodaj „#$tag\"';
+  }
 }

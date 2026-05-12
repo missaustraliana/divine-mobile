@@ -474,7 +474,6 @@
     "videoPlayerUnmute": "إلغاء كتم الفيديو",
     "videoPlayerEditVideo": "تعديل الفيديو",
     "videoPlayerEditVideoTooltip": "تعديل الفيديو",
-    "videoPlayerTapHint": "اضغط للتشغيل أو الإيقاف المؤقت. اضغط مرتين للإعجاب.",
     "contentWarningLabel": "تحذير محتوى",
     "contentWarningNudity": "عري",
     "contentWarningSexualContent": "محتوى جنسي",
@@ -563,35 +562,6 @@
         "placeholders": {
             "count": {
                 "type": "int"
-            }
-        }
-    },
-    "videoCollaboratorPendingDecoration": "Pending",
-    "@videoCollaboratorPendingDecoration": {
-        "description": "Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted."
-    },
-    "videoCollaboratorPendingSemanticLabel": "Pending collaborator",
-    "@videoCollaboratorPendingSemanticLabel": {
-        "description": "Screen reader label for a dimmed pending collaborator avatar on the creator's own video."
-    },
-    "videoCollaboratorWithPendingSuffix": "{label} ({pending} pending)",
-    "@videoCollaboratorWithPendingSuffix": {
-        "description": "Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.",
-        "placeholders": {
-            "label": {
-                "type": "String"
-            },
-            "pending": {
-                "type": "int"
-            }
-        }
-    },
-    "profileChipTapHint": "{name}. Tap to view profile.",
-    "@profileChipTapHint": {
-        "description": "Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.",
-        "placeholders": {
-            "name": {
-                "type": "String"
             }
         }
     },
@@ -3393,21 +3363,7 @@
     "bugReportExpectedBehaviorHint": "ماذا كان يجب أن يحدث بدلًا من ذلك؟",
     "bugReportDiagnosticsNotice": "ستُرفَق معلومات الجهاز والسجلات تلقائيًا.",
     "bugReportSuccessMessage": "شكرًا لك! استلمنا تقريرك وسنستخدمه لجعل Divine أفضل.",
-    "bugReportAttachImages": "Attach images",
-  "bugReportImagesCount": "{count} of {max} images selected",
-  "@bugReportImagesCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      },
-      "max": {
-        "type": "int"
-      }
-    }
-  },
-  "bugReportRemoveImage": "Remove image",
-  "bugReportUploadFailed": "We couldn't upload the selected image. Try again or send the report without it.",
-  "bugReportSendFailed": "فشل إرسال تقرير الخطأ. حاول مرّة أخرى لاحقًا.",
+    "bugReportSendFailed": "فشل إرسال تقرير الخطأ. حاول مرّة أخرى لاحقًا.",
     "bugReportFailedWithError": "فشل إرسال تقرير الخطأ: {error}",
     "@bugReportFailedWithError": {
         "placeholders": {
@@ -3603,5 +3559,81 @@
             }
         }
     },
-    "notificationsVideoThumbnail": "صورة مصغرة للفيديو"
+    "notificationsVideoThumbnail": "صورة مصغرة للفيديو",
+    "videoPlayerTapHint": "اضغط للتشغيل أو الإيقاف المؤقت. اضغط مرتين للإعجاب.",
+    "videoCollaboratorPendingDecoration": "Pending",
+    "@videoCollaboratorPendingDecoration": {
+        "description": "Small badge next to a collaborator's name or avatar when the creator (viewing their own video) has invited them but they have not yet accepted."
+    },
+    "videoCollaboratorPendingSemanticLabel": "Pending collaborator",
+    "@videoCollaboratorPendingSemanticLabel": {
+        "description": "Screen reader label for a dimmed pending collaborator avatar on the creator's own video."
+    },
+    "videoCollaboratorWithPendingSuffix": "{label} ({pending} pending)",
+    "@videoCollaboratorWithPendingSuffix": {
+        "description": "Appends a pending count to the collaborator label on the creator's own video. {label} is the existing 'with @name' / 'with @name +N' phrase.",
+        "placeholders": {
+            "label": {
+                "type": "String"
+            },
+            "pending": {
+                "type": "int"
+            }
+        }
+    },
+    "profileChipTapHint": "{name}. Tap to view profile.",
+    "@profileChipTapHint": {
+        "description": "Screen reader hint announced when a user-chip in the metadata sheet is focused. {name} is the user's display name.",
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
+    "bugReportAttachImages": "Attach images",
+    "bugReportImagesCount": "{count} of {max} images selected",
+    "@bugReportImagesCount": {
+        "placeholders": {
+            "count": {
+                "type": "int"
+            },
+            "max": {
+                "type": "int"
+            }
+        }
+    },
+    "bugReportRemoveImage": "Remove image",
+    "bugReportUploadFailed": "We couldn't upload the selected image. Try again or send the report without it.",
+    "@profileSetupUploadFailedGeneric": {
+        "placeholders": {
+            "error": {
+                "type": "Object"
+            }
+        }
+    },
+    "videoMetadataEditCoverTitle": "تعديل الغلاف",
+    "videoMetadataEditCoverCloseSemanticLabel": "إغلاق محرر الغلاف",
+    "videoMetadataEditCoverConfirmSemanticLabel": "تأكيد اختيار الغلاف",
+    "videoMetadataEditCoverStripSemanticLabel": "التنقل عبر الفيديو لاختيار إطار الغلاف",
+    "userPickerRemoveSelectionSemantics": "إزالة {name}",
+    "@userPickerRemoveSelectionSemantics": {
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
+    "videoMetadataEditCoverFailedSnackbar": "تعذر تحديث الغلاف. حاول مرة أخرى.",
+    "videoMetadataEditCoverSuccessAnnouncement": "تم تحديث الغلاف",
+    "videoMetadataTagsPickerSearchHint": "ابحث أو أضف وسوماً",
+    "videoMetadataTagsPickerEmptyHint": "أضف وسوماً ليكتشف الآخرون فيديوك",
+    "videoMetadataTagsPickerNoResults": "لا توجد وسوم مطابقة",
+    "videoMetadataTagsPickerAddTag": "إضافة \"#{tag}\"",
+    "@videoMetadataTagsPickerAddTag": {
+        "placeholders": {
+            "tag": {
+                "type": "String"
+            }
+        }
+    }
 }

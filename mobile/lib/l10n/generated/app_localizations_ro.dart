@@ -4300,6 +4300,11 @@ class AppLocalizationsRo extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return 'Elimină $name';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => 'Gașca ta e acolo';
 
   @override
@@ -5567,6 +5572,14 @@ class AppLocalizationsRo extends AppLocalizations {
 
   @override
   String get commonClose => 'Închide';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      'Coperta nu a putut fi actualizată. Încearcă din nou.';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement =>
+      'Coperta a fost actualizată';
 
   @override
   String get videoMetadataTags => 'Etichete';
@@ -7312,4 +7325,34 @@ class AppLocalizationsRo extends AppLocalizations {
   @override
   String get profileEditGetVerifiedSubtitle =>
       'Conectează-ți conturile de social media ca lumea să știe că ești tu.';
+
+  @override
+  String get videoMetadataEditCoverTitle => 'Editează coperta';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel =>
+      'Închide editorul de copertă';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel =>
+      'Confirmă selecția copertei';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel =>
+      'Parcurge videoclipul pentru a selecta cadrul copertei';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => 'Caută sau adaugă etichete';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint =>
+      'Adaugă etichete pentru ca alții să-ți descopere videoclipul';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => 'Nicio etichetă potrivită';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return 'Adaugă „#$tag\"';
+  }
 }

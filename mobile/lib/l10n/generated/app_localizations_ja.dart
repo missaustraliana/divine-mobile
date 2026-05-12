@@ -3978,6 +3978,11 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String userPickerRemoveSelectionSemantics(String name) {
+    return '$nameを削除';
+  }
+
+  @override
   String get userPickerEmptyFollowListTitle => 'あなたの仲間は外にいる';
 
   @override
@@ -5195,6 +5200,13 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get commonClose => '閉じる';
+
+  @override
+  String get videoMetadataEditCoverFailedSnackbar =>
+      'カバーを更新できませんでした。もう一度お試しください。';
+
+  @override
+  String get videoMetadataEditCoverSuccessAnnouncement => 'カバーを更新しました';
 
   @override
   String get videoMetadataTags => 'タグ';
@@ -6836,4 +6848,31 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get profileEditGetVerifiedSubtitle =>
       'ソーシャルメディアのアカウントをつないで、本物のあなただと伝えよう。';
+
+  @override
+  String get videoMetadataEditCoverTitle => 'カバーを編集';
+
+  @override
+  String get videoMetadataEditCoverCloseSemanticLabel => 'カバーエディターを閉じる';
+
+  @override
+  String get videoMetadataEditCoverConfirmSemanticLabel => 'カバー選択を確認';
+
+  @override
+  String get videoMetadataEditCoverStripSemanticLabel =>
+      'カバーフレームを選択するために動画をシーク';
+
+  @override
+  String get videoMetadataTagsPickerSearchHint => 'タグを検索または追加';
+
+  @override
+  String get videoMetadataTagsPickerEmptyHint => 'タグを追加して動画を見つけてもらおう';
+
+  @override
+  String get videoMetadataTagsPickerNoResults => '一致するタグがありません';
+
+  @override
+  String videoMetadataTagsPickerAddTag(String tag) {
+    return '「#$tag」を追加';
+  }
 }

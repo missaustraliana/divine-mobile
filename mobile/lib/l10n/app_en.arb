@@ -447,16 +447,16 @@
   "profileSetupNip05AddressLabel": "NIP-05 Address",
   "profileSetupExternalNip05InvalidFormat": "Invalid NIP-05 format (e.g., name@domain.com)",
   "profileSetupExternalNip05DivineDomain": "Use the username field above for divine.video",
-"nostrSettingsNip05Address": "NIP-05 address",
-"nostrSettingsNip05AddressSubtitle": "Use your divine.video username, or point your handle at a NIP-05 address on a domain you control.",
-"nostrSettingsNip05AddressHint": "you@example.com",
-"nostrSettingsNip05SaveAction": "Save NIP-05",
-"nostrSettingsNip05Saved": "NIP-05 saved",
-"nostrSettingsNip05SaveFailed": "Couldn't save NIP-05. Please try again.",
-"profileSetupNip05ConfirmTitle": "Use your own NIP-05?",
-"profileSetupNip05ConfirmBody": "NIP-05 maps a name like you@yourdomain.com to your Nostr identity. You need to control the domain and host a verification file at the right path. If it's wrong, people can't find you and your verified handle disappears. Continue only if you've set this up.",
-"profileSetupNip05ConfirmContinue": "Continue",
-"profileSetupNip05ConfirmCancel": "Cancel",
+  "nostrSettingsNip05Address": "NIP-05 address",
+  "nostrSettingsNip05AddressSubtitle": "Use your divine.video username, or point your handle at a NIP-05 address on a domain you control.",
+  "nostrSettingsNip05AddressHint": "you@example.com",
+  "nostrSettingsNip05SaveAction": "Save NIP-05",
+  "nostrSettingsNip05Saved": "NIP-05 saved",
+  "nostrSettingsNip05SaveFailed": "Couldn't save NIP-05. Please try again.",
+  "profileSetupNip05ConfirmTitle": "Use your own NIP-05?",
+  "profileSetupNip05ConfirmBody": "NIP-05 maps a name like you@yourdomain.com to your Nostr identity. You need to control the domain and host a verification file at the right path. If it's wrong, people can't find you and your verified handle disappears. Continue only if you've set this up.",
+  "profileSetupNip05ConfirmContinue": "Continue",
+  "profileSetupNip05ConfirmCancel": "Cancel",
   "profileSetupProfilePicturePreview": "Profile picture preview",
   "nostrInfoIntroBuiltOn": "DiVine is built on Nostr,",
   "nostrInfoIntroDescription": " a censorship-resistant open protocol that lets people communicate online without relying on a single company or platform. ",
@@ -2262,6 +2262,15 @@
       }
     }
   },
+  "userPickerRemoveSelectionSemantics": "Remove {name}",
+  "@userPickerRemoveSelectionSemantics": {
+    "description": "Semantic label for the remove button on a selected user chip in the user picker. {name} is the user's display name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "userPickerEmptyFollowListTitle": "Your crew is out there",
   "userPickerEmptyFollowListBody": "Follow people you vibe with. When they follow back, you can collab.",
   "userPickerGoBack": "Go back",
@@ -2714,13 +2723,10 @@
   "categoryVlog": "Vlog",
   "categoryVlogging": "Vlogging",
   "categoryWrestling": "Wrestling",
-
   "profileSetupUploadStaged": "Uploaded — tap Save to apply",
   "@profileSetupUploadStaged": {
     "description": "Snackbar shown after a profile picture upload succeeds on the profile edit screen. The new picture is staged in the form but not yet published; the user must tap Save for it to take effect."
   },
-  "profileSetupSendRequest": "Send request",
-
   "inboxReportedUser": "Reported {displayName}",
   "@inboxReportedUser": {
     "placeholders": {
@@ -2746,10 +2752,8 @@
     }
   },
   "inboxRemovedConversation": "Removed conversation",
-
   "inboxEmptyTitle": "No messages yet",
   "inboxEmptySubtitle": "That + button won't bite.",
-
   "inboxActionMute": "Mute conversation",
   "inboxActionReport": "Report {displayName}",
   "@inboxActionReport": {
@@ -2776,7 +2780,6 @@
     }
   },
   "inboxActionRemove": "Remove conversation",
-
   "inboxRemoveConfirmTitle": "Remove conversation?",
   "inboxRemoveConfirmBody": "This will delete your conversation with {displayName}. This action cannot be undone.",
   "@inboxRemoveConfirmBody": {
@@ -2787,10 +2790,8 @@
     }
   },
   "inboxRemoveConfirmConfirm": "Remove",
-
   "inboxConversationMuted": "Conversation muted",
   "inboxConversationUnmuted": "Conversation unmuted",
-
   "inboxCollabInviteCardTitle": "Collaborator invite",
   "@inboxCollabInviteCardTitle": {
     "description": "Header label on a collaborator invite card in the DM conversation."
@@ -2839,12 +2840,10 @@
   "@inboxCollabInviteSentStatus": {
     "description": "Shown on the inviter's own outgoing collaborator invite card in their DM with the collaborator. Replaces Accept/Ignore which are recipient-only actions."
   },
-
   "inboxConversationCollabInvitePreview": "Collaborator invite",
   "@inboxConversationCollabInvitePreview": {
     "description": "Substituted for the legacy NIP-04 plaintext invite copy when shown as the most-recent-message preview in the DM conversation list. The plaintext copy ('Open diVine to review and accept') is misleading inside diVine."
   },
-
   "collaboratorInviteDmBody": "You were invited to collaborate on {title}: {url}\n\nOpen diVine to review and accept.",
   "@collaboratorInviteDmBody": {
     "description": "Plaintext body of the encrypted DM that invites someone to collaborate on a video. Includes a clickable web link so non-Divine Nostr clients can preview the video. The trailing 'Open diVine to review and accept.' sentence MUST stay verbatim — diVine uses it as a marker to suppress legacy plaintext invites in conversation views.",
@@ -2869,7 +2868,6 @@
       }
     }
   },
-
   "dmSendFailedMessage": "Message couldn't be sent",
   "@dmSendFailedMessage": {
     "description": "SnackBar text shown in a DM conversation when a send fails (relay error, signer error, network error). Paired with the retry action `dmSendFailedRetry`."
@@ -2886,10 +2884,8 @@
   "@dmConversationLoadError": {
     "description": "Error text shown in place of the message list when DmRepository.watchMessages emits an error (e.g. local DB read failure). Distinct from send failures (which use `dmSendFailedMessage`)."
   },
-
   "reportDialogCancel": "Cancel",
   "reportDialogReport": "Report",
-
   "exploreVideoId": "ID: {id}",
   "@exploreVideoId": {
     "placeholders": {
@@ -2917,9 +2913,7 @@
       }
     }
   },
-  "exploreNoVideosAvailable": "No videos available",
   "exploreSearchHint": "Search...",
-
   "categoryVideoCount": "{count} videos",
   "@categoryVideoCount": {
     "placeholders": {
@@ -2928,7 +2922,6 @@
       }
     }
   },
-
   "discoverListsFailedToUpdateSubscription": "Failed to update subscription: {error}",
   "@discoverListsFailedToUpdateSubscription": {
     "placeholders": {
@@ -2951,21 +2944,26 @@
   "discoverListsEmptyTitle": "No public lists found",
   "discoverListsEmptySubtitle": "Check back later for new lists",
   "discoverListsByAuthorPrefix": "by",
-
   "curatedListEmptyTitle": "No videos in this list",
   "curatedListEmptySubtitle": "Add some videos to get started",
   "curatedListLoadingVideos": "Loading videos...",
   "curatedListFailedToLoad": "Failed to load list",
   "curatedListNoVideosAvailable": "No videos available",
   "curatedListVideoNotAvailable": "Video not available",
-
   "commonRetry": "Retry",
   "commonNext": "Next",
   "commonDelete": "Delete",
   "commonCancel": "Cancel",
   "commonBack": "Back",
   "commonClose": "Close",
-
+  "videoMetadataEditCoverFailedSnackbar": "Couldn't update the cover. Try again.",
+  "@videoMetadataEditCoverFailedSnackbar": {
+    "description": "Snackbar message shown when saving the chosen cover thumbnail fails on the cover-edit screen. The user can dismiss and try again."
+  },
+  "videoMetadataEditCoverSuccessAnnouncement": "Cover updated",
+  "@videoMetadataEditCoverSuccessAnnouncement": {
+    "description": "Screen-reader announcement spoken after the user confirms a new cover thumbnail and the screen is about to close. Visual users get the screen pop as feedback; this is the audio equivalent."
+  },
   "videoMetadataTags": "Tags",
   "videoMetadataExpiration": "Expiration",
   "videoMetadataExpirationNotExpire": "Does not expire",
@@ -2975,15 +2973,10 @@
   "videoMetadataExpirationOneYear": "1 year",
   "videoMetadataExpirationOneDecade": "1 decade",
   "videoMetadataContentWarnings": "Content Warnings",
-
   "videoEditorStickers": "Stickers",
-
   "trendingTitle": "Trending",
-
   "proofmodeCheckAiGenerated": "Check if AI-generated",
-
   "libraryDeleteConfirm": "Delete",
-
   "libraryWebUnavailableHeadline": "Library is available in the mobile app",
   "libraryWebUnavailableDescription": "Drafts and clips are saved on your device, so open Divine on your phone to manage them.",
   "libraryTabDrafts": "Drafts",
@@ -3074,10 +3067,8 @@
   },
   "libraryAddClips": "Add",
   "libraryRecordVideo": "Record a Video",
-
   "routerInvalidCreator": "Invalid creator",
   "routerInvalidHashtagRoute": "Invalid hashtag route",
-
   "categoryGalleryCouldNotLoadVideos": "Could not load videos",
   "categoryGalleryNoVideosInCategory": "No videos in this category",
   "categoryGallerySortOptionsLabel": "Category sort options",
@@ -3087,15 +3078,12 @@
   "categoryGallerySortForYou": "For You",
   "categoriesCouldNotLoadCategories": "Could not load categories",
   "categoriesNoCategoriesAvailable": "No categories available",
-
   "notificationsEmptyTitle": "No activity yet",
   "notificationsEmptySubtitle": "When people interact with your content, you'll see it here",
-
   "appsPermissionsTitle": "Integration Permissions",
   "appsPermissionsRevoke": "Revoke",
   "appsPermissionsEmptyTitle": "No saved integration permissions",
   "appsPermissionsEmptySubtitle": "Approved integrations will appear here after you remember an access approval.",
-
   "nostrAppPermissionTitle": "{appName} wants your approval",
   "@nostrAppPermissionTitle": {
     "placeholders": {
@@ -3110,7 +3098,6 @@
   "nostrAppPermissionCapability": "Capability",
   "nostrAppPermissionEventKind": "Event kind",
   "nostrAppPermissionAllow": "Allow",
-
   "bugReportSendReport": "Send Report",
   "supportSubjectRequiredLabel": "Subject *",
   "supportRequiredHelper": "Required",
@@ -3164,9 +3151,7 @@
       }
     }
   },
-
   "notificationFollowBack": "Follow back",
-
   "followingTitle": "Following",
   "followingTitleForName": "{displayName}'s Following",
   "@followingTitleForName": {
@@ -3190,16 +3175,13 @@
   "followersFailedToLoadList": "Failed to load followers list",
   "followersEmptyTitle": "No followers yet",
   "followersUpdateFollowFailed": "Failed to update follow status. Please try again.",
-
   "reportMessageTitle": "Report Message",
   "reportMessageWhyReporting": "Why are you reporting this message?",
   "reportMessageSelectReason": "Please select a reason for reporting this message",
-
   "newMessageTitle": "New message",
   "newMessageFindPeople": "Find people",
   "newMessageNoContacts": "No contacts found.\nFollow people to see them here.",
   "newMessageNoUsersFound": "No users found",
-
   "hashtagSearchTitle": "Search for hashtags",
   "hashtagSearchSubtitle": "Discover trending topics and content",
   "hashtagSearchNoResults": "No hashtags found for \"{query}\"",
@@ -3211,12 +3193,9 @@
     }
   },
   "hashtagSearchFailed": "Search failed",
-
   "userNotAvailableTitle": "Account not available",
   "userNotAvailableBody": "This account isn't available right now.",
-
   "classicVinersTitle": "OG Viners",
-
   "blossomFailedToSaveSettings": "Failed to save settings: {error}",
   "@blossomFailedToSaveSettings": {
     "placeholders": {
@@ -3236,12 +3215,10 @@
   "blossomCustomServerUrl": "Custom Blossom Server URL",
   "blossomCustomServerHelper": "Enter the URL of your custom Blossom server",
   "blossomPopularServers": "Popular Blossom Servers",
-
   "blossomServerUrlMustUseHttps": "Blossom server URL must use https://",
   "@blossomServerUrlMustUseHttps": {
     "description": "Snackbar shown when the user typed a non-loopback http:// Blossom server URL. Under release transport security those uploads would silently fail at the OS layer; the validator rejects them with this hint instead."
   },
-
   "blueskyFailedToUpdateCrosspost": "Failed to update crosspost setting",
   "blueskySignInRequired": "Sign in to manage Bluesky settings",
   "blueskyPublishVideos": "Publish videos to Bluesky",
@@ -3254,13 +3231,14 @@
   "blueskyStatusFailed": "Account provisioning failed",
   "blueskyStatusDisabled": "Account disabled",
   "blueskyStatusNotLinked": "No Bluesky account linked",
-
   "invitesTitle": "Invite Friends",
   "invitesGenerateCardTitle": "{count, plural, =1{1 invite ready to generate} other{{count} invites ready to generate}}",
   "@invitesGenerateCardTitle": {
     "description": "Title of the generate-invite card on the invites screen, shown when the user has invite capacity that has not been generated as codes yet.",
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "invitesGenerateCardSubtitle": "Generate a code when you are ready to share one.",
@@ -3289,7 +3267,6 @@
   "invitesClaimed": "Claimed",
   "invitesCouldNotLoad": "Could not load invites",
   "invitesRetry": "Retry",
-
   "searchSomethingWentWrong": "Something went wrong",
   "searchTryAgain": "Try again",
   "searchForLists": "Search for lists",
@@ -3310,13 +3287,8 @@
   "searchVideosLoadingLabel": "Loading video results",
   "searchListsSectionHeader": "Lists",
   "searchListsLoadingLabel": "Loading list results",
-
-  "contentWarningViewAnyway": "View Anyway",
-
   "cameraAgeRestriction": "You must be 16 or older to create content",
-
   "featureRequestCancel": "Cancel",
-
   "keyImportError": "Error: {error}",
   "@keyImportError": {
     "placeholders": {
@@ -3329,7 +3301,6 @@
   "@keyImportInsecureBunkerRelay": {
     "description": "Shown when a pasted bunker:// or nostrconnect:// URL contains a relay parameter that uses cleartext ws:// for a non-loopback host."
   },
-
   "timeNow": "now",
   "@timeNow": {
     "description": "Relative time label for less than one minute ago (short form)"
@@ -3338,42 +3309,54 @@
   "@timeShortMinutes": {
     "description": "Short relative time in minutes, e.g. 3m",
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "timeShortHours": "{count}h",
   "@timeShortHours": {
     "description": "Short relative time in hours, e.g. 2h",
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "timeShortDays": "{count}d",
   "@timeShortDays": {
     "description": "Short relative time in days, e.g. 3d",
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "timeShortWeeks": "{count}w",
   "@timeShortWeeks": {
     "description": "Short relative time in weeks, e.g. 2w",
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "timeShortMonths": "{count}mo",
   "@timeShortMonths": {
     "description": "Short relative time in months, e.g. 1mo",
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "timeShortYears": "{count}y",
   "@timeShortYears": {
     "description": "Short relative time in years, e.g. 1y",
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "timeVerboseNow": "Now",
@@ -3384,7 +3367,9 @@
   "@timeAgo": {
     "description": "Verbose relative time with ago suffix, e.g. 3m ago",
     "placeholders": {
-      "time": { "type": "String" }
+      "time": {
+        "type": "String"
+      }
     }
   },
   "timeToday": "Today",
@@ -3403,28 +3388,33 @@
   "@timeMinutesAgo": {
     "description": "Relative time in minutes with ago suffix",
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "timeHoursAgo": "{count}h ago",
   "@timeHoursAgo": {
     "description": "Relative time in hours with ago suffix",
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "timeDaysAgo": "{count}d ago",
   "@timeDaysAgo": {
     "description": "Relative time in days with ago suffix",
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "draftTimeJustNow": "Just now",
   "@draftTimeJustNow": {
     "description": "Draft age label for less than one minute (capitalized)"
   },
-
   "contentLabelNudity": "Nudity",
   "contentLabelSexualContent": "Sexual Content",
   "contentLabelPornography": "Pornography",
@@ -3446,42 +3436,53 @@
   "contentLabelSpoiler": "Spoiler",
   "contentLabelMisleading": "Misleading",
   "contentLabelSensitiveContent": "Sensitive Content",
-
   "notificationLikedYourVideo": "{actorName} liked your video",
   "@notificationLikedYourVideo": {
     "placeholders": {
-      "actorName": { "type": "String" }
+      "actorName": {
+        "type": "String"
+      }
     }
   },
   "notificationLikedYourComment": "{actorName} liked your comment",
   "@notificationLikedYourComment": {
     "description": "Notification text when someone reacts to a comment the user posted (typically under another user's video).",
     "placeholders": {
-      "actorName": { "type": "String" }
+      "actorName": {
+        "type": "String"
+      }
     }
   },
   "notificationCommentedOnYourVideo": "{actorName} commented on your video",
   "@notificationCommentedOnYourVideo": {
     "placeholders": {
-      "actorName": { "type": "String" }
+      "actorName": {
+        "type": "String"
+      }
     }
   },
   "notificationStartedFollowing": "{actorName} started following you",
   "@notificationStartedFollowing": {
     "placeholders": {
-      "actorName": { "type": "String" }
+      "actorName": {
+        "type": "String"
+      }
     }
   },
   "notificationMentionedYou": "{actorName} mentioned you",
   "@notificationMentionedYou": {
     "placeholders": {
-      "actorName": { "type": "String" }
+      "actorName": {
+        "type": "String"
+      }
     }
   },
   "notificationRepostedYourVideo": "{actorName} reposted your video",
   "@notificationRepostedYourVideo": {
     "placeholders": {
-      "actorName": { "type": "String" }
+      "actorName": {
+        "type": "String"
+      }
     }
   },
   "notificationRepliedToYourComment": "replied to your comment",
@@ -3496,7 +3497,9 @@
   "@notificationOthersCount": {
     "description": "Number of additional actors beyond the first in a grouped notification.",
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "notificationSystemUpdate": "You have a new update",
@@ -3507,7 +3510,6 @@
   "@notificationSomeoneLikedYourVideo": {
     "description": "Defensive fallback shown on a grouped like notification when the actor list is empty (e.g. the backend returned a count without resolved actors). Should be rare in practice."
   },
-
   "commentReplyToPrefix": "Re:",
   "@commentReplyToPrefix": {
     "description": "Short prefix shown before a replied-to username (e.g. 'Re: alice'). Used in the orphaned-reply chip on a comment item and above the comment input when actively replying."
@@ -3516,9 +3518,6 @@
   "@commentHideKeyboard": {
     "description": "Accessibility label for the comment input control that dismisses the keyboard."
   },
-
-  "searchSomethingWentWrong": "Something went wrong",
-  "searchTryAgain": "Try again",
   "draftUntitled": "Untitled",
   "contentWarningNone": "None",
   "textBackgroundNone": "None",
@@ -3619,10 +3618,10 @@
   "videoEditorPlayPauseSemanticLabel": "Play or pause video",
   "videoEditorCropSemanticLabel": "Crop",
   "videoEditorCannotSplitProcessing": "Cannot split clip while it is being processed. Please wait.",
-  "videoEditorSplitPositionInvalid": "Split position invalid. Both clips must be at least {minMs}ms long.",
+  "videoEditorSplitPositionInvalid": "Split position invalid. Both clips must be at least {minDurationMs}ms long.",
   "@videoEditorSplitPositionInvalid": {
     "placeholders": {
-      "minMs": {
+      "minDurationMs": {
         "type": "int"
       }
     }
@@ -3702,14 +3701,6 @@
   "videoEditorSelectFontSemanticLabel": "Select font",
   "videoEditorFontUnknown": "Unknown",
   "videoEditorSplitPlayheadOutsideClip": "Playhead must be within the selected clip to split.",
-  "videoEditorSplitPositionInvalid": "Split position invalid. Both clips must be at least {minDurationMs}ms long.",
-  "@videoEditorSplitPositionInvalid": {
-    "placeholders": {
-      "minDurationMs": {
-        "type": "int"
-      }
-    }
-  },
   "videoEditorTimelineTrimStartSemanticLabel": "Trim start",
   "videoEditorTimelineTrimEndSemanticLabel": "Trim end",
   "videoEditorTimelineTrimClipSemanticLabel": "Trim clip",
@@ -3745,15 +3736,20 @@
   "videoEditorTimelinePositionFormat": "{minutes}m {seconds}s",
   "@videoEditorTimelinePositionFormat": {
     "placeholders": {
-      "minutes": { "type": "int" },
-      "seconds": { "type": "String" }
+      "minutes": {
+        "type": "int"
+      },
+      "seconds": {
+        "type": "String"
+      }
     }
   },
-  "videoEditorColorPickerSemanticLabel": "Color picker",
   "videoEditorColorSelectedSemanticLabel": "{colorName}, selected",
   "@videoEditorColorSelectedSemanticLabel": {
     "placeholders": {
-      "colorName": { "type": "String" }
+      "colorName": {
+        "type": "String"
+      }
     }
   },
   "videoEditorCloseColorPickerSemanticLabel": "Close color picker",
@@ -3763,8 +3759,12 @@
   "videoEditorSaturationBrightnessValue": "Saturation {saturation}%, Brightness {brightness}%",
   "@videoEditorSaturationBrightnessValue": {
     "placeholders": {
-      "saturation": { "type": "int" },
-      "brightness": { "type": "int" }
+      "saturation": {
+        "type": "int"
+      },
+      "brightness": {
+        "type": "int"
+      }
     }
   },
   "videoEditorHueSemanticLabel": "Hue",
@@ -3772,7 +3772,6 @@
   "videoEditorCloseSemanticLabel": "Close",
   "videoEditorDoneSemanticLabel": "Done",
   "videoEditorLevelSemanticLabel": "Level",
-
   "videoMetadataBackSemanticLabel": "Back",
   "videoMetadataDismissHelpDialogSemanticLabel": "Dismiss help dialog",
   "videoMetadataGotItButton": "Got it!",
@@ -3791,13 +3790,13 @@
       }
     }
   },
-  "videoMetadataContentWarningLabel": "Content Warning",
+  "videoMetadataContentWarningLabel": "Add content warning",
   "videoMetadataSelectContentWarningsSemanticLabel": "Select content warnings",
-  "videoMetadataContentWarningSelectAllThatApply": "Select all that apply to your content",
+  "videoMetadataContentWarningSelectAllThatApply": "Select all that apply",
   "videoMetadataContentWarningDoneButton": "Done",
   "videoMetadataAudioReuseTitle": "Publish this sound",
   "videoMetadataAudioReuseSubtitle": "Let others save and reuse this video's audio.",
-  "videoMetadataCollaboratorsLabel": "Collaborators",
+  "videoMetadataCollaboratorsLabel": "Add collaborators",
   "videoMetadataAddCollaboratorSemanticLabel": "Invite collaborator",
   "videoMetadataCollaboratorsHelpTooltip": "How collaborators work",
   "videoMetadataCollaboratorsCount": "{count}/{max} Collaborators",
@@ -3822,7 +3821,7 @@
       }
     }
   },
-  "videoMetadataInspiredByLabel": "Inspired by",
+  "videoMetadataInspiredByLabel": "Add inspired by",
   "videoMetadataSetInspiredBySemanticLabel": "Set inspired by",
   "videoMetadataInspiredByHelpTooltip": "How inspiration credits work",
   "videoMetadataInspiredByNone": "None",
@@ -3951,5 +3950,20 @@
   "profileEditGetVerifiedSubtitle": "Link your social media accounts so people know it's really you.",
   "@profileEditGetVerifiedSubtitle": {
     "description": "Subtitle under the Get verified tile, harmonized with verifyer.divine.video landing copy."
+  },
+  "videoMetadataEditCoverTitle": "Edit cover",
+  "videoMetadataEditCoverCloseSemanticLabel": "Close cover editor",
+  "videoMetadataEditCoverConfirmSemanticLabel": "Confirm cover selection",
+  "videoMetadataEditCoverStripSemanticLabel": "Seek through video to select cover frame",
+  "videoMetadataTagsPickerSearchHint": "Search or add tags",
+  "videoMetadataTagsPickerEmptyHint": "Add tags to help people discover your video",
+  "videoMetadataTagsPickerNoResults": "No matching tags",
+  "videoMetadataTagsPickerAddTag": "Add \"#{tag}\"",
+  "@videoMetadataTagsPickerAddTag": {
+    "placeholders": {
+      "tag": {
+        "type": "String"
+      }
+    }
   }
 }
