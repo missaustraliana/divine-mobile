@@ -172,21 +172,33 @@ class _NotificationsViewState extends ConsumerState<NotificationsView> {
           videoAddressableId: videoAddressableId,
           notificationKind: type,
         );
-      case ActorNotification(:final actor, :final type, :final targetEventId):
+      case ActorNotification(
+        :final actor,
+        :final type,
+        :final targetEventId,
+        :final videoAddressableId,
+      ):
         switch (type) {
           case NotificationKind.follow:
-          case NotificationKind.mention:
             _navigateToProfile(context, actor.pubkey);
+          case NotificationKind.mention:
           case NotificationKind.likeComment:
           case NotificationKind.reply:
-            // targetEventId is the kind 1111 comment; the resolver
-            // walks its E tag to the root video.
+            // targetEventId is the event the resolver will walk to find the
+            // root video. Falls back to the actor's profile only for mentions,
+            // where the mention may have no video context at all.
             if (targetEventId != null && targetEventId.isNotEmpty) {
-              await _navigateToVideo(
+              final navigated = await _navigateToVideo(
                 context,
                 targetEventId,
+                videoAddressableId: videoAddressableId,
                 notificationKind: type,
               );
+              if (!navigated &&
+                  type == NotificationKind.mention &&
+                  context.mounted) {
+                _navigateToProfile(context, actor.pubkey);
+              }
             } else {
               _navigateToProfile(context, actor.pubkey);
             }
@@ -202,7 +214,16 @@ class _NotificationsViewState extends ConsumerState<NotificationsView> {
     }
   }
 
-  Future<void> _navigateToVideo(
+  /// Resolves the video route and pushes [PooledFullscreenVideoFeedScreen].
+  ///
+  /// Returns `true` if a navigation was pushed, `false` if resolution failed
+  /// (resolver returned null) and no navigation occurred. The caller decides
+  /// what to do on `false` — e.g. the mention branch falls back to profile.
+  ///
+  /// The video fetch runs concurrently after the push so the screen opens
+  /// immediately; if the fetch fails or the video is unavailable a snackbar
+  /// is shown on the notifications scaffold without touching the router.
+  Future<bool> _navigateToVideo(
     BuildContext context,
     String videoEventId, {
     String? videoAddressableId,
@@ -218,36 +239,36 @@ class _NotificationsViewState extends ConsumerState<NotificationsView> {
     final videoEventService = ref.read(videoEventServiceProvider);
     final videosRepository = ref.read(videosRepositoryProvider);
 
-    // Use the stable NIP-33 addressable ID whenever the notification payload
-    // includes one. It survives metadata updates because it's keyed on
-    // (kind:pubkey:d-tag) rather than the mutable event hash.
-    final isComment =
+    final shouldAutoOpenComments =
         notificationKind == NotificationKind.comment ||
         notificationKind == NotificationKind.reply ||
-        notificationKind == NotificationKind.likeComment;
+        notificationKind == NotificationKind.likeComment ||
+        notificationKind == NotificationKind.mention;
 
     // Resolve the navigation target.
+    //
+    // The stable-ID path (videoAddressableId set) and the raw-event-id
+    // fallback are synchronous — no await before navigation.
+    // The resolver path (comment/mention without addressable ID) requires
+    // one relay round-trip; we await only that before opening the screen,
+    // then hand the video fetch off as a stream so the screen opens
+    // immediately showing its own loading indicator.
     String routeId;
     if (videoAddressableId != null && videoAddressableId.isNotEmpty) {
       // Stable path: addressable ID works even after a metadata update.
       routeId = videoAddressableId;
-    } else if (isComment) {
-      // Comment path: walk E/e tags to find the root video event ID.
+    } else if (shouldAutoOpenComments) {
+      // Comment/mention path: walk E/e tags to find the root video event ID.
       final resolved = await NotificationTargetResolver(
         videoEventService: videoEventService,
         nostrService: ref.read(nostrServiceProvider),
       ).resolveVideoEventIdFromNotificationTarget(videoEventId);
 
-      if (!context.mounted) return;
+      if (!context.mounted) return false;
 
       if (resolved == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.l10n.notificationsVideoNotFound),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-        return;
+        // Resolution failed — caller decides the fallback (e.g. profile).
+        return false;
       }
       routeId = resolved;
     } else {
@@ -255,49 +276,66 @@ class _NotificationsViewState extends ConsumerState<NotificationsView> {
       routeId = videoEventId;
     }
 
-    VideoEvent? video;
-    try {
-      video = await videosRepository.fetchVideoWithStatsForRouteId(routeId);
-      if (!context.mounted) return;
-    } catch (e) {
-      Log.error(
-        'Failed to fetch video: $e',
-        name: 'NotificationsView',
-        category: LogCategory.ui,
-      );
-    }
+    // Capture l10n and scaffold messenger before the async gap; they remain
+    // valid even after the push transitions away from this view.
+    final l10n = context.l10n;
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
 
-    if (!context.mounted) return;
+    // Fetch the video concurrently. The stream is consumed by the opened
+    // screen's BLoC — we never pop here to avoid touching the wrong route
+    // if the user navigated away before the fetch resolved.
+    final videoFuture = videosRepository
+        .fetchVideoWithStatsForRouteId(routeId)
+        .then((video) {
+          if (video == null) {
+            scaffoldMessenger.showSnackBar(
+              SnackBar(
+                content: Text(l10n.notificationsVideoNotFound),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+            return <VideoEvent>[];
+          }
+          if (videoEventService.shouldHideVideo(video)) {
+            scaffoldMessenger.showSnackBar(
+              SnackBar(
+                content: Text(l10n.notificationsVideoUnavailable),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+            return <VideoEvent>[];
+          }
+          return [video];
+        })
+        .onError<Object>((e, stackTrace) {
+          Log.error(
+            'Failed to fetch video for notification',
+            name: 'NotificationsView',
+            category: LogCategory.ui,
+            error: e,
+            stackTrace: stackTrace,
+          );
+          scaffoldMessenger.showSnackBar(
+            SnackBar(
+              content: Text(l10n.notificationsVideoNotFound),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+          return <VideoEvent>[];
+        });
 
-    if (video == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.l10n.notificationsVideoNotFound),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
-
-    if (videoEventService.shouldHideVideo(video)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.l10n.notificationsVideoUnavailable),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
+    if (!context.mounted) return false;
 
     context.push(
       PooledFullscreenVideoFeedScreen.path,
       extra: PooledFullscreenVideoFeedArgs(
-        videosStream: Stream.value([video]),
+        videosStream: Stream.fromFuture(videoFuture),
         initialIndex: 0,
-        contextTitle: context.l10n.notificationsFromNotification,
-        autoOpenComments: isComment,
+        contextTitle: l10n.notificationsFromNotification,
+        autoOpenComments: shouldAutoOpenComments,
       ),
     );
+    return true;
   }
 
   void _navigateToProfile(BuildContext context, String userPubkey) {

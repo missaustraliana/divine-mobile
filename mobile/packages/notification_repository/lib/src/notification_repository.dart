@@ -715,9 +715,6 @@ class NotificationRepository {
               kind == NotificationKind.reply)
           ? kind
           : NotificationKind.system;
-      final isCommentTargeted =
-          mapped == NotificationKind.likeComment ||
-          mapped == NotificationKind.reply;
       result.add(
         ActorNotification(
           id: n.dedupeKey,
@@ -726,10 +723,11 @@ class NotificationRepository {
           timestamp: n.createdAt,
           isRead: n.read,
           commentText: _truncateComment(n.content, kind),
-          targetEventId: isCommentTargeted ? n.referencedEventId : null,
+          targetEventId: _actorTargetEventId(mapped, n),
           sourceEventIds: n.sourceEventId.isNotEmpty
               ? [n.sourceEventId]
               : const [],
+          videoAddressableId: _actorVideoAddressableId(mapped, n),
         ),
       );
     }
@@ -799,9 +797,6 @@ class NotificationRepository {
             kind == NotificationKind.reply)
         ? kind
         : NotificationKind.system;
-    final isCommentTargeted =
-        mapped == NotificationKind.likeComment ||
-        mapped == NotificationKind.reply;
     return ActorNotification(
       id: raw.dedupeKey,
       type: mapped,
@@ -809,15 +804,58 @@ class NotificationRepository {
       timestamp: raw.createdAt,
       isRead: raw.read,
       commentText: _truncateComment(raw.content, kind),
-      targetEventId: isCommentTargeted ? raw.referencedEventId : null,
+      targetEventId: _actorTargetEventId(mapped, raw),
       sourceEventIds: raw.sourceEventId.isNotEmpty
           ? [raw.sourceEventId]
           : const [],
+      videoAddressableId: _actorVideoAddressableId(mapped, raw),
     );
   }
 
   /// Returns null if [s] is null or empty, otherwise [s].
   static String? _nonEmpty(String? s) => (s == null || s.isEmpty) ? null : s;
+
+  /// Returns the `targetEventId` for an actor-anchored notification.
+  ///
+  /// - `likeComment`/`reply` → the referenced comment event ID (resolver
+  ///   walks its E-tags to reach the root video).
+  /// - `mention` → the source event ID (the kind-1 event that mentioned
+  ///   the user; same resolver path).
+  /// - Everything else → null.
+  ///
+  /// Used by both the page-load path ([_mapActorAnchored]) and the
+  /// realtime path ([enrichOne]) to stay in lockstep.
+  static String? _actorTargetEventId(
+    NotificationKind mapped,
+    RelayNotification n,
+  ) => switch (mapped) {
+    NotificationKind.likeComment ||
+    NotificationKind.reply => n.referencedEventId,
+    NotificationKind.mention =>
+      n.sourceEventId.isNotEmpty ? n.sourceEventId : null,
+    _ => null,
+  };
+
+  /// Returns the stable NIP-33 addressable ID for an actor-anchored
+  /// notification, when the server provided the video's `d_tag`.
+  ///
+  /// Only populated for `likeComment` and `reply` — the tap handler uses
+  /// it to navigate directly to the video without a relay round-trip.
+  ///
+  /// Used by both the page-load path ([_mapActorAnchored]) and the
+  /// realtime path ([enrichOne]) to stay in lockstep.
+  String? _actorVideoAddressableId(
+    NotificationKind mapped,
+    RelayNotification n,
+  ) {
+    if (mapped != NotificationKind.likeComment &&
+        mapped != NotificationKind.reply) {
+      return null;
+    }
+    final dTag = n.referencedDTag;
+    if (dTag == null || dTag.isEmpty) return null;
+    return '${NIP71VideoKinds.addressableShortVideo}:$_userPubkey:$dTag';
+  }
 
   /// Consolidates follow notifications — keeps the earliest per pubkey.
   List<RelayNotification> _consolidateFollows(List<RelayNotification> raw) {
