@@ -1,5 +1,7 @@
 // ABOUTME: BLoC for managing current user's following list with reactive updates
-// ABOUTME: Listens to FollowRepository stream for real-time following changes
+// ABOUTME: Combines CacheSync bootstrap with live FollowRepository reactivity
+
+import 'dart:async';
 
 import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:content_blocklist_repository/content_blocklist_repository.dart';
@@ -13,9 +15,9 @@ part 'my_following_state.dart';
 
 /// BLoC for managing the current user's following list.
 ///
-/// Uses [FollowRepository] for reactive updates via emit.forEach.
-/// Initial state is set optimistically with cached repository data
-/// to prevent UI flash.
+/// Uses [FollowRepository.watchMyFollowingCached] for stale-while-revalidate:
+/// cached pubkeys are served immediately ([isRefreshing] = true) while the
+/// live stream catches up.
 ///
 /// Filters out blocked users before emitting state.
 class MyFollowingBloc extends Bloc<MyFollowingEvent, MyFollowingState> {
@@ -26,7 +28,10 @@ class MyFollowingBloc extends Bloc<MyFollowingEvent, MyFollowingState> {
        _blocklistRepository = contentBlocklistRepository,
        super(
          MyFollowingState(
-           status: MyFollowingStatus.success,
+           status: followRepository.followingPubkeys.isEmpty
+               ? MyFollowingStatus.initial
+               : MyFollowingStatus.success,
+           rawFollowingPubkeys: followRepository.followingPubkeys,
            followingPubkeys: followRepository.followingPubkeys
                .where((pk) => !contentBlocklistRepository.isBlocked(pk))
                .toList(),
@@ -38,31 +43,32 @@ class MyFollowingBloc extends Bloc<MyFollowingEvent, MyFollowingState> {
       transformer: droppable(),
     );
     on<MyFollowingBlocklistChanged>(_onBlocklistChanged);
+    on<_MyFollowingRepositoryUpdated>(_onRepositoryUpdated);
   }
 
   final FollowRepository _followRepository;
   final ContentBlocklistRepository _blocklistRepository;
-
-  /// Raw unfiltered following pubkeys for re-filtering on blocklist changes.
-  List<String> _rawFollowingPubkeys = [];
+  StreamSubscription<List<String>>? _followingSubscription;
 
   /// Filter pubkeys by removing blocked users.
   List<String> _filterPubkeys(List<String> pubkeys) =>
       pubkeys.where((pk) => !_blocklistRepository.isBlocked(pk)).toList();
 
-  /// Listen to repository stream for reactive updates
+  /// Listen to repository's cached stream for stale-while-revalidate.
   Future<void> _onLoadRequested(
     MyFollowingListLoadRequested event,
     Emitter<MyFollowingState> emit,
   ) async {
+    _ensureFollowingSubscription();
     try {
-      await emit.forEach<List<String>>(
-        _followRepository.followingStream,
-        onData: (followingPubkeys) {
-          _rawFollowingPubkeys = followingPubkeys;
+      await emit.forEach<CacheResult<FollowingSnapshot>>(
+        _followRepository.watchMyFollowingCached(),
+        onData: (result) {
           return state.copyWith(
             status: MyFollowingStatus.success,
-            followingPubkeys: _filterPubkeys(followingPubkeys),
+            rawFollowingPubkeys: result.data.pubkeys,
+            followingPubkeys: _filterPubkeys(result.data.pubkeys),
+            isRefreshing: result.isStale,
           );
         },
         onError: (error, stackTrace) {
@@ -71,22 +77,42 @@ class MyFollowingBloc extends Bloc<MyFollowingEvent, MyFollowingState> {
             name: 'MyFollowingBloc',
             category: LogCategory.system,
           );
-          return state.copyWith(status: MyFollowingStatus.failure);
+          addError(error, stackTrace);
+          if (_hasVisibleData) {
+            return state.copyWith(isRefreshing: false);
+          }
+          return state.copyWith(
+            status: MyFollowingStatus.failure,
+            isRefreshing: false,
+          );
         },
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
       Log.error(
         'Failed to listen to following stream: $e',
         name: 'MyFollowingBloc',
         category: LogCategory.system,
       );
-      emit(state.copyWith(status: MyFollowingStatus.failure));
+      addError(e, stackTrace);
+      if (_hasVisibleData) {
+        emit(state.copyWith(isRefreshing: false));
+        return;
+      }
+      emit(
+        state.copyWith(status: MyFollowingStatus.failure, isRefreshing: false),
+      );
     }
   }
 
   /// Handle follow toggle request.
-  /// Delegates to repository which handles the toggle logic internally.
-  /// UI updates reactively via the repository's stream.
+  ///
+  /// Delegates to repository which handles the toggle logic internally,
+  /// then re-dispatches [MyFollowingListLoadRequested] so the cache layer
+  /// and UI re-observe the new follow set. The previous implementation
+  /// relied on a [BehaviorSubject] replay flowing through
+  /// `CacheSync.watchStream`, which mis-tagged stale in-memory snapshots
+  /// as live; [FollowRepository.watchMyFollowingCached] is now one-shot,
+  /// so explicit re-load here owns the post-toggle refresh.
   ///
   /// Uses [droppable] transformer to prevent concurrent toggles from
   /// racing each other (e.g. rapid taps toggling follow/unfollow/follow).
@@ -101,6 +127,7 @@ class MyFollowingBloc extends Bloc<MyFollowingEvent, MyFollowingState> {
 
     try {
       await _followRepository.toggleFollow(event.pubkey);
+      add(const MyFollowingListLoadRequested());
     } catch (e) {
       Log.error(
         'Failed to toggle follow for user: $e',
@@ -111,6 +138,29 @@ class MyFollowingBloc extends Bloc<MyFollowingEvent, MyFollowingState> {
     }
   }
 
+  void _onRepositoryUpdated(
+    _MyFollowingRepositoryUpdated event,
+    Emitter<MyFollowingState> emit,
+  ) {
+    if (state.status == MyFollowingStatus.initial && event.pubkeys.isEmpty) {
+      return;
+    }
+    if (_samePubkeys(state.rawFollowingPubkeys, event.pubkeys) &&
+        state.status == MyFollowingStatus.success &&
+        !state.isRefreshing) {
+      return;
+    }
+
+    emit(
+      state.copyWith(
+        status: MyFollowingStatus.success,
+        rawFollowingPubkeys: event.pubkeys,
+        followingPubkeys: _filterPubkeys(event.pubkeys),
+        isRefreshing: false,
+      ),
+    );
+  }
+
   /// Re-filter following when blocklist changes.
   void _onBlocklistChanged(
     MyFollowingBlocklistChanged event,
@@ -119,7 +169,35 @@ class MyFollowingBloc extends Bloc<MyFollowingEvent, MyFollowingState> {
     if (state.status != MyFollowingStatus.success) return;
 
     emit(
-      state.copyWith(followingPubkeys: _filterPubkeys(_rawFollowingPubkeys)),
+      state.copyWith(
+        followingPubkeys: _filterPubkeys(state.rawFollowingPubkeys),
+      ),
     );
+  }
+
+  bool get _hasVisibleData =>
+      state.status == MyFollowingStatus.toggleFailure ||
+      state.isRefreshing ||
+      state.rawFollowingPubkeys.isNotEmpty;
+
+  void _ensureFollowingSubscription() {
+    _followingSubscription ??= _followRepository.followingStream.listen(
+      (pubkeys) => add(_MyFollowingRepositoryUpdated(pubkeys)),
+    );
+  }
+
+  bool _samePubkeys(List<String> a, List<String> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  Future<void> close() async {
+    await _followingSubscription?.cancel();
+    return super.close();
   }
 }

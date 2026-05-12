@@ -1,8 +1,7 @@
 // ABOUTME: Widget tests for OthersFollowersScreen startup behavior
-// ABOUTME: Ensures the followers list renders without waiting for exact count
+// ABOUTME: Ensures the followers list renders correctly with CacheSync integration
 
-import 'dart:async';
-
+import 'package:cache_sync/cache_sync.dart';
 import 'package:content_blocklist_repository/content_blocklist_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,6 +21,30 @@ class _MockContentBlocklistRepository extends Mock
 
 class _MockNostrClient extends Mock implements NostrClient {}
 
+class _FakeCacheDao implements CacheDao {
+  @override
+  Future<String?> read(String key) async => null;
+
+  @override
+  Future<void> write({
+    required String key,
+    required String payload,
+    Duration? ttl,
+  }) async {}
+
+  @override
+  Future<void> delete(String key) async {}
+
+  @override
+  Future<void> deleteAll() async {}
+
+  @override
+  Future<int> totalPayloadBytes() async => 0;
+
+  @override
+  Future<void> evictOldest(int bytesToFree) async {}
+}
+
 void main() {
   const targetPubkey =
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -35,7 +58,9 @@ void main() {
     late _MockContentBlocklistRepository mockBlocklistRepository;
     late _MockNostrClient mockNostrClient;
 
-    setUp(() {
+    setUp(() async {
+      await CacheSync.init(dao: _FakeCacheDao());
+
       mockFollowRepository = _MockFollowRepository();
       mockBlocklistRepository = _MockContentBlocklistRepository();
       mockNostrClient = _MockNostrClient();
@@ -45,46 +70,52 @@ void main() {
       when(() => mockFollowRepository.followingPubkeys).thenReturn(const []);
       when(
         () => mockFollowRepository.followingStream,
-      ).thenAnswer((_) => Stream<List<String>>.value([]));
+      ).thenAnswer((_) => Stream<List<String>>.value(const []));
       when(() => mockNostrClient.publicKey).thenReturn(currentUserPubkey);
+      when(() => mockFollowRepository.watchMyFollowingCached()).thenAnswer(
+        (_) => Stream.value(
+          const CacheResult.live(
+            FollowingSnapshot(pubkeys: <String>[], count: 0),
+          ),
+        ),
+      );
     });
 
-    testWidgets(
-      'renders follower tiles before the exact count request finishes',
-      (tester) async {
-        final followerCountCompleter = Completer<int>();
-
-        when(
-          () => mockFollowRepository.getFollowers(targetPubkey),
-        ).thenAnswer((_) async => [followerPubkey]);
-        when(
-          () => mockFollowRepository.getFollowerCount(targetPubkey),
-        ).thenAnswer((_) => followerCountCompleter.future);
-
-        await tester.pumpWidget(
-          testMaterialApp(
-            home: const OthersFollowersScreen(
-              pubkey: targetPubkey,
-              displayName: 'Alice',
-            ),
-            mockProfileRepository: createMockProfileRepository(),
-            mockNostrService: mockNostrClient,
-            additionalOverrides: [
-              followRepositoryProvider.overrideWithValue(mockFollowRepository),
-              contentBlocklistRepositoryProvider.overrideWithValue(
-                mockBlocklistRepository,
-              ),
-            ],
+    testWidgets('renders follower tiles after followers load', (tester) async {
+      when(
+        () => mockFollowRepository.watchOthersFollowersCached(
+          targetPubkey,
+          forceRefresh: any(named: 'forceRefresh'),
+        ),
+      ).thenAnswer(
+        (_) => Stream.value(
+          const CacheResult.live(
+            FollowersSnapshot(pubkeys: [followerPubkey], count: 1),
           ),
-        );
-        await tester.pump();
-        await tester.pump();
+        ),
+      );
 
-        expect(find.byType(UserProfileTile), findsOneWidget);
-        expect(find.byType(CircularProgressIndicator), findsNothing);
+      await tester.pumpWidget(
+        testMaterialApp(
+          home: const OthersFollowersScreen(
+            pubkey: targetPubkey,
+            displayName: 'Alice',
+          ),
+          mockProfileRepository: createMockProfileRepository(),
+          mockNostrService: mockNostrClient,
+          mockFollowRepository: mockFollowRepository,
+          additionalOverrides: [
+            contentBlocklistRepositoryProvider.overrideWithValue(
+              mockBlocklistRepository,
+            ),
+          ],
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
 
-        followerCountCompleter.complete(500);
-      },
-    );
+      expect(find.byType(UserProfileTile), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
   });
 }

@@ -1,6 +1,7 @@
 // ABOUTME: Cubit managing account list, draft warnings, and account switching
 // ABOUTME: for the settings screen account-switcher bottom sheet.
 
+import 'package:cache_sync/cache_sync.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:openvine/models/known_account.dart';
@@ -42,14 +43,18 @@ class SettingsAccountCubit extends Cubit<SettingsAccountState> {
 
   /// Switches to an existing account by signing out and setting the pending
   /// account switch pubkey so WelcomeBloc pre-selects it.
-  void switchToAccount(String pubkeyHex) {
+  Future<void> switchToAccount(String pubkeyHex) async {
     if (pubkeyHex == state.currentPubkey) return;
+    // Clear all cache rows before sign-out so the next account cannot hydrate
+    // from stale entries while startup races with asynchronous eviction.
+    await CacheSync.invalidateAll();
     _authService.pendingAccountSwitchPubkey = pubkeyHex;
-    _authService.signOut();
+    await _authService.signOut();
   }
 
   /// Signs out to add a new account (no pending switch pubkey).
-  void addNewAccount() {
-    _authService.signOut();
+  Future<void> addNewAccount() async {
+    await CacheSync.invalidateAll();
+    await _authService.signOut();
   }
 }

@@ -23,16 +23,24 @@ final class OthersFollowersState extends Equatable {
   const OthersFollowersState({
     this.status = OthersFollowersStatus.initial,
     this.followersPubkeys = const [],
+    this.rawFollowersPubkeys = const [],
     this.followerCount = 0,
     this.targetPubkey,
-    this.lastFetchedAt,
+    this.isRefreshing = false,
+    this.isFollowingTarget = false,
   });
 
   /// The current status of the followers list
   final OthersFollowersStatus status;
 
-  /// List of pubkeys who follow the target user
+  /// List of pubkeys who follow the target user (blocklist-filtered).
   final List<String> followersPubkeys;
+
+  /// Unfiltered follower pubkeys as received from the repository.
+  ///
+  /// Stored in state so blocklist re-filtering and optimistic updates can
+  /// replay the full list without waiting for a new network event.
+  final List<String> rawFollowersPubkeys;
 
   /// Authoritative follower count (max of list length and COUNT query).
   ///
@@ -44,32 +52,36 @@ final class OthersFollowersState extends Equatable {
   /// The pubkey whose followers list is being viewed (for retry)
   final String? targetPubkey;
 
-  /// When the followers list was last fetched from relays
-  final DateTime? lastFetchedAt;
+  /// Whether a background refresh is in progress (stale-while-revalidate).
+  ///
+  /// When [true], the list is showing cached data while fresh data loads.
+  /// Used by the UI to show a progress indicator via [LoadingOverlay].
+  final bool isRefreshing;
 
-  /// Cache TTL - data older than this is considered stale
-  static const cacheTtl = Duration(seconds: 30);
-
-  /// Check if the cached data is stale and should be re-fetched
-  bool get isStale {
-    if (lastFetchedAt == null) return true;
-    return DateTime.now().difference(lastFetchedAt!) > cacheTtl;
-  }
+  /// Whether the current user follows the target user.
+  ///
+  /// Used to decide whether to hide the current user from the target's
+  /// follower list (a user who doesn't follow back is hidden).
+  final bool isFollowingTarget;
 
   /// Create a copy with updated values
   OthersFollowersState copyWith({
     OthersFollowersStatus? status,
     List<String>? followersPubkeys,
+    List<String>? rawFollowersPubkeys,
     int? followerCount,
     String? targetPubkey,
-    DateTime? lastFetchedAt,
+    bool? isRefreshing,
+    bool? isFollowingTarget,
   }) {
     return OthersFollowersState(
       status: status ?? this.status,
       followersPubkeys: followersPubkeys ?? this.followersPubkeys,
+      rawFollowersPubkeys: rawFollowersPubkeys ?? this.rawFollowersPubkeys,
       followerCount: followerCount ?? this.followerCount,
       targetPubkey: targetPubkey ?? this.targetPubkey,
-      lastFetchedAt: lastFetchedAt ?? this.lastFetchedAt,
+      isRefreshing: isRefreshing ?? this.isRefreshing,
+      isFollowingTarget: isFollowingTarget ?? this.isFollowingTarget,
     );
   }
 
@@ -77,8 +89,10 @@ final class OthersFollowersState extends Equatable {
   List<Object?> get props => [
     status,
     followersPubkeys,
+    rawFollowersPubkeys,
     followerCount,
     targetPubkey,
-    lastFetchedAt,
+    isRefreshing,
+    isFollowingTarget,
   ];
 }

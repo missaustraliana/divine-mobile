@@ -1,8 +1,6 @@
 // ABOUTME: Tests for OthersFollowersBloc - another user's followers list
 // ABOUTME: Tests loading from repository, error handling, and follow operations
 
-import 'dart:async';
-
 import 'package:bloc_test/bloc_test.dart';
 import 'package:content_blocklist_repository/content_blocklist_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -30,7 +28,7 @@ void main() {
       return hexSuffix.padLeft(64, '0');
     }
 
-    setUp(() {
+    setUp(() async {
       mockFollowRepository = _MockFollowRepository();
       mockBlocklistRepository = _MockContentBlocklistRepository();
 
@@ -55,12 +53,21 @@ void main() {
       blocTest<OthersFollowersBloc, OthersFollowersState>(
         'emits [loading, success] with followers from repository',
         setUp: () {
-          when(() => mockFollowRepository.getFollowers(any())).thenAnswer(
-            (_) async => [validPubkey('follower1'), validPubkey('follower2')],
-          );
           when(
-            () => mockFollowRepository.getFollowerCount(any()),
-          ).thenAnswer((_) async => 2);
+            () => mockFollowRepository.watchOthersFollowersCached(
+              any(),
+              forceRefresh: any(named: 'forceRefresh'),
+            ),
+          ).thenAnswer(
+            (_) => Stream<CacheResult<FollowersSnapshot>>.value(
+              CacheResult.live(
+                FollowersSnapshot(
+                  pubkeys: [validPubkey('follower1'), validPubkey('follower2')],
+                  count: 2,
+                ),
+              ),
+            ),
+          );
         },
         build: createBloc,
         act: (bloc) =>
@@ -73,38 +80,56 @@ void main() {
           ]);
           expect(bloc.state.followerCount, 2);
           expect(bloc.state.targetPubkey, validPubkey('target'));
-          expect(bloc.state.lastFetchedAt, isNotNull);
         },
       );
 
       blocTest<OthersFollowersBloc, OthersFollowersState>(
-        'uses higher count from service when list is incomplete',
+        'followerCount equals fetched list length',
         setUp: () {
           when(
-            () => mockFollowRepository.getFollowers(any()),
-          ).thenAnswer((_) async => [validPubkey('follower1')]);
-          when(
-            () => mockFollowRepository.getFollowerCount(any()),
-          ).thenAnswer((_) async => 500);
+            () => mockFollowRepository.watchOthersFollowersCached(
+              any(),
+              forceRefresh: any(named: 'forceRefresh'),
+            ),
+          ).thenAnswer(
+            (_) => Stream<CacheResult<FollowersSnapshot>>.value(
+              CacheResult.live(
+                FollowersSnapshot(
+                  pubkeys: [validPubkey('follower1')],
+                  count: [validPubkey('follower1')].length,
+                ),
+              ),
+            ),
+          );
         },
         build: createBloc,
         act: (bloc) =>
             bloc.add(OthersFollowersListLoadRequested(validPubkey('target'))),
         verify: (bloc) {
           expect(bloc.state.followersPubkeys, hasLength(1));
-          expect(bloc.state.followerCount, 500);
+          expect(bloc.state.followerCount, 1);
         },
       );
 
       blocTest<OthersFollowersBloc, OthersFollowersState>(
         'filters out current user when viewer is not following target',
         setUp: () {
-          when(() => mockFollowRepository.getFollowers(any())).thenAnswer(
-            (_) async => [testCurrentUserPubkey, validPubkey('follower1')],
-          );
           when(
-            () => mockFollowRepository.getFollowerCount(any()),
-          ).thenAnswer((_) async => 2);
+            () => mockFollowRepository.watchOthersFollowersCached(
+              any(),
+              forceRefresh: any(named: 'forceRefresh'),
+            ),
+          ).thenAnswer(
+            (_) => Stream<CacheResult<FollowersSnapshot>>.value(
+              CacheResult.live(
+                FollowersSnapshot(
+                  pubkeys: [testCurrentUserPubkey, validPubkey('follower1')],
+                  count: 2,
+                ),
+              ),
+            ),
+          );
+
           when(
             () => mockFollowRepository.isFollowing(validPubkey('target')),
           ).thenReturn(false);
@@ -121,12 +146,22 @@ void main() {
       blocTest<OthersFollowersBloc, OthersFollowersState>(
         'keeps current user in list when viewer is following target',
         setUp: () {
-          when(() => mockFollowRepository.getFollowers(any())).thenAnswer(
-            (_) async => [testCurrentUserPubkey, validPubkey('follower1')],
-          );
           when(
-            () => mockFollowRepository.getFollowerCount(any()),
-          ).thenAnswer((_) async => 2);
+            () => mockFollowRepository.watchOthersFollowersCached(
+              any(),
+              forceRefresh: any(named: 'forceRefresh'),
+            ),
+          ).thenAnswer(
+            (_) => Stream<CacheResult<FollowersSnapshot>>.value(
+              CacheResult.live(
+                FollowersSnapshot(
+                  pubkeys: [testCurrentUserPubkey, validPubkey('follower1')],
+                  count: 2,
+                ),
+              ),
+            ),
+          );
+
           when(
             () => mockFollowRepository.isFollowing(validPubkey('target')),
           ).thenReturn(true);
@@ -147,11 +182,17 @@ void main() {
         'emits [loading, success] with empty list when no followers',
         setUp: () {
           when(
-            () => mockFollowRepository.getFollowers(any()),
-          ).thenAnswer((_) async => []);
-          when(
-            () => mockFollowRepository.getFollowerCount(any()),
-          ).thenAnswer((_) async => 0);
+            () => mockFollowRepository.watchOthersFollowersCached(
+              any(),
+              forceRefresh: any(named: 'forceRefresh'),
+            ),
+          ).thenAnswer(
+            (_) => Stream<CacheResult<FollowersSnapshot>>.value(
+              const CacheResult.live(
+                FollowersSnapshot(pubkeys: <String>[], count: 0),
+              ),
+            ),
+          );
         },
         build: createBloc,
         act: (bloc) =>
@@ -161,7 +202,6 @@ void main() {
           expect(bloc.state.followersPubkeys, isEmpty);
           expect(bloc.state.followerCount, 0);
           expect(bloc.state.targetPubkey, validPubkey('target'));
-          expect(bloc.state.lastFetchedAt, isNotNull);
         },
       );
 
@@ -169,11 +209,15 @@ void main() {
         'emits [loading, failure] when repository throws',
         setUp: () {
           when(
-            () => mockFollowRepository.getFollowers(any()),
-          ).thenThrow(Exception('Network error'));
-          when(
-            () => mockFollowRepository.getFollowerCount(any()),
-          ).thenAnswer((_) async => 0);
+            () => mockFollowRepository.watchOthersFollowersCached(
+              any(),
+              forceRefresh: any(named: 'forceRefresh'),
+            ),
+          ).thenAnswer(
+            (_) => Stream<CacheResult<FollowersSnapshot>>.error(
+              Exception('Network error'),
+            ),
+          );
         },
         build: createBloc,
         act: (bloc) =>
@@ -191,14 +235,47 @@ void main() {
       );
 
       blocTest<OthersFollowersBloc, OthersFollowersState>(
+        'keeps cached data when refresh errors after cached emission',
+        setUp: () {
+          when(
+            () => mockFollowRepository.watchOthersFollowersCached(
+              any(),
+              forceRefresh: any(named: 'forceRefresh'),
+            ),
+          ).thenAnswer((_) async* {
+            yield CacheResult.cached(
+              FollowersSnapshot(pubkeys: [validPubkey('cached')], count: 10),
+            );
+            throw Exception('Network error');
+          });
+        },
+        build: createBloc,
+        act: (bloc) =>
+            bloc.add(OthersFollowersListLoadRequested(validPubkey('target'))),
+        verify: (bloc) {
+          expect(bloc.state.status, OthersFollowersStatus.success);
+          expect(bloc.state.followersPubkeys, [validPubkey('cached')]);
+          expect(bloc.state.followerCount, 10);
+          expect(bloc.state.isRefreshing, isFalse);
+        },
+        errors: () => [isA<Exception>()],
+      );
+
+      blocTest<OthersFollowersBloc, OthersFollowersState>(
         'stores targetPubkey in state for retry',
         setUp: () {
           when(
-            () => mockFollowRepository.getFollowers(any()),
-          ).thenAnswer((_) async => []);
-          when(
-            () => mockFollowRepository.getFollowerCount(any()),
-          ).thenAnswer((_) async => 0);
+            () => mockFollowRepository.watchOthersFollowersCached(
+              any(),
+              forceRefresh: any(named: 'forceRefresh'),
+            ),
+          ).thenAnswer(
+            (_) => Stream<CacheResult<FollowersSnapshot>>.value(
+              const CacheResult.live(
+                FollowersSnapshot(pubkeys: <String>[], count: 0),
+              ),
+            ),
+          );
         },
         build: createBloc,
         act: (bloc) =>
@@ -212,45 +289,28 @@ void main() {
         'calls repository with correct pubkey',
         setUp: () {
           when(
-            () => mockFollowRepository.getFollowers(any()),
-          ).thenAnswer((_) async => []);
-          when(
-            () => mockFollowRepository.getFollowerCount(any()),
-          ).thenAnswer((_) async => 0);
+            () => mockFollowRepository.watchOthersFollowersCached(
+              any(),
+              forceRefresh: any(named: 'forceRefresh'),
+            ),
+          ).thenAnswer(
+            (_) => Stream<CacheResult<FollowersSnapshot>>.value(
+              const CacheResult.live(
+                FollowersSnapshot(pubkeys: <String>[], count: 0),
+              ),
+            ),
+          );
         },
         build: createBloc,
         act: (bloc) =>
             bloc.add(OthersFollowersListLoadRequested(validPubkey('target'))),
         verify: (_) {
           verify(
-            () => mockFollowRepository.getFollowers(validPubkey('target')),
+            () => mockFollowRepository.watchOthersFollowersCached(
+              validPubkey('target'),
+              forceRefresh: any(named: 'forceRefresh'),
+            ),
           ).called(1);
-        },
-      );
-
-      blocTest<OthersFollowersBloc, OthersFollowersState>(
-        'skips fetch when data is fresh for same target',
-        setUp: () {
-          when(
-            () => mockFollowRepository.getFollowers(any()),
-          ).thenAnswer((_) async => [validPubkey('follower1')]);
-          when(
-            () => mockFollowRepository.getFollowerCount(any()),
-          ).thenAnswer((_) async => 1);
-        },
-        build: createBloc,
-        seed: () => OthersFollowersState(
-          status: OthersFollowersStatus.success,
-          followersPubkeys: [validPubkey('follower1')],
-          followerCount: 1,
-          targetPubkey: validPubkey('target'),
-          lastFetchedAt: DateTime.now(), // Fresh data
-        ),
-        act: (bloc) =>
-            bloc.add(OthersFollowersListLoadRequested(validPubkey('target'))),
-        expect: () => <OthersFollowersState>[], // No state change
-        verify: (_) {
-          verifyNever(() => mockFollowRepository.getFollowers(any()));
         },
       );
 
@@ -258,11 +318,20 @@ void main() {
         'fetches when forceRefresh is true even if data is fresh',
         setUp: () {
           when(
-            () => mockFollowRepository.getFollowers(any()),
-          ).thenAnswer((_) async => [validPubkey('follower1')]);
-          when(
-            () => mockFollowRepository.getFollowerCount(any()),
-          ).thenAnswer((_) async => 1);
+            () => mockFollowRepository.watchOthersFollowersCached(
+              any(),
+              forceRefresh: any(named: 'forceRefresh'),
+            ),
+          ).thenAnswer(
+            (_) => Stream<CacheResult<FollowersSnapshot>>.value(
+              CacheResult.live(
+                FollowersSnapshot(
+                  pubkeys: [validPubkey('follower1')],
+                  count: 1,
+                ),
+              ),
+            ),
+          );
         },
         build: createBloc,
         seed: () => OthersFollowersState(
@@ -270,7 +339,6 @@ void main() {
           followersPubkeys: [validPubkey('follower1')],
           followerCount: 1,
           targetPubkey: validPubkey('target'),
-          lastFetchedAt: DateTime.now(), // Fresh data
         ),
         act: (bloc) => bloc.add(
           OthersFollowersListLoadRequested(
@@ -279,63 +347,13 @@ void main() {
           ),
         ),
         verify: (bloc) {
-          verify(() => mockFollowRepository.getFollowers(any())).called(1);
-          expect(bloc.state.status, OthersFollowersStatus.success);
-        },
-      );
-
-      test(
-        'emits followers before the exact follower count resolves',
-        () async {
-          final countCompleter = Completer<int>();
-
-          when(
-            () => mockFollowRepository.getFollowers(any()),
-          ).thenAnswer((_) async => [validPubkey('follower1')]);
-          when(
-            () => mockFollowRepository.getFollowerCount(any()),
-          ).thenAnswer((_) => countCompleter.future);
-
-          final bloc = createBloc();
-
-          final firstStates = expectLater(
-            bloc.stream,
-            emitsInOrder([
-              isA<OthersFollowersState>().having(
-                (state) => state.status,
-                'status',
-                OthersFollowersStatus.loading,
-              ),
-              isA<OthersFollowersState>()
-                  .having(
-                    (state) => state.status,
-                    'status',
-                    OthersFollowersStatus.success,
-                  )
-                  .having(
-                    (state) => state.followersPubkeys,
-                    'followersPubkeys',
-                    [validPubkey('follower1')],
-                  )
-                  .having((state) => state.followerCount, 'followerCount', 1),
-            ]),
-          );
-
-          bloc.add(OthersFollowersListLoadRequested(validPubkey('target')));
-
-          await firstStates.timeout(
-            const Duration(milliseconds: 200),
-            onTimeout: () => throw TimeoutException(
-              'Followers list never resolved before count finished',
+          verify(
+            () => mockFollowRepository.watchOthersFollowersCached(
+              any(),
+              forceRefresh: any(named: 'forceRefresh'),
             ),
-          );
-
-          countCompleter.complete(500);
-          await Future<void>.delayed(Duration.zero);
-
-          expect(bloc.state.followerCount, 500);
-
-          await bloc.close();
+          ).called(1);
+          expect(bloc.state.status, OthersFollowersStatus.success);
         },
       );
     });
@@ -347,6 +365,7 @@ void main() {
         seed: () => OthersFollowersState(
           status: OthersFollowersStatus.success,
           followersPubkeys: [validPubkey('existing')],
+          rawFollowersPubkeys: [validPubkey('existing')],
           followerCount: 500,
           targetPubkey: validPubkey('target'),
         ),
@@ -356,6 +375,7 @@ void main() {
           OthersFollowersState(
             status: OthersFollowersStatus.success,
             followersPubkeys: [validPubkey('existing'), validPubkey('new')],
+            rawFollowersPubkeys: [validPubkey('existing'), validPubkey('new')],
             followerCount: 501,
             targetPubkey: validPubkey('target'),
           ),
@@ -368,6 +388,7 @@ void main() {
         seed: () => OthersFollowersState(
           status: OthersFollowersStatus.success,
           followersPubkeys: [validPubkey('existing')],
+          rawFollowersPubkeys: [validPubkey('existing')],
           followerCount: 1,
           targetPubkey: validPubkey('target'),
         ),
@@ -390,6 +411,7 @@ void main() {
           OthersFollowersState(
             status: OthersFollowersStatus.success,
             followersPubkeys: [validPubkey('first')],
+            rawFollowersPubkeys: [validPubkey('first')],
             followerCount: 1,
             targetPubkey: validPubkey('target'),
           ),
@@ -407,6 +429,10 @@ void main() {
             validPubkey('follower1'),
             validPubkey('follower2'),
           ],
+          rawFollowersPubkeys: [
+            validPubkey('follower1'),
+            validPubkey('follower2'),
+          ],
           followerCount: 500,
           targetPubkey: validPubkey('target'),
         ),
@@ -417,6 +443,7 @@ void main() {
           OthersFollowersState(
             status: OthersFollowersStatus.success,
             followersPubkeys: [validPubkey('follower2')],
+            rawFollowersPubkeys: [validPubkey('follower2')],
             followerCount: 499,
             targetPubkey: validPubkey('target'),
           ),
@@ -429,6 +456,7 @@ void main() {
         seed: () => OthersFollowersState(
           status: OthersFollowersStatus.success,
           followersPubkeys: [validPubkey('existing')],
+          rawFollowersPubkeys: [validPubkey('existing')],
           followerCount: 1,
           targetPubkey: validPubkey('target'),
         ),
@@ -444,6 +472,7 @@ void main() {
         seed: () => OthersFollowersState(
           status: OthersFollowersStatus.success,
           followersPubkeys: [validPubkey('only')],
+          rawFollowersPubkeys: [validPubkey('only')],
           followerCount: 1,
           targetPubkey: validPubkey('target'),
         ),
@@ -504,41 +533,22 @@ void main() {
     });
 
     test('props includes all fields', () {
-      final testTime = DateTime(2024, 1, 1, 12);
-      final state = OthersFollowersState(
+      const state = OthersFollowersState(
         status: OthersFollowersStatus.success,
-        followersPubkeys: const ['pubkey1'],
+        followersPubkeys: ['pubkey1'],
         followerCount: 10,
         targetPubkey: 'target',
-        lastFetchedAt: testTime,
       );
 
       expect(state.props, [
         OthersFollowersStatus.success,
         ['pubkey1'],
+        <String>[], // rawFollowersPubkeys
         10,
         'target',
-        testTime,
+        false, // isRefreshing
+        false, // isFollowingTarget
       ]);
-    });
-
-    test('isStale returns true when lastFetchedAt is null', () {
-      const state = OthersFollowersState();
-      expect(state.isStale, isTrue);
-    });
-
-    test('isStale returns true when data is older than cacheTtl', () {
-      final oldTime = DateTime.now().subtract(
-        OthersFollowersState.cacheTtl + const Duration(seconds: 1),
-      );
-      final state = OthersFollowersState(lastFetchedAt: oldTime);
-      expect(state.isStale, isTrue);
-    });
-
-    test('isStale returns false when data is fresh', () {
-      final recentTime = DateTime.now().subtract(const Duration(seconds: 10));
-      final state = OthersFollowersState(lastFetchedAt: recentTime);
-      expect(state.isStale, isFalse);
     });
   });
 }
