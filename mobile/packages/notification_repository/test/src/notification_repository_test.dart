@@ -277,7 +277,7 @@ void main() {
         expect(item.actors.first.pictureUrl, isNull);
       });
 
-      test('returns empty page on API error', () async {
+      test('rethrows on API error after logging', () async {
         when(
           () => funnelcakeApiClient.getNotifications(
             pubkey: any(named: 'pubkey'),
@@ -286,12 +286,80 @@ void main() {
             authHeaders: any(named: 'authHeaders'),
             limit: any(named: 'limit'),
           ),
-        ).thenThrow(Exception('network error'));
+        ).thenThrow(const FunnelcakeException('network error'));
 
-        final page = await repository.getNotifications();
+        await expectLater(
+          repository.getNotifications(),
+          throwsA(isA<FunnelcakeException>()),
+        );
 
-        expect(page.items, isEmpty);
-        expect(page.unreadCount, equals(0));
+        // BehaviorSubject preserves its prior value across the throw —
+        // the seeded NotificationPage.empty stays as the snapshot value
+        // so downstream consumers don't see a spurious update.
+        final snapshot = await repository.watchSnapshot().first;
+        expect(snapshot, equals(NotificationPage.empty));
+      });
+
+      test('preserves populated snapshot when refresh throws', () async {
+        // First refresh succeeds and populates the snapshot.
+        stubProfiles({
+          'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+        });
+        stubNotifications([makeNotification()], unreadCount: 1);
+        await repository.refresh();
+        final populated = await repository.watchSnapshot().first;
+        expect(populated.items, hasLength(1));
+
+        // Second refresh throws — the snapshot must keep the populated
+        // page from the first refresh, not revert to empty. This pins
+        // the design contract that lets the BLoC's failure state coexist
+        // with previously-loaded data (the BehaviorSubject value the
+        // snapshot stream emits to subscribers stays at the populated
+        // page).
+        when(
+          () => funnelcakeApiClient.getNotifications(
+            pubkey: any(named: 'pubkey'),
+            cursor: any(named: 'cursor'),
+            requestUri: any(named: 'requestUri'),
+            authHeaders: any(named: 'authHeaders'),
+            limit: any(named: 'limit'),
+          ),
+        ).thenThrow(const FunnelcakeException('network error'));
+
+        await expectLater(
+          repository.refresh(),
+          throwsA(isA<FunnelcakeException>()),
+        );
+
+        final after = await repository.watchSnapshot().first;
+        expect(after, equals(populated));
+      });
+
+      test('repeated throws keep snapshot stable', () async {
+        when(
+          () => funnelcakeApiClient.getNotifications(
+            pubkey: any(named: 'pubkey'),
+            cursor: any(named: 'cursor'),
+            requestUri: any(named: 'requestUri'),
+            authHeaders: any(named: 'authHeaders'),
+            limit: any(named: 'limit'),
+          ),
+        ).thenThrow(const FunnelcakeException('network error'));
+
+        await expectLater(
+          repository.getNotifications(),
+          throwsA(isA<FunnelcakeException>()),
+        );
+        await expectLater(
+          repository.getNotifications(),
+          throwsA(isA<FunnelcakeException>()),
+        );
+
+        // Two consecutive throws must not corrupt the snapshot or leave
+        // the repository in a degraded state — the seeded empty page
+        // remains the live snapshot value.
+        final snapshot = await repository.watchSnapshot().first;
+        expect(snapshot, equals(NotificationPage.empty));
       });
 
       test('passes cursor for pagination', () async {
@@ -1037,6 +1105,49 @@ void main() {
               authHeaders: any(named: 'authHeaders'),
             ),
           );
+        },
+      );
+
+      test(
+        'rolls back optimistic snapshot on 200 / success:false soft-failure',
+        () async {
+          stubProfiles({
+            'pubkey_alice': makeProfile('pubkey_alice', displayName: 'Alice'),
+          });
+          stubNotifications([makeNotification()], unreadCount: 1);
+          await repository.refresh();
+          final loadedId =
+              (await repository.watchSnapshot().first).items.first.id;
+          expect(await repository.watchUnreadCount().first, equals(1));
+
+          when(
+            () => funnelcakeApiClient.markNotificationsRead(
+              pubkey: any(named: 'pubkey'),
+              notificationIds: any(named: 'notificationIds'),
+              authHeaders: any(named: 'authHeaders'),
+            ),
+          ).thenThrow(
+            const FunnelcakeApiException(
+              message:
+                  'Mark notifications read rejected by server: token rejected',
+              statusCode: 200,
+            ),
+          );
+
+          await expectLater(
+            repository.markAsRead([loadedId]),
+            throwsA(isA<FunnelcakeApiException>()),
+          );
+
+          expect(
+            await repository.watchUnreadCount().first,
+            equals(1),
+            reason:
+                'A 200 / success:false from the API now throws and must '
+                'roll back the optimistic flip so the snapshot matches '
+                'server truth.',
+          );
+          verifyNever(() => notificationsDao.markAsRead(any()));
         },
       );
     });

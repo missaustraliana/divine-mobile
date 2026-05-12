@@ -2124,7 +2124,11 @@ class FunnelcakeApiClient {
   /// via the `before` query param. The [authHeaders] parameter allows the
   /// caller to provide pre-built NIP-98 auth headers.
   ///
-  /// Returns an empty [NotificationResponse] on errors instead of throwing.
+  /// Throws:
+  /// - [FunnelcakeNotConfiguredException] if the API is not configured.
+  /// - [FunnelcakeApiException] if the request fails with a non-success status.
+  /// - [FunnelcakeTimeoutException] if the request times out.
+  /// - [FunnelcakeException] for other errors.
   Future<NotificationResponse> getNotifications({
     required String pubkey,
     int limit = 50,
@@ -2132,6 +2136,10 @@ class FunnelcakeApiClient {
     Uri? requestUri,
     Map<String, String>? authHeaders,
   }) async {
+    if (!isAvailable) {
+      throw const FunnelcakeNotConfiguredException();
+    }
+
     final url =
         requestUri ??
         notificationsUri(pubkey: pubkey, limit: limit, cursor: cursor);
@@ -2148,22 +2156,22 @@ class FunnelcakeApiClient {
           )
           .timeout(_timeout);
 
-      if (response.statusCode != 200) {
-        return const NotificationResponse(
-          notifications: [],
-          unreadCount: 0,
-          hasMore: false,
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return NotificationResponse.fromJson(json);
+      } else {
+        throw FunnelcakeApiException(
+          message: 'Failed to fetch notifications',
+          statusCode: response.statusCode,
+          url: url.toString(),
         );
       }
-
-      final json = jsonDecode(response.body) as Map<String, dynamic>;
-      return NotificationResponse.fromJson(json);
-    } on Object {
-      return const NotificationResponse(
-        notifications: [],
-        unreadCount: 0,
-        hasMore: false,
-      );
+    } on TimeoutException {
+      throw FunnelcakeTimeoutException(url.toString());
+    } on FunnelcakeException {
+      rethrow;
+    } catch (e) {
+      throw FunnelcakeException('Failed to fetch notifications: $e');
     }
   }
 
@@ -2173,12 +2181,27 @@ class FunnelcakeApiClient {
   /// mark all as read. The [authHeaders] parameter allows the caller to
   /// provide pre-built NIP-98 auth headers.
   ///
-  /// Returns a failure [MarkReadResponse] on errors instead of throwing.
+  /// A `200 OK` response with `success: false` is treated as an API
+  /// failure and throws [FunnelcakeApiException] (with `statusCode: 200`
+  /// and the server-provided `error` text in the message) so the
+  /// repository rollback path fires consistently with the HTTP-error
+  /// case.
+  ///
+  /// Throws:
+  /// - [FunnelcakeNotConfiguredException] if the API is not configured.
+  /// - [FunnelcakeApiException] if the request fails with a non-success
+  ///   status, or returns `200` with `success: false`.
+  /// - [FunnelcakeTimeoutException] if the request times out.
+  /// - [FunnelcakeException] for other errors.
   Future<MarkReadResponse> markNotificationsRead({
     required String pubkey,
     List<String>? notificationIds,
     Map<String, String>? authHeaders,
   }) async {
+    if (!isAvailable) {
+      throw const FunnelcakeNotConfiguredException();
+    }
+
     final url = Uri.parse('$_baseUrl/api/users/$pubkey/notifications/read');
 
     final payload = jsonEncode({'notification_ids': ?notificationIds});
@@ -2197,14 +2220,33 @@ class FunnelcakeApiClient {
           )
           .timeout(_timeout);
 
-      if (response.statusCode != 200) {
-        return const MarkReadResponse(success: false, markedCount: 0);
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        final result = MarkReadResponse.fromJson(json);
+        if (!result.success) {
+          final detail = result.error;
+          throw FunnelcakeApiException(
+            message: detail != null && detail.isNotEmpty
+                ? 'Mark notifications read rejected by server: $detail'
+                : 'Mark notifications read rejected by server',
+            statusCode: 200,
+            url: url.toString(),
+          );
+        }
+        return result;
+      } else {
+        throw FunnelcakeApiException(
+          message: 'Failed to mark notifications as read',
+          statusCode: response.statusCode,
+          url: url.toString(),
+        );
       }
-
-      final json = jsonDecode(response.body) as Map<String, dynamic>;
-      return MarkReadResponse.fromJson(json);
-    } on Object {
-      return const MarkReadResponse(success: false, markedCount: 0);
+    } on TimeoutException {
+      throw FunnelcakeTimeoutException(url.toString());
+    } on FunnelcakeException {
+      rethrow;
+    } catch (e) {
+      throw FunnelcakeException('Failed to mark notifications as read: $e');
     }
   }
 
