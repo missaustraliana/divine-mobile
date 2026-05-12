@@ -62,18 +62,6 @@ class NotificationRepository {
   /// Last cursor returned by the API, used for pagination.
   String? _lastCursor;
 
-  /// Nostr event ids the repository has ingested via either path.
-  ///
-  /// Populated from every raw notification's `sourceEventId` as it flows
-  /// through [_enrichAndGroup] — REST-loaded items carry the Nostr event
-  /// id in `sourceEventId` (with the server's UUID in `id`), while
-  /// WS-loaded items carry the Nostr event id in both fields. Querying
-  /// `raw.id` against this set in [acceptRealtime] therefore catches the
-  /// "same logical event arrives via REST then via WS" case the legacy
-  /// `notification_realtime_bridge_provider.dart` covered with its
-  /// `metadata['sourceEventId'] == notification.id` check.
-  final Set<String> _knownSourceEventIds = <String>{};
-
   /// Reactive snapshot of the enriched, grouped notification feed.
   ///
   /// Single source of truth for the feed bloc (list rendering) and the
@@ -256,18 +244,16 @@ class NotificationRepository {
   /// `mobile/lib/providers/notification_realtime_bridge_provider.dart`
   /// which wrote into the now-unused Riverpod cache.
   Future<void> acceptRealtime(RelayNotification raw) async {
-    // Cross-path dedupe: REST raws carry the Nostr event id in
-    // `sourceEventId`, WS raws (built by `notification_realtime_bridge.dart`)
-    // carry it in `id`. The legacy bridge checked
-    // `metadata['sourceEventId'] == notification.id` for the same reason —
-    // skip a WS arrival when the same Nostr event was already loaded over
-    // REST.
-    if (raw.id.isNotEmpty && _knownSourceEventIds.contains(raw.id)) return;
+    if (_snapshotContainsSourceEventId(raw.id)) return;
 
     final enriched = await _enrichAndGroup([raw]);
     if (enriched.isEmpty) return;
 
     final current = _snapshot.value;
+    // Re-check against the post-await snapshot so concurrent refresh/page
+    // updates can neither be clobbered nor bypass the cross-path dedupe.
+    if (_snapshotContainsSourceEventId(raw.id)) return;
+
     final newItem = enriched.first;
     if (current.items.any((n) => n.id == newItem.id)) return;
 
@@ -279,10 +265,13 @@ class NotificationRepository {
       }
     }
 
-    _snapshot.add(
-      current.copyWith(
-        items: [newItem, ...current.items],
-      ),
+    _snapshot.add(current.copyWith(items: [newItem, ...current.items]));
+  }
+
+  bool _snapshotContainsSourceEventId(String sourceEventId) {
+    if (sourceEventId.isEmpty) return false;
+    return _snapshot.value.items.any(
+      (n) => n.sourceEventIds.contains(sourceEventId),
     );
   }
 
@@ -293,8 +282,10 @@ class NotificationRepository {
   /// Merge semantics (mirror the pre-snapshot bloc handler): prepend the
   /// new actor onto the existing actors capped at [_maxGroupActors],
   /// increment `totalCount`, flip `isRead` to false, bump `timestamp` to
-  /// the incoming arrival. The row stays at its existing index — no
-  /// re-sort, so the visible list doesn't jump.
+  /// the incoming arrival, and union the underlying `sourceEventIds` so
+  /// the merged row carries every Nostr event it represents. The row
+  /// stays at its existing index — no re-sort, so the visible list
+  /// doesn't jump.
   static List<NotificationItem>? _mergeIntoExistingVideoGroup(
     List<NotificationItem> items,
     VideoNotification incoming,
@@ -310,12 +301,17 @@ class NotificationRepository {
           incoming.actors.first,
           ...existing.actors,
         ].take(_maxGroupActors).toList();
+        final mergedSourceEventIds = <String>{
+          ...existing.sourceEventIds,
+          ...incoming.sourceEventIds,
+        }.toList();
         result.add(
           existing.copyWith(
             actors: mergedActors,
             totalCount: existing.totalCount + 1,
             isRead: false,
             timestamp: incoming.timestamp,
+            sourceEventIds: mergedSourceEventIds,
           ),
         );
         merged = true;
@@ -329,8 +325,31 @@ class NotificationRepository {
   /// Updates [_snapshot] with [page]'s contents.
   ///
   /// First-page emissions replace the items list (used by [refresh] and
-  /// the initial [getNotifications] call). Subsequent pages append,
-  /// preserving order and deduplicating by id.
+  /// the initial [getNotifications] call) — the REST first page is the
+  /// authoritative ground truth, so a full replace is correct.
+  ///
+  /// Subsequent pages merge incoming items into the existing snapshot
+  /// using three gates:
+  ///
+  /// 1. **`(videoEventId, type)` overlap (VideoNotification only)** —
+  ///    when an incoming group matches an existing snapshot group, the
+  ///    existing row is replaced in place by
+  ///    [_mergeAppendedVideoGroup] (richer REST data folded into the
+  ///    existing WS-built row, preserving its position).
+  /// 2. **`sourceEventIds` overlap** — when an incoming item's
+  ///    underlying Nostr event ids overlap the rendered snapshot's set,
+  ///    the incoming item is skipped as a cross-path duplicate. Same
+  ///    logical-event identity that [acceptRealtime] queries against the
+  ///    current snapshot (Nostr event id).
+  /// 3. **`id` equality fallback** — defensive against the rare case of
+  ///    items with empty `sourceEventIds` (server returned a notification
+  ///    without `source_event_id`). Preserves the original
+  ///    `_emitSnapshotForPage` contract; PR #4247's REST→WS guard relied
+  ///    only on (1)+(2) and is untouched.
+  ///
+  /// Closes the symmetric gap to PR #4247: WS-first arrival followed by
+  /// a REST pagination that returns the same Nostr event(s) no longer
+  /// duplicates the row (#4264).
   void _emitSnapshotForPage(
     NotificationPage page, {
     required bool isFirstPage,
@@ -340,13 +359,130 @@ class NotificationRepository {
       return;
     }
     final current = _snapshot.value;
-    final existingIds = current.items.map((n) => n.id).toSet();
-    final appended = [
-      ...current.items,
-      ...page.items.where((n) => !existingIds.contains(n.id)),
-    ];
-    _snapshot.add(
-      page.copyWith(items: appended),
+    final mergedItems = _mergeAppendedPage(current.items, page.items);
+    _snapshot.add(page.copyWith(items: mergedItems));
+  }
+
+  /// Returns the merged item list for a non-first-page emission.
+  ///
+  /// See [_emitSnapshotForPage] for the dedupe/merge contract.
+  static List<NotificationItem> _mergeAppendedPage(
+    List<NotificationItem> current,
+    List<NotificationItem> incoming,
+  ) {
+    final result = [...current];
+    final allSourceEventIds = <String>{
+      for (final n in result) ...n.sourceEventIds,
+    };
+    final allIds = <String>{for (final n in result) n.id};
+    final videoGroupIndex = <(String, NotificationKind), int>{};
+    for (var i = 0; i < result.length; i++) {
+      final item = result[i];
+      if (item is VideoNotification) {
+        videoGroupIndex[(item.videoEventId, item.type)] = i;
+      }
+    }
+
+    final appended = <NotificationItem>[];
+    for (final item in incoming) {
+      if (item is VideoNotification) {
+        final idx = videoGroupIndex[(item.videoEventId, item.type)];
+        if (idx != null) {
+          result[idx] = _mergeAppendedVideoGroup(
+            result[idx] as VideoNotification,
+            item,
+          );
+          allSourceEventIds.addAll(item.sourceEventIds);
+          allIds.add(item.id);
+          continue;
+        }
+      }
+      final hasOverlap = item.sourceEventIds.any(allSourceEventIds.contains);
+      if (hasOverlap) continue;
+      // Fallback: catch same-id repeats when sourceEventIds is empty (server
+      // omitted source_event_id). Preserves the original by-id dedupe
+      // contract.
+      if (allIds.contains(item.id)) continue;
+      appended.add(item);
+      allSourceEventIds.addAll(item.sourceEventIds);
+      allIds.add(item.id);
+    }
+    return [...result, ...appended];
+  }
+
+  /// Merges [incoming] (from a REST pagination page) into [existing] (a
+  /// snapshot row, typically WS-built) without changing the row's
+  /// position in the snapshot.
+  ///
+  /// Mirror of [_mergeIntoExistingVideoGroup] in the opposite direction
+  /// (incoming group → existing single, instead of incoming single →
+  /// existing group). Semantics:
+  ///
+  /// - `sourceEventIds` = set union of both sides (preserves uniqueness).
+  /// - `totalCount` = size of the union (so the count reflects unique
+  ///   underlying logical events, not the sum of overlapping totals);
+  ///   floored at `mergedActors.length` so the constructor's
+  ///   `totalCount >= actors.length` invariant always holds even in the
+  ///   defensive edge case where both sides had empty `sourceEventIds`
+  ///   (server response missing `source_event_id`).
+  /// - `actors` = existing actors first, then non-duplicate incoming
+  ///   actors (matched by pubkey), capped at [_maxGroupActors].
+  ///   "Existing first" matches production semantics: pagination walks
+  ///   backward in time, so existing.actors carry the newer createdAts.
+  /// - `isRead` = `existing.isRead && incoming.isRead` (either side
+  ///   being unread keeps the row unread).
+  /// - `timestamp` = `max(existing.timestamp, incoming.timestamp)`.
+  /// - Thumbnail / title / addressable id = existing if non-empty, else
+  ///   incoming (parallel to `_groupVideoAnchored`'s
+  ///   `_nonEmpty(...) ?? _nonEmpty(...)` pattern).
+  /// - `commentText` for comment-kind rows: pick from the side with the
+  ///   larger `timestamp`, falling back to the other side only when the
+  ///   newer side has no text. Mirrors `_groupVideoAnchored`'s
+  ///   newest-wins (sort desc by `createdAt`, take `group.first.content`)
+  ///   and the `timestamp = max(...)` rule above, so the bold first-actor
+  ///   quote stays the latest comment even though REST pagination walks
+  ///   backward in time.
+  static VideoNotification _mergeAppendedVideoGroup(
+    VideoNotification existing,
+    VideoNotification incoming,
+  ) {
+    final unionIds = <String>{
+      ...existing.sourceEventIds,
+      ...incoming.sourceEventIds,
+    }.toList();
+    final mergedActors = [
+      ...existing.actors,
+      ...incoming.actors.where(
+        (a) => !existing.actors.any((e) => e.pubkey == a.pubkey),
+      ),
+    ].take(_maxGroupActors).toList();
+    final existingIsNewer = !existing.timestamp.isBefore(incoming.timestamp);
+    final mergedTimestamp = existingIsNewer
+        ? existing.timestamp
+        : incoming.timestamp;
+    final mergedCommentText = existing.type == NotificationKind.comment
+        ? (existingIsNewer
+              ? (existing.commentText ?? incoming.commentText)
+              : (incoming.commentText ?? existing.commentText))
+        : null;
+    final mergedTotalCount = unionIds.length >= mergedActors.length
+        ? unionIds.length
+        : mergedActors.length;
+    return existing.copyWith(
+      sourceEventIds: unionIds,
+      actors: mergedActors,
+      totalCount: mergedTotalCount,
+      isRead: existing.isRead && incoming.isRead,
+      timestamp: mergedTimestamp,
+      videoThumbnailUrl:
+          _nonEmpty(existing.videoThumbnailUrl) ??
+          _nonEmpty(incoming.videoThumbnailUrl),
+      videoTitle:
+          _nonEmpty(existing.videoTitle) ?? _nonEmpty(incoming.videoTitle),
+      videoAddressableId:
+          _nonEmpty(existing.videoAddressableId) ??
+          _nonEmpty(incoming.videoAddressableId),
+      commentText: mergedCommentText,
     );
   }
 
@@ -381,12 +517,6 @@ class NotificationRepository {
     List<RelayNotification> raw,
   ) async {
     if (raw.isEmpty) return [];
-
-    for (final n in raw) {
-      if (n.sourceEventId.isNotEmpty) {
-        _knownSourceEventIds.add(n.sourceEventId);
-      }
-    }
 
     final pubkeys = raw.map((n) => n.sourcePubkey).toSet().toList();
     final eventIds = raw
@@ -547,6 +677,10 @@ class NotificationRepository {
           timestamp: group.first.createdAt,
           isRead: group.every((n) => n.read),
           commentText: commentTextForRow,
+          sourceEventIds: group
+              .map((n) => n.sourceEventId)
+              .where((s) => s.isNotEmpty)
+              .toList(),
         ),
       );
     }
@@ -593,6 +727,9 @@ class NotificationRepository {
           isRead: n.read,
           commentText: _truncateComment(n.content, kind),
           targetEventId: isCommentTargeted ? n.referencedEventId : null,
+          sourceEventIds: n.sourceEventId.isNotEmpty
+              ? [n.sourceEventId]
+              : const [],
         ),
       );
     }
@@ -648,6 +785,9 @@ class NotificationRepository {
         commentText: kind == NotificationKind.comment
             ? _truncateComment(raw.content, kind)
             : null,
+        sourceEventIds: raw.sourceEventId.isNotEmpty
+            ? [raw.sourceEventId]
+            : const [],
       );
     }
 
@@ -670,6 +810,9 @@ class NotificationRepository {
       isRead: raw.read,
       commentText: _truncateComment(raw.content, kind),
       targetEventId: isCommentTargeted ? raw.referencedEventId : null,
+      sourceEventIds: raw.sourceEventId.isNotEmpty
+          ? [raw.sourceEventId]
+          : const [],
     );
   }
 
