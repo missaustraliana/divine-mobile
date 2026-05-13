@@ -255,6 +255,11 @@ class NotificationRepository {
     if (_snapshotContainsSourceEventId(raw.id)) return;
 
     final newItem = enriched.first;
+    // Final by-id dedupe gate (the deliberate WS → WS guard). The
+    // `_snapshotContainsSourceEventId` checks above match on the
+    // snapshot's `sourceEventIds` set; this catches the residual
+    // same-id arrival whose `id` isn't represented in any existing
+    // row's `sourceEventIds`. Preserves the original by-id contract.
     if (current.items.any((n) => n.id == newItem.id)) return;
 
     if (newItem is VideoNotification) {
@@ -637,15 +642,10 @@ class NotificationRepository {
           .map((n) => _buildActor(n.sourcePubkey, profiles))
           .toList();
       final video = videosById[entry.key.eventId];
-      // Build the stable NIP-33 addressable ID from the d_tag returned by the
-      // server and the current user's pubkey (all video notifications are for
-      // videos owned by this user, so _userPubkey is always the right author).
       final dTag = group
           .map((n) => n.referencedDTag)
           .firstWhere((d) => d != null, orElse: () => null);
-      final addressableId = dTag != null && dTag.isNotEmpty
-          ? '${NIP71VideoKinds.addressableShortVideo}:$_userPubkey:$dTag'
-          : null;
+      final addressableId = _buildVideoAddressableId(dTag);
       // Prefer thumbnail from the notification payload — it comes directly from
       // the server and is stable even after a metadata update (unlike the stats
       // lookup which uses the mutable event ID and may 404 post-edit).
@@ -762,10 +762,7 @@ class NotificationRepository {
     if (isVideoAnchored) {
       if (referenced == null || referenced.isEmpty) return null;
       final video = videosById[referenced];
-      final dTag = raw.referencedDTag;
-      final addressableId = dTag != null && dTag.isNotEmpty
-          ? '${NIP71VideoKinds.addressableShortVideo}:$_userPubkey:$dTag'
-          : null;
+      final addressableId = _buildVideoAddressableId(raw.referencedDTag);
       return VideoNotification(
         id: raw.dedupeKey,
         type: kind,
@@ -836,6 +833,17 @@ class NotificationRepository {
     _ => null,
   };
 
+  /// Builds the stable NIP-33 addressable ID for a video the current
+  /// user owns.
+  ///
+  /// All notifications surfaced here are about the current user's own
+  /// content, so [_userPubkey] is always the right author component.
+  /// Returns null when the server didn't provide a usable [dTag].
+  String? _buildVideoAddressableId(String? dTag) {
+    if (dTag == null || dTag.isEmpty) return null;
+    return '${NIP71VideoKinds.addressableShortVideo}:$_userPubkey:$dTag';
+  }
+
   /// Returns the stable NIP-33 addressable ID for an actor-anchored
   /// notification, when the server provided the video's `d_tag`.
   ///
@@ -852,9 +860,7 @@ class NotificationRepository {
         mapped != NotificationKind.reply) {
       return null;
     }
-    final dTag = n.referencedDTag;
-    if (dTag == null || dTag.isEmpty) return null;
-    return '${NIP71VideoKinds.addressableShortVideo}:$_userPubkey:$dTag';
+    return _buildVideoAddressableId(n.referencedDTag);
   }
 
   /// Consolidates follow notifications — keeps the earliest per pubkey.
