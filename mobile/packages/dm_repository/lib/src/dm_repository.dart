@@ -1599,13 +1599,19 @@ class DmRepository {
     }
 
     final publishResult = await _nostrClient.publishEvent(signed);
-    if (publishResult is! PublishSuccess) {
+    final failureReason = publishResult.failureReason;
+    if (failureReason != null) {
+      Log.error(
+        'Failed to publish NIP-04 message: $failureReason',
+        category: LogCategory.system,
+      );
       return const NIP17SendResult.failure('NIP-04 publish failed');
     }
 
+    final sent = publishResult as PublishSuccess;
     return NIP17SendResult.success(
-      rumorEventId: publishResult.event.id,
-      messageEventId: publishResult.event.id,
+      rumorEventId: sent.event.id,
+      messageEventId: sent.event.id,
       recipientPubkey: recipientPubkey,
     );
   }

@@ -119,9 +119,10 @@ class PushNotificationService {
     }
 
     final published = await _nostrClient.publishEvent(event);
-    if (published is! PublishSuccess) {
+    final failureReason = published.failureReason;
+    if (failureReason != null) {
       Log.error(
-        'Failed to publish deregistration event',
+        'Failed to publish deregistration event: $failureReason',
         name: 'PushNotificationService',
         category: LogCategory.system,
       );
@@ -181,9 +182,10 @@ class PushNotificationService {
     }
 
     final published = await _nostrClient.publishEvent(event);
-    if (published is! PublishSuccess) {
+    final failureReason = published.failureReason;
+    if (failureReason != null) {
       Log.error(
-        'Failed to publish preferences event',
+        'Failed to publish preferences event: $failureReason',
         name: 'PushNotificationService',
         category: LogCategory.system,
       );
@@ -275,9 +277,10 @@ class PushNotificationService {
     }
 
     final published = await _nostrClient.publishEvent(event);
-    if (published is! PublishSuccess) {
+    final failureReason = published.failureReason;
+    if (failureReason != null) {
       Log.error(
-        'Failed to publish registration event',
+        'Failed to publish registration event: $failureReason',
         name: 'PushNotificationService',
         category: LogCategory.system,
       );

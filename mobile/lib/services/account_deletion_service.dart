@@ -103,9 +103,10 @@ class AccountDeletionService {
 
       final sentEvent = await _nostrService.publishEvent(event);
 
-      if (sentEvent is! PublishSuccess) {
+      final failureReason = sentEvent.failureReason;
+      if (failureReason != null) {
         Log.error(
-          'Failed to publish NIP-62 deletion request to any relay',
+          'Failed to publish NIP-62 deletion request: $failureReason',
           name: 'AccountDeletionService',
           category: LogCategory.system,
         );
@@ -186,10 +187,16 @@ class AccountDeletionService {
 
       if (deleteEvent != null) {
         final sentEvent = await _nostrService.publishEvent(deleteEvent);
-        if (sentEvent is PublishSuccess) {
+        if (sentEvent.isSuccess) {
           successCount += kindEvents.length;
           Log.debug(
             'Published batch deletion for ${kindEvents.length} kind $kind events',
+            name: 'AccountDeletionService',
+            category: LogCategory.system,
+          );
+        } else {
+          Log.warning(
+            'Batch deletion for kind $kind skipped: ${sentEvent.failureReason}',
             name: 'AccountDeletionService',
             category: LogCategory.system,
           );

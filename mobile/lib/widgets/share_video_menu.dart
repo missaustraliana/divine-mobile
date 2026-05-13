@@ -1604,10 +1604,16 @@ class _EditVideoDialogState extends ConsumerState<_EditVideoDialog> {
       // Publish the updated event
       final nostrService = ref.read(nostrServiceProvider);
       final publishResult = await nostrService.publishEvent(event);
-      if (publishResult is! PublishSuccess) {
+      final failureReason = publishResult.failureReason;
+      if (failureReason != null) {
+        Log.error(
+          'Failed to publish video metadata edit: $failureReason',
+          name: 'ShareVideoMenu',
+          category: LogCategory.ui,
+        );
         throw Exception('Failed to publish updated event');
       }
-      final publishedEvent = publishResult.event;
+      final publishedEvent = (publishResult as PublishSuccess).event;
 
       // Update local cache for immediate UI update
       final personalEventCache = ref.read(personalEventCacheServiceProvider);

@@ -182,13 +182,14 @@ class ContentReportingService {
         reportEvent,
         targetRelays: [_moderationRelayUrl],
       );
-      if (sentEvent is! PublishSuccess) {
+      // Always continue to local save regardless of publish outcome.
+      final failureReason = sentEvent.failureReason;
+      if (failureReason != null) {
         Log.error(
-          'Failed to publish report to relays',
+          'Failed to publish NIP-56 report: $failureReason',
           name: 'ContentReportingService',
           category: LogCategory.system,
         );
-        // Still save locally even if publish fails
       } else {
         Log.info(
           'Report published to relays',
