@@ -13,6 +13,7 @@ import 'package:openvine/l10n/generated/app_localizations_en.dart';
 import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/clip_manager_provider.dart';
+import 'package:openvine/providers/shared_preferences_provider.dart';
 import 'package:openvine/screens/library_screen.dart';
 import 'package:openvine/services/clip_library_service.dart';
 import 'package:openvine/services/draft_storage_service.dart';
@@ -39,6 +40,7 @@ void main() {
     late _MockGallerySaveService mockGallerySaveService;
     late _MockClipLibraryService mockClipLibraryService;
     late _MockDraftStorageService mockDraftStorageService;
+    late SharedPreferences sharedPreferences;
 
     setUpAll(() {
       registerFallbackValue(<DivineVideoClip>[]);
@@ -46,6 +48,7 @@ void main() {
 
     setUp(() async {
       SharedPreferences.setMockInitialValues({});
+      sharedPreferences = await SharedPreferences.getInstance();
       mockGallerySaveService = _MockGallerySaveService();
       mockClipLibraryService = _MockClipLibraryService();
       mockDraftStorageService = _MockDraftStorageService();
@@ -61,11 +64,12 @@ void main() {
     Widget buildWidget({
       bool selectionMode = false,
       int initialTabIndex = 0,
-      bool enableSoundTab = true,
+      LibraryTabsMode tabsMode = LibraryTabsMode.allTabs,
       List<DivineVideoClip> editorClips = const [],
     }) {
       return ProviderScope(
         overrides: [
+          sharedPreferencesProvider.overrideWithValue(sharedPreferences),
           gallerySaveServiceProvider.overrideWithValue(mockGallerySaveService),
           clipLibraryServiceProvider.overrideWithValue(mockClipLibraryService),
           draftStorageServiceProvider.overrideWithValue(
@@ -80,7 +84,7 @@ void main() {
           home: LibraryScreen(
             selectionMode: selectionMode,
             initialTabIndex: initialTabIndex,
-            enableSoundTab: enableSoundTab,
+            tabsMode: tabsMode,
             editorClips: editorClips,
           ),
         ),
@@ -126,7 +130,7 @@ void main() {
         await tester.pump();
 
         // In selection mode, appBar is null
-        expect(find.text('My library'), findsNothing);
+        expect(find.text(en.profileLibraryLabel), findsNothing);
       });
 
       testWidgets('no FloatingActionButton', (tester) async {
@@ -138,32 +142,18 @@ void main() {
     });
 
     group('tab navigation', () {
-      testWidgets('hides Sounds tab when enableSoundTab is false', (
-        tester,
-      ) async {
-        await tester.pumpWidget(buildWidget(enableSoundTab: false));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Drafts'), findsOneWidget);
-        expect(find.text('Clips'), findsOneWidget);
-        expect(find.text('Sounds'), findsNothing);
-      });
-
-      testWidgets('tab flow stays stable with only Drafts and Clips', (
+      testWidgets('shows only clips and hides tab bar in clipsOnly mode', (
         tester,
       ) async {
         await tester.pumpWidget(
-          buildWidget(enableSoundTab: false, initialTabIndex: 1),
+          buildWidget(tabsMode: LibraryTabsMode.clipsOnly),
         );
         await tester.pumpAndSettle();
 
+        expect(find.byType(TabBar), findsNothing);
         expect(find.byType(ClipsTab), findsOneWidget);
-
-        await tester.tap(find.text('Drafts'));
-        await tester.pumpAndSettle();
-
-        expect(find.byType(DraftsTab), findsOneWidget);
-        expect(tester.takeException(), isNull);
+        expect(find.byType(DraftsTab), findsNothing);
+        expect(find.text(en.soundsTitle), findsNothing);
       });
 
       testWidgets('can switch to $ClipsTab', (tester) async {
@@ -268,6 +258,7 @@ void main() {
           await tester.pumpWidget(
             ProviderScope(
               overrides: [
+                sharedPreferencesProvider.overrideWithValue(sharedPreferences),
                 gallerySaveServiceProvider.overrideWithValue(
                   mockGallerySaveService,
                 ),
@@ -289,7 +280,7 @@ void main() {
                     selectionMode: true,
                     initialTabIndex: 1,
                     editorClips: [existingClip],
-                    enableSoundTab: false,
+                    tabsMode: LibraryTabsMode.clipsOnly,
                   ),
                 ),
               ),
@@ -304,7 +295,7 @@ void main() {
           await tester.tap(cards.at(1));
           await tester.pumpAndSettle();
 
-          await tester.tap(find.text('Select').first);
+          await tester.tap(find.text(en.librarySelect).first);
           await tester.pumpAndSettle();
 
           final captured = verify(
@@ -344,6 +335,7 @@ void main() {
           await tester.pumpWidget(
             ProviderScope(
               overrides: [
+                sharedPreferencesProvider.overrideWithValue(sharedPreferences),
                 gallerySaveServiceProvider.overrideWithValue(
                   mockGallerySaveService,
                 ),
@@ -381,7 +373,7 @@ void main() {
           await tester.pumpAndSettle();
 
           // Tap "Select" button (visible in the header)
-          await tester.tap(find.text('Select').first);
+          await tester.tap(find.text(en.librarySelect).first);
           await tester.pumpAndSettle();
 
           // Verify context.pop was called with the selected clip list
