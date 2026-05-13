@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io'
     if (dart.library.html) 'package:openvine/utils/platform_io_web.dart'
     as io;
@@ -76,6 +77,9 @@ import 'package:openvine/services/deep_link_service.dart';
 import 'package:openvine/services/locale_preference_service.dart';
 import 'package:openvine/services/logging_config_service.dart';
 import 'package:openvine/services/nip98_auth_service.dart' show HttpMethod;
+import 'package:openvine/services/notification_service.dart'
+    show NotificationKind;
+import 'package:openvine/services/notification_target_resolver.dart';
 import 'package:openvine/services/openvine_media_cache.dart';
 import 'package:openvine/services/performance_monitoring_service.dart';
 import 'package:openvine/services/seed_data_preload_service.dart';
@@ -135,7 +139,12 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     title,
     body,
     details,
-    payload: data['referencedEventId'] as String?,
+    payload: jsonEncode({
+      'referencedEventId': data['referencedEventId'],
+      // Normalise at the boundary: FCM wire key is 'type'; the internal
+      // payload (read by NotificationService) uses 'notificationType'.
+      'notificationType': data['type'],
+    }),
   );
 }
 
@@ -181,6 +190,131 @@ Future<void> _runTimedStartupTask({
   } finally {
     StartupPerformanceService.instance.completePhase(phaseName);
   }
+}
+
+/// Describes the router action to take when navigating to a video deep link.
+@visibleForTesting
+enum VideoDeepLinkNavAction {
+  /// Navigate to the route, keeping the current route in the back stack.
+  push,
+
+  /// Replace the current route in-place (already on a video route).
+  go,
+
+  /// Re-trigger the current route with [autoOpenComments] set to `true`.
+  ///
+  /// Used when the user is already on the target video but a reply
+  /// notification tap needs the comments sheet to open.
+  goSameRouteWithComments,
+
+  /// The router is already on the target route with nothing new to do.
+  skip,
+}
+
+/// Determines which router action to take for a video deep-link navigation
+/// given the current router location and the incoming [DeepLink].
+///
+/// Extracted for testability — the caller executes the action; this function
+/// only decides what action that should be.
+@visibleForTesting
+VideoDeepLinkNavAction resolveVideoDeepLinkNavAction({
+  required String currentLocation,
+  required String targetPath,
+  required bool autoOpenComments,
+}) {
+  if (currentLocation == targetPath) {
+    // Already on the exact target route.
+    if (autoOpenComments) {
+      // Reply notification tap while the video is already visible — retrigger
+      // the route with autoOpenComments so the comments sheet opens.
+      return VideoDeepLinkNavAction.goSameRouteWithComments;
+    }
+    // Duplicate navigation with nothing new to do (e.g. getInitialLink +
+    // uriLinkStream both fire for the same URL). Safe to skip.
+    return VideoDeepLinkNavAction.skip;
+  }
+  if (currentLocation.startsWith('${VideoDetailScreen.basePath}/')) {
+    // A different video is already showing — replace it in-place.
+    return VideoDeepLinkNavAction.go;
+  }
+  // Coming from a non-video route — push so back returns home.
+  return VideoDeepLinkNavAction.push;
+}
+
+/// Normalises the raw FCM [RemoteMessage.data] map into the two fields the
+/// app cares about, translating the wire key `'type'` to `notificationType`
+/// so the rest of the app never has to know which key the FCM server uses.
+///
+/// Returns `null` when the payload carries no `referencedEventId`.
+({String referencedEventId, String? notificationType})? _parseFcmPayload(
+  Map<String, dynamic> data,
+) {
+  final referencedEventId = data['referencedEventId'] as String?;
+  if (referencedEventId == null || referencedEventId.isEmpty) return null;
+  // FCM wire payload uses the key 'type'; local-notification JSON uses
+  // 'notificationType'. Normalise here so callers see one shape.
+  final notificationType = data['type'] as String?;
+  return (
+    referencedEventId: referencedEventId,
+    notificationType: notificationType,
+  );
+}
+
+/// Resolves [referencedEventId] from a push notification payload to a video
+/// event ID, then pushes a [DeepLink] into [deepLinkService].
+///
+/// For `notificationType == "reply"` (and other comment-type notifications),
+/// [referencedEventId] is the ID of a Kind 1111 comment event, not a video.
+/// [NotificationTargetResolver] fetches that event from the relay, walks its
+/// NIP-22 `E` / NIP-10 `e` tags, and returns the root video event ID.
+///
+/// For video-type events the resolver returns the same ID unchanged.
+Future<void> _resolveAndPushNotificationDeepLink({
+  required String referencedEventId,
+  required String? notificationType,
+  required ProviderContainer container,
+}) async {
+  final deepLinkService = container.read(deepLinkServiceProvider);
+  final autoOpenComments = notificationType == NotificationKind.reply;
+
+  String? videoEventId;
+  try {
+    videoEventId = await NotificationTargetResolver(
+      videoEventService: container.read(videoEventServiceProvider),
+      nostrService: container.read(nostrServiceProvider),
+    ).resolveVideoEventIdFromNotificationTarget(referencedEventId);
+  } catch (e) {
+    Log.error(
+      'Failed to resolve notification target: $e',
+      name: 'main',
+      category: LogCategory.system,
+    );
+  }
+
+  if (videoEventId == null) {
+    Log.warning(
+      'Could not resolve notification target to a video, '
+      'referencedEventId=$referencedEventId type=$notificationType',
+      name: 'main',
+      category: LogCategory.system,
+    );
+    return;
+  }
+
+  Log.info(
+    'Resolved notification target: $referencedEventId → $videoEventId '
+    '(type=$notificationType, autoOpenComments=$autoOpenComments)',
+    name: 'main',
+    category: LogCategory.system,
+  );
+
+  deepLinkService.pushLink(
+    DeepLink(
+      type: DeepLinkType.video,
+      videoRef: videoEventId,
+      autoOpenComments: autoOpenComments,
+    ),
+  );
 }
 
 StartupCoordinator _createStartupCoordinator(ProviderContainer container) {
@@ -375,26 +509,42 @@ StartupCoordinator _createStartupCoordinator(ProviderContainer container) {
       final initialMessage = await FirebaseMessaging.instance
           .getInitialMessage();
       if (initialMessage != null) {
-        final referencedEventId =
-            initialMessage.data['referencedEventId'] as String?;
-        if (referencedEventId != null) {
+        final parsed = _parseFcmPayload(initialMessage.data);
+        if (parsed != null) {
           Log.info(
-            'App launched from push notification, target: $referencedEventId',
+            'App launched from push notification, '
+            'target: ${parsed.referencedEventId} '
+            '(type: ${parsed.notificationType})',
             name: 'main',
             category: LogCategory.system,
+          );
+          unawaited(
+            _resolveAndPushNotificationDeepLink(
+              referencedEventId: parsed.referencedEventId,
+              notificationType: parsed.notificationType,
+              container: container,
+            ),
           );
         }
       }
 
       // Handle taps on notifications while app is in background
       FirebaseMessaging.onMessageOpenedApp.listen((message) {
-        final referencedEventId = message.data['referencedEventId'] as String?;
-        if (referencedEventId != null) {
+        final parsed = _parseFcmPayload(message.data);
+        if (parsed != null) {
           Log.info(
             'Push notification tapped (background), '
-            'target: $referencedEventId',
+            'target: ${parsed.referencedEventId} '
+            '(type: ${parsed.notificationType})',
             name: 'main',
             category: LogCategory.system,
+          );
+          unawaited(
+            _resolveAndPushNotificationDeepLink(
+              referencedEventId: parsed.referencedEventId,
+              notificationType: parsed.notificationType,
+              container: container,
+            ),
           );
         }
       });
@@ -1050,7 +1200,29 @@ class _DivineAppState extends ConsumerState<DivineApp> {
     );
 
     // Initialize the deep link service for video content
-    ref.read(deepLinkServiceProvider).initialize();
+    final deepLinkService = ref.read(deepLinkServiceProvider);
+    deepLinkService.initialize();
+
+    // Route local notification taps (background-built via flutter_local_notifications)
+    // through the same deep-link stream so the build() listener handles navigation.
+    final container = ProviderScope.containerOf(context);
+    ref
+        .read(notificationServiceProvider)
+        .onNotificationTap = (referencedEventId, notificationType) {
+      Log.info(
+        '🔔 Local notification tap: eventId=$referencedEventId '
+        'type=$notificationType',
+        name: 'DeepLinkHandler',
+        category: LogCategory.ui,
+      );
+      unawaited(
+        _resolveAndPushNotificationDeepLink(
+          referencedEventId: referencedEventId,
+          notificationType: notificationType,
+          container: container,
+        ),
+      );
+    };
 
     // Initialize the deep link service for password reset
     ref.read(passwordResetListenerProvider).initialize();
@@ -1177,25 +1349,36 @@ class _DivineAppState extends ConsumerState<DivineApp> {
                   deepLink.videoRef!,
                 );
                 Log.info(
-                  '📱 Navigating to video: $targetPath',
+                  '📱 Navigating to video: $targetPath'
+                  '${deepLink.autoOpenComments ? " (open comments)" : ""}',
                   name: 'DeepLinkHandler',
                   category: LogCategory.ui,
                 );
                 try {
-                  // Skip if already showing this video (getInitialLink
-                  // and uriLinkStream can both fire for the same URL).
-                  if (currentLocation == targetPath) break;
-                  final isReplacingExistingVideoRoute = currentLocation
-                      .startsWith('${VideoDetailScreen.basePath}/');
-                  if (isReplacingExistingVideoRoute) {
-                    // When another shared video is opened while a shared
-                    // video route is already visible, replace the current
-                    // detail route instead of stacking it.
-                    router.go(targetPath);
-                  } else {
-                    // Keep the home route underneath the first shared video
-                    // so back navigation returns to the main screen.
-                    router.push(targetPath);
+                  final routeExtra = deepLink.autoOpenComments
+                      ? const VideoDetailRouteExtra(autoOpenComments: true)
+                      : null;
+                  final action = resolveVideoDeepLinkNavAction(
+                    currentLocation: currentLocation,
+                    targetPath: targetPath,
+                    autoOpenComments: deepLink.autoOpenComments,
+                  );
+                  switch (action) {
+                    case VideoDeepLinkNavAction.skip:
+                      break;
+                    case VideoDeepLinkNavAction.goSameRouteWithComments:
+                      // Already on the video — retrigger so the comments
+                      // sheet opens in response to a reply notification tap.
+                      router.go(targetPath, extra: routeExtra);
+                    case VideoDeepLinkNavAction.go:
+                      // When another shared video is opened while a shared
+                      // video route is already visible, replace the current
+                      // detail route instead of stacking it.
+                      router.go(targetPath, extra: routeExtra);
+                    case VideoDeepLinkNavAction.push:
+                      // Keep the home route underneath the first shared video
+                      // so back navigation returns to the main screen.
+                      router.push(targetPath, extra: routeExtra);
                   }
                   Log.info(
                     '✅ Navigation completed to: $targetPath',

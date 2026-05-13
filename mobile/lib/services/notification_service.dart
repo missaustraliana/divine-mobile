@@ -1,6 +1,8 @@
 // ABOUTME: Service for showing user notifications about upload status and publishing
 // ABOUTME: Handles local notifications and in-app messages for video processing updates
 
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -12,6 +14,16 @@ enum NotificationType {
   videoPublished,
   uploadFailed,
   processingStarted,
+}
+
+/// Push-notification kind values as they appear in the FCM payload `type` field
+/// and in the local-notification JSON payload `notificationType` field.
+///
+/// Use these constants instead of bare string literals so that the routing
+/// policy (e.g. "open comments for replies") is defined in one place.
+abstract final class NotificationKind {
+  /// The originating notification was a reply to one of the user's videos.
+  static const String reply = 'reply';
 }
 
 /// Notification data structure
@@ -109,6 +121,15 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
   bool _pluginInitialized = false;
+
+  /// Optional callback invoked when the user taps a local notification.
+  ///
+  /// The callback receives two arguments: the [referencedEventId] (Nostr event
+  /// ID of the content the notification is about) and [notificationType] (e.g.
+  /// `"reply"`, `"reaction"`, `"repost"`, `"zap"`, `"follow"`).  Either value
+  /// may be null if the payload doesn't carry that field.
+  void Function(String referencedEventId, String? notificationType)?
+  onNotificationTap;
 
   /// List of recent notifications
   List<AppNotification> get notifications => List.unmodifiable(_notifications);
@@ -415,26 +436,44 @@ class NotificationService {
   }
 
   /// Handle notification tap
-  ///
-  /// TODO: Implement navigation based on notification action:
-  /// - 'open_feed': Navigate to home feed screen
-  /// - 'open_uploads': Navigate to uploads screen
-  /// - 'retry_upload': Navigate to failed upload and show retry UI
-  /// - 'show_progress': Navigate to upload progress screen
   void _onNotificationTapped(NotificationResponse response) {
+    _handleNotificationTapPayload(response.payload);
+  }
+
+  /// Parses [payload] and invokes [onNotificationTap] when a valid
+  /// [referencedEventId] can be extracted.
+  ///
+  /// Exposed for testing; production callers should use
+  /// [_onNotificationTapped] or configure [onNotificationTap] instead.
+  @visibleForTesting
+  void handleNotificationTapPayload(String? payload) =>
+      _handleNotificationTapPayload(payload);
+
+  void _handleNotificationTapPayload(String? payload) {
     Log.debug(
-      'Notification tapped: ${response.payload}',
+      'Notification tapped: $payload',
       name: 'NotificationService',
       category: LogCategory.system,
     );
-    // TODO: Handle notification actions (navigate to relevant screen)
-    // Example implementation:
-    // final data = jsonDecode(response.payload ?? '{}');
-    // final action = data['action'];
-    // switch (action) {
-    //   case 'open_feed': navigatorKey.currentState?.pushNamed('/feed');
-    //   case 'retry_upload': navigatorKey.currentState?.pushNamed('/uploads');
-    // }
+
+    if (payload == null || payload.isEmpty) return;
+
+    try {
+      final data = jsonDecode(payload) as Map<String, dynamic>;
+      final referencedEventId = data['referencedEventId'] as String?;
+      final notificationType = data['notificationType'] as String?;
+      if (referencedEventId != null && referencedEventId.isNotEmpty) {
+        onNotificationTap?.call(referencedEventId, notificationType);
+      }
+    } catch (_) {
+      // Legacy payloads were bare event IDs (plain strings, not JSON).
+      // Treat the whole payload as a referencedEventId with unknown type.
+      // TODO(#4329): Remove this fallback once all clients have been emitting
+      // JSON payloads (referencedEventId + notificationType) for at least one
+      // full app-store release cycle and telemetry confirms this path is
+      // never reached. See issue for the full removal plan.
+      onNotificationTap?.call(payload, null);
+    }
   }
 
   /// Send a local notification with title and body
