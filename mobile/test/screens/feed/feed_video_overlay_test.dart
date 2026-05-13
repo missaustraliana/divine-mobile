@@ -21,12 +21,12 @@ import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/screens/feed/feed_auto_advance_cubit.dart';
 import 'package:openvine/screens/feed/feed_video_overlay.dart';
 import 'package:openvine/services/media_auth_interceptor.dart';
-import 'package:openvine/services/video_event_service.dart';
 import 'package:openvine/utils/scroll_driven_opacity.dart';
 import 'package:openvine/utils/string_utils.dart';
 import 'package:openvine/widgets/proofmode_badge_row.dart';
 import 'package:openvine/widgets/video_feed_item/moderated_content_overlay.dart';
 import 'package:pooled_video_player/pooled_video_player.dart';
+import 'package:reposts_repository/reposts_repository.dart';
 import 'package:videos_repository/videos_repository.dart';
 
 import '../../helpers/test_provider_overrides.dart';
@@ -45,7 +45,7 @@ class _MockPlayerState extends Mock implements PlayerState {}
 class _MockCuratedListRepository extends Mock
     implements CuratedListRepository {}
 
-class _MockVideoEventService extends Mock implements VideoEventService {}
+class _MockRepostsRepository extends Mock implements RepostsRepository {}
 
 class _MockVideosRepository extends Mock implements VideosRepository {}
 
@@ -106,7 +106,7 @@ void main() {
     late PlayerStream mockStream;
     late PlayerState mockPlayerState;
     late CuratedListRepository mockCuratedListRepository;
-    late VideoEventService mockVideoEventService;
+    late RepostsRepository mockRepostsRepository;
     late VideosRepository mockVideosRepository;
     late MockProfileRepository mockProfileRepository;
     late MockNip05VerificationService mockNip05VerificationService;
@@ -131,7 +131,7 @@ void main() {
       mockStream = _MockPlayerStream();
       mockPlayerState = _MockPlayerState();
       mockCuratedListRepository = _MockCuratedListRepository();
-      mockVideoEventService = _MockVideoEventService();
+      mockRepostsRepository = _MockRepostsRepository();
       mockVideosRepository = _MockVideosRepository();
       mockProfileRepository = createMockProfileRepository();
       mockNip05VerificationService = createMockNip05VerificationService();
@@ -158,7 +158,10 @@ void main() {
       when(() => mockPlayerState.buffering).thenReturn(false);
       when(() => mockPlayerState.volume).thenReturn(100.0);
       when(
-        () => mockVideoEventService.getRepostersForVideo(any()),
+        () => mockRepostsRepository.fetchEventReposters(
+          eventId: any(named: 'eventId'),
+          addressableId: any(named: 'addressableId'),
+        ),
       ).thenAnswer((_) async => const <String>[]);
       when(
         () => mockVideosRepository.fetchVideoWithStatsForRouteId(any()),
@@ -212,7 +215,7 @@ void main() {
           curatedListRepositoryProvider.overrideWithValue(
             mockCuratedListRepository,
           ),
-          videoEventServiceProvider.overrideWithValue(mockVideoEventService),
+          repostsRepositoryProvider.overrideWithValue(mockRepostsRepository),
           videosRepositoryProvider.overrideWithValue(mockVideosRepository),
           ...?additionalOverrides,
         ],
