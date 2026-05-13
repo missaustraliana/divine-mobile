@@ -1,6 +1,5 @@
-// ABOUTME: Popular Videos feed provider showing trending videos
-// ABOUTME: Uses VideosRepository which tries Funnelcake, NIP-50, then
-// ABOUTME: client-side engagement sorting as fallbacks.
+// ABOUTME: Popular Videos feed provider showing trending native videos.
+// ABOUTME: Uses VideosRepository's native Popular path for Explore pagination.
 
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:funnelcake_api_client/funnelcake_api_client.dart';
@@ -15,6 +14,7 @@ import 'package:openvine/state/video_feed_state.dart';
 import 'package:openvine/utils/video_nostr_enrichment.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:unified_logger/unified_logger.dart';
+import 'package:videos_repository/videos_repository.dart';
 
 part 'popular_videos_feed_provider.g.dart';
 
@@ -25,9 +25,8 @@ final popularVideosVariantProvider = StateProvider<PopularVideosVariant>(
 
 /// Popular Videos feed provider - shows trending videos by recent engagement.
 ///
-/// Delegates video fetching to [VideosRepository.getPopularVideos], which
-/// implements a 3-tier fallback: Funnelcake REST API → NIP-50 sort:hot →
-/// client-side engagement sorting.
+/// Delegates video fetching to [VideosRepository.getNativePopularVideos], which
+/// uses the new divine video leaderboard.
 ///
 /// Rebuilds when:
 /// - Pull to refresh
@@ -35,12 +34,10 @@ final popularVideosVariantProvider = StateProvider<PopularVideosVariant>(
 /// - Content filter preferences change
 @Riverpod(keepAlive: true)
 class PopularVideosFeed extends _$PopularVideosFeed {
-  int? _nextCursor;
+  _PopularFeedCursor _cursor = const _NativePopularCursor(offset: 0);
 
   @override
   Future<VideoFeedState> build() async {
-    _nextCursor = null;
-
     // Watch content filter version — rebuilds when preferences change.
     ref.watch(contentFilterVersionProvider);
     ref.watch(divineHostFilterVersionProvider);
@@ -50,6 +47,7 @@ class PopularVideosFeed extends _$PopularVideosFeed {
 
     // Watch the user-selected native/classic split.
     final variant = ref.watch(popularVideosVariantProvider);
+    _cursor = _initialCursorFor(variant);
 
     // Watch appReady gate
     final isAppReady = ref.watch(appReadyProvider);
@@ -74,22 +72,22 @@ class PopularVideosFeed extends _$PopularVideosFeed {
     return _loadFirstPage(variant);
   }
 
-  Future<VideoFeedState> _loadFirstPage(PopularVideosVariant variant) async {
+  Future<VideoFeedState> _loadFirstPage(
+    PopularVideosVariant variant, {
+    bool skipCache = false,
+    bool preserveExistingOnError = false,
+  }) async {
     try {
-      final videosRepository = ref.read(videosRepositoryProvider);
-      final videos = await videosRepository.getPopularVideos(
-        limit: AppConstants.paginationBatchSize,
-        variant: variant,
-      );
+      final page = await _fetchFirstPage(variant, skipCache: skipCache);
 
       if (!ref.mounted) {
         return const VideoFeedState(videos: [], hasMoreContent: true);
       }
 
-      if (videos.isNotEmpty) {
-        _nextCursor = getOldestTimestamp(videos);
+      if (page.videos.isNotEmpty) {
+        _cursor = _cursorForPage(variant, page);
 
-        final filteredVideos = _filterVideos(videos);
+        final filteredVideos = _filterVideos(page.videos, variant);
         _scheduleEnrichment(filteredVideos);
 
         Log.info(
@@ -100,7 +98,7 @@ class PopularVideosFeed extends _$PopularVideosFeed {
 
         return VideoFeedState(
           videos: filteredVideos,
-          hasMoreContent: videos.length >= AppConstants.paginationBatchSize,
+          hasMoreContent: _pageHasMoreContent(page),
           lastUpdated: DateTime.now(),
         );
       }
@@ -118,12 +116,34 @@ class PopularVideosFeed extends _$PopularVideosFeed {
         name: 'PopularVideosFeedProvider',
         category: LogCategory.video,
       );
+      if (preserveExistingOnError) rethrow;
       return VideoFeedState(
         videos: const [],
         hasMoreContent: false,
         error: e.toString(),
       );
     }
+  }
+
+  Future<NativePopularVideosPage> _fetchFirstPage(
+    PopularVideosVariant variant, {
+    required bool skipCache,
+  }) async {
+    final videosRepository = ref.read(videosRepositoryProvider);
+    return switch (variant) {
+      PopularVideosVariant.native =>
+        videosRepository.getNativePopularVideosPage(
+          limit: AppConstants.paginationBatchSize,
+          skipCache: skipCache,
+        ),
+      PopularVideosVariant.classic => _buildClassicPage(
+        videos: await videosRepository.getPopularVideos(
+          limit: AppConstants.paginationBatchSize,
+          variant: variant,
+          skipCache: skipCache,
+        ),
+      ),
+    };
   }
 
   /// Load more videos for pagination.
@@ -136,40 +156,34 @@ class PopularVideosFeed extends _$PopularVideosFeed {
     state = AsyncData(currentState.copyWith(isLoadingMore: true));
 
     try {
-      final videosRepository = ref.read(videosRepositoryProvider);
       final variant = ref.read(popularVideosVariantProvider);
-      final newVideos = await videosRepository.getPopularVideos(
-        limit: 50,
-        until: _nextCursor,
-        variant: variant,
-      );
+      final newVideos = await _fetchNextPage();
 
       if (!ref.mounted) return;
 
-      if (newVideos.isEmpty) {
+      if (newVideos.videos.isEmpty) {
         state = AsyncData(
           currentState.copyWith(hasMoreContent: false, isLoadingMore: false),
         );
         return;
       }
 
-      _nextCursor = getOldestTimestamp(newVideos);
+      _cursor = _cursorForPage(variant, newVideos);
 
       // Deduplicate against existing videos
       final existingIds = currentState.videos
           .map((v) => v.id.toLowerCase())
           .toSet();
-      final dedupedNew = newVideos
+      final dedupedNew = newVideos.videos
           .where((v) => !existingIds.contains(v.id.toLowerCase()))
           .toList();
 
-      final filteredNew = _filterVideos(dedupedNew);
+      final filteredNew = _filterVideos(dedupedNew, variant);
 
       if (filteredNew.isEmpty) {
         state = AsyncData(
           currentState.copyWith(
-            hasMoreContent:
-                newVideos.length >= AppConstants.paginationBatchSize,
+            hasMoreContent: _pageHasMoreContent(newVideos),
             isLoadingMore: false,
           ),
         );
@@ -187,7 +201,7 @@ class PopularVideosFeed extends _$PopularVideosFeed {
       state = AsyncData(
         VideoFeedState(
           videos: allVideos,
-          hasMoreContent: newVideos.length >= AppConstants.paginationBatchSize,
+          hasMoreContent: _pageHasMoreContent(newVideos),
           lastUpdated: DateTime.now(),
         ),
       );
@@ -207,7 +221,25 @@ class PopularVideosFeed extends _$PopularVideosFeed {
     }
   }
 
-  /// Refresh the feed by resetting cursor and rebuilding.
+  Future<NativePopularVideosPage> _fetchNextPage() async {
+    final videosRepository = ref.read(videosRepositoryProvider);
+    return switch (_cursor) {
+      _NativePopularCursor(:final offset) =>
+        videosRepository.getNativePopularVideosPage(
+          limit: AppConstants.paginationBatchSize,
+          offset: offset,
+        ),
+      _ClassicPopularCursor(:final until) => _buildClassicPage(
+        videos: await videosRepository.getPopularVideos(
+          limit: AppConstants.paginationBatchSize,
+          until: until,
+          variant: PopularVideosVariant.classic,
+        ),
+      ),
+    };
+  }
+
+  /// Refresh the feed while preserving visible videos during revalidation.
   Future<void> refresh() async {
     Log.info(
       'PopularVideosFeed: Refreshing',
@@ -215,28 +247,69 @@ class PopularVideosFeed extends _$PopularVideosFeed {
       category: LogCategory.video,
     );
 
-    _nextCursor = null;
     final variant = ref.read(popularVideosVariantProvider);
-
     await staleWhileRevalidate(
       getCurrentState: () => state,
       isMounted: () => ref.mounted,
       setState: (s) => state = s,
-      fetchFresh: () => _loadFirstPage(variant),
+      fetchFresh: () => _loadFirstPage(
+        variant,
+        skipCache: true,
+        preserveExistingOnError: true,
+      ),
     );
   }
 
   /// Applies platform compatibility, content preference,
   /// and blocked user filters.
-  List<VideoEvent> _filterVideos(List<VideoEvent> videos) {
+  List<VideoEvent> _filterVideos(
+    List<VideoEvent> videos,
+    PopularVideosVariant variant,
+  ) {
     final videoEventService = ref.read(videoEventServiceProvider);
     final blocklistRepository = ref.read(contentBlocklistRepositoryProvider);
-    return videoEventService.filterVideoList(
-      videos
-          .where((v) => v.isSupportedOnCurrentPlatform)
-          .where((v) => !blocklistRepository.shouldFilterFromFeeds(v.pubkey))
-          .toList(),
+    final compatibleVideos = videos
+        .where((v) => v.isSupportedOnCurrentPlatform)
+        .where((v) => !blocklistRepository.shouldFilterFromFeeds(v.pubkey));
+    final platformVideos = variant == PopularVideosVariant.native
+        ? compatibleVideos.where((v) => !v.isOriginalVine)
+        : compatibleVideos;
+    return videoEventService.filterVideoList(platformVideos.toList());
+  }
+
+  _PopularFeedCursor _initialCursorFor(PopularVideosVariant variant) {
+    return switch (variant) {
+      PopularVideosVariant.native => const _NativePopularCursor(offset: 0),
+      PopularVideosVariant.classic => const _ClassicPopularCursor(until: null),
+    };
+  }
+
+  _PopularFeedCursor _cursorForPage(
+    PopularVideosVariant variant,
+    NativePopularVideosPage page,
+  ) {
+    return switch (variant) {
+      PopularVideosVariant.native => _NativePopularCursor(
+        offset: page.nextOffset ?? page.videos.length,
+      ),
+      PopularVideosVariant.classic => _ClassicPopularCursor(
+        until: page.videos.isEmpty ? null : getOldestTimestamp(page.videos),
+      ),
+    };
+  }
+
+  NativePopularVideosPage _buildClassicPage({
+    required List<VideoEvent> videos,
+  }) {
+    return NativePopularVideosPage(
+      videos: videos,
+      consumedItemCount: videos.length,
     );
+  }
+
+  bool _pageHasMoreContent(NativePopularVideosPage page) {
+    final consumed = page.consumedItemCount ?? page.videos.length;
+    return consumed >= AppConstants.paginationBatchSize;
   }
 
   void _scheduleEnrichment(List<VideoEvent> videos) {
@@ -276,4 +349,20 @@ class PopularVideosFeed extends _$PopularVideosFeed {
       },
     );
   }
+}
+
+sealed class _PopularFeedCursor {
+  const _PopularFeedCursor();
+}
+
+class _NativePopularCursor extends _PopularFeedCursor {
+  const _NativePopularCursor({required this.offset});
+
+  final int offset;
+}
+
+class _ClassicPopularCursor extends _PopularFeedCursor {
+  const _ClassicPopularCursor({required this.until});
+
+  final int? until;
 }
