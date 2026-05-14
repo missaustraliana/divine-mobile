@@ -5,11 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:openvine/services/age_verification_service.dart';
+import 'package:openvine/services/content_filter_service.dart';
 import 'package:openvine/services/media_auth_interceptor.dart';
 import 'package:openvine/services/media_viewer_auth_service.dart';
 
 class MockAgeVerificationService extends Mock
     implements AgeVerificationService {}
+
+class MockContentFilterService extends Mock implements ContentFilterService {}
 
 class MockMediaViewerAuthService extends Mock
     implements MediaViewerAuthService {}
@@ -20,6 +23,7 @@ class FakeBuildContext extends Fake implements BuildContext {}
 
 void main() {
   late MockAgeVerificationService mockAgeVerificationService;
+  late MockContentFilterService mockContentFilterService;
   late MockMediaViewerAuthService mockMediaViewerAuthService;
   late MediaAuthInterceptor interceptor;
   late MockBuildContext mockContext;
@@ -30,20 +34,19 @@ void main() {
 
   setUp(() {
     mockAgeVerificationService = MockAgeVerificationService();
+    mockContentFilterService = MockContentFilterService();
     mockMediaViewerAuthService = MockMediaViewerAuthService();
     mockContext = MockBuildContext();
     interceptor = MediaAuthInterceptor(
       ageVerificationService: mockAgeVerificationService,
+      contentFilterService: mockContentFilterService,
       mediaViewerAuthService: mockMediaViewerAuthService,
     );
 
     // Default mock behavior for preference checks
     when(
-      () => mockAgeVerificationService.shouldHideAdultContent,
-    ).thenReturn(false);
-    when(
-      () => mockAgeVerificationService.shouldAutoShowAdultContent,
-    ).thenReturn(false);
+      () => mockContentFilterService.adultPlaybackPreference,
+    ).thenReturn(ContentFilterPreference.warn);
   });
 
   group('MediaAuthInterceptor - 401 handling', () {
@@ -84,9 +87,11 @@ void main() {
     test(
       'creates auth header when user has alwaysShow preference and is verified',
       () async {
-        // Arrange - shouldAutoShowAdultContent means verified + alwaysShow preference
         when(
-          () => mockAgeVerificationService.shouldAutoShowAdultContent,
+          () => mockContentFilterService.adultPlaybackPreference,
+        ).thenReturn(ContentFilterPreference.show);
+        when(
+          () => mockAgeVerificationService.isAdultContentVerified,
         ).thenReturn(true);
         when(
           () => mockMediaViewerAuthService.createAuthHeaders(
@@ -119,7 +124,10 @@ void main() {
     test(
       'creates auth header when user confirms adult content access via dialog',
       () async {
-        // Arrange - default askEachTime preference (shouldAutoShowAdultContent=false)
+        // Arrange - warn preference uses the click-through verification path
+        when(
+          () => mockAgeVerificationService.isAdultContentVerified,
+        ).thenReturn(true);
         when(() => mockContext.mounted).thenReturn(true);
         when(
           () => mockAgeVerificationService.verifyAdultContentAccess(any()),
@@ -153,9 +161,11 @@ void main() {
     );
 
     test('includes serverUrl in auth header when provided', () async {
-      // Arrange - auto-show mode
       when(
-        () => mockAgeVerificationService.shouldAutoShowAdultContent,
+        () => mockContentFilterService.adultPlaybackPreference,
+      ).thenReturn(ContentFilterPreference.show);
+      when(
+        () => mockAgeVerificationService.isAdultContentVerified,
       ).thenReturn(true);
       when(
         () => mockMediaViewerAuthService.createAuthHeaders(
@@ -184,9 +194,11 @@ void main() {
     });
 
     test('logs category for future extensibility', () async {
-      // Arrange - auto-show mode
       when(
-        () => mockAgeVerificationService.shouldAutoShowAdultContent,
+        () => mockContentFilterService.adultPlaybackPreference,
+      ).thenReturn(ContentFilterPreference.show);
+      when(
+        () => mockAgeVerificationService.isAdultContentVerified,
       ).thenReturn(true);
       when(
         () => mockMediaViewerAuthService.createAuthHeaders(
@@ -213,9 +225,11 @@ void main() {
     test(
       'returns null when BlossomAuthService fails to create header',
       () async {
-        // Arrange - auto-show mode but auth service returns null
         when(
-          () => mockAgeVerificationService.shouldAutoShowAdultContent,
+          () => mockContentFilterService.adultPlaybackPreference,
+        ).thenReturn(ContentFilterPreference.show);
+        when(
+          () => mockAgeVerificationService.isAdultContentVerified,
         ).thenReturn(true);
         when(
           () => mockMediaViewerAuthService.createAuthHeaders(

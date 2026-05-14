@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:openvine/services/age_verification_service.dart';
+import 'package:openvine/services/content_filter_service.dart';
 import 'package:openvine/services/media_viewer_auth_service.dart';
 import 'package:unified_logger/unified_logger.dart';
 
@@ -10,11 +11,14 @@ import 'package:unified_logger/unified_logger.dart';
 class MediaAuthInterceptor {
   MediaAuthInterceptor({
     required AgeVerificationService ageVerificationService,
+    required ContentFilterService contentFilterService,
     required MediaViewerAuthService mediaViewerAuthService,
   }) : _ageVerificationService = ageVerificationService,
+       _contentFilterService = contentFilterService,
        _mediaViewerAuthService = mediaViewerAuthService;
 
   final AgeVerificationService _ageVerificationService;
+  final ContentFilterService _contentFilterService;
   final MediaViewerAuthService _mediaViewerAuthService;
 
   /// Handle 401 unauthorized response from Blossom media server
@@ -33,8 +37,16 @@ class MediaAuthInterceptor {
         category: LogCategory.system,
       );
 
-      // Check if user has chosen to never show adult content
-      if (_ageVerificationService.shouldHideAdultContent) {
+      final playbackPreference = _contentFilterService.adultPlaybackPreference;
+
+      final isAdultContentVerified =
+          _ageVerificationService.isAdultContentVerified;
+
+      // Verified users with all adult categories set to hide should be
+      // blocked immediately. Unverified users still go through the existing
+      // verify-on-play path below.
+      if (isAdultContentVerified &&
+          playbackPreference == ContentFilterPreference.hide) {
         Log.debug(
           '🚫 User preference is to never show adult content',
           name: 'MediaAuthInterceptor',
@@ -43,8 +55,10 @@ class MediaAuthInterceptor {
         return null;
       }
 
-      // Check if user has chosen to always show (and is verified)
-      if (_ageVerificationService.shouldAutoShowAdultContent) {
+      // Auto-create auth headers only when the user is already verified and
+      // every adult category is configured to show.
+      if (isAdultContentVerified &&
+          playbackPreference == ContentFilterPreference.show) {
         Log.debug(
           '✅ Auto-showing adult content (user preference: always show)',
           name: 'MediaAuthInterceptor',
@@ -110,8 +124,4 @@ class MediaAuthInterceptor {
 
   /// Check if we can create auth headers (user is authenticated with Nostr)
   bool get canCreateAuthHeaders => _mediaViewerAuthService.canCreateHeaders;
-
-  /// Returns true if adult content should be filtered from feeds entirely
-  bool get shouldFilterContent =>
-      _ageVerificationService.shouldHideAdultContent;
 }

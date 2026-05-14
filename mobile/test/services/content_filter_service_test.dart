@@ -277,6 +277,60 @@ void main() {
       });
     });
 
+    group('adultPlaybackPreference', () {
+      test('returns hide when adult categories are locked', () async {
+        await ageService.initialize();
+        await service.initialize();
+
+        expect(
+          service.adultPlaybackPreference,
+          equals(ContentFilterPreference.hide),
+        );
+      });
+
+      test('returns show when all adult categories are set to show', () async {
+        await ageService.initialize();
+        await ageService.setAdultContentVerified(true);
+        await service.initialize();
+
+        for (final label in ContentFilterService.adultCategories) {
+          await service.setPreference(label, ContentFilterPreference.show);
+        }
+
+        expect(
+          service.adultPlaybackPreference,
+          equals(ContentFilterPreference.show),
+        );
+      });
+
+      test(
+        'returns warn when adult categories have mixed preferences',
+        () async {
+          await ageService.initialize();
+          await ageService.setAdultContentVerified(true);
+          await service.initialize();
+
+          await service.setPreference(
+            ContentLabel.nudity,
+            ContentFilterPreference.show,
+          );
+          await service.setPreference(
+            ContentLabel.sexual,
+            ContentFilterPreference.warn,
+          );
+          await service.setPreference(
+            ContentLabel.porn,
+            ContentFilterPreference.hide,
+          );
+
+          expect(
+            service.adultPlaybackPreference,
+            equals(ContentFilterPreference.warn),
+          );
+        },
+      );
+    });
+
     group('allPreferences', () {
       test('returns unmodifiable map of all preferences', () async {
         await service.initialize();
@@ -296,7 +350,7 @@ void main() {
     group('migration from old preferences', () {
       test('migrates alwaysShow to show for adult categories', () async {
         SharedPreferences.setMockInitialValues({
-          // AdultContentPreference.alwaysShow = index 0
+          // Legacy playback preference "alwaysShow" = index 0
           'adult_content_preference': 0,
         });
 
@@ -317,7 +371,7 @@ void main() {
 
       test('migrates askEachTime to warn for adult categories', () async {
         SharedPreferences.setMockInitialValues({
-          // AdultContentPreference.askEachTime = index 1
+          // Legacy playback preference "askEachTime" = index 1
           'adult_content_preference': 1,
         });
 
@@ -336,7 +390,7 @@ void main() {
 
       test('migrates neverShow to hide for adult categories', () async {
         SharedPreferences.setMockInitialValues({
-          // AdultContentPreference.neverShow = index 2
+          // Legacy playback preference "neverShow" = index 2
           'adult_content_preference': 2,
         });
 
