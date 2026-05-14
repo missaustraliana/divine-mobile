@@ -176,15 +176,27 @@ final class MentionSearchRequested extends CommentsEvent {
   final String query;
 }
 
-/// Register a mention mapping (displayName -> npub) for conversion on submit
+/// Register a mention mapping (displayName -> full hex pubkey) for resolution
+/// on submit.
 final class MentionRegistered extends CommentsEvent {
-  const MentionRegistered({required this.displayName, required this.npub});
+  const MentionRegistered({
+    required this.displayName,
+    required this.pubkey,
+    this.start,
+    this.end,
+  });
 
   /// The display name shown in the text field (e.g. "Alice")
   final String displayName;
 
-  /// The npub to convert to on submit (e.g. "npub1abc...")
-  final String npub;
+  /// The full hex pubkey to resolve on submit.
+  final String pubkey;
+
+  /// Start offset of the selected visible mention token in the current input.
+  final int? start;
+
+  /// Exclusive end offset of the selected visible mention token.
+  final int? end;
 }
 
 /// Clear mention suggestions (when @ is removed or input dismissed)

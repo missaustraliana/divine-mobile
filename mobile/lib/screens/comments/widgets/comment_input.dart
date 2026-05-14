@@ -62,8 +62,15 @@ class CommentInput extends StatefulWidget {
   /// Callback fired with the query text after '@'.
   final ValueChanged<String>? onMentionQuery;
 
-  /// Callback fired with (npub, displayName) when a mention is selected.
-  final void Function(String npub, String displayName)? onMentionSelected;
+  /// Callback fired with (hex pubkey, displayName, start, exclusive end) when a
+  /// mention is selected.
+  final void Function(
+    String pubkey,
+    String displayName,
+    int start,
+    int end,
+  )?
+  onMentionSelected;
 
   /// Callback fired when the user wants to record a video comment.
   final VoidCallback? onVideoReplyPressed;
@@ -153,7 +160,7 @@ class _CommentInputState extends State<CommentInput> {
     widget.onMentionQuery?.call('');
   }
 
-  void _handleMentionSelected(String npub, String displayName) {
+  void _handleMentionSelected(String pubkey, String displayName) {
     final text = widget.controller.text;
     final cursorPos = widget.controller.selection.baseOffset;
     if (cursorPos < 0) return;
@@ -162,8 +169,8 @@ class _CommentInputState extends State<CommentInput> {
     final atIndex = textBeforeCursor.lastIndexOf('@');
     if (atIndex < 0) return;
 
-    // Replace @query with @displayName (human-readable)
-    // The BLoC will convert @displayName -> nostr:npub on submit
+    // Replace @query with @displayName (human-readable). The BLoC keeps the
+    // selected hex pubkey and canonicalizes the text on submit.
     final mention = '@$displayName ';
     final newText =
         text.substring(0, atIndex) + mention + text.substring(cursorPos);
@@ -172,7 +179,12 @@ class _CommentInputState extends State<CommentInput> {
       offset: atIndex + mention.length,
     );
 
-    widget.onMentionSelected?.call(npub, displayName);
+    widget.onMentionSelected?.call(
+      pubkey,
+      displayName,
+      atIndex,
+      atIndex + mention.length - 1,
+    );
     widget.onChanged?.call(newText);
   }
 

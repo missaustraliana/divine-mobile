@@ -16,6 +16,7 @@ import 'package:nostr_sdk/event_kind.dart';
 import 'package:openvine/services/auth_service.dart';
 import 'package:openvine/services/content_moderation_service.dart';
 import 'package:openvine/services/content_reporting_service.dart';
+import 'package:openvine/services/mention_resolution_service.dart';
 import 'package:profile_repository/profile_repository.dart';
 import 'package:unified_logger/unified_logger.dart';
 
@@ -46,6 +47,7 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
     int? initialTotalCount,
     ProfileRepository? profileRepository,
     FollowRepository? followRepository,
+    MentionResolutionService? mentionResolutionService,
     bool includeVideoReplies = false,
   }) : _commentsRepository = commentsRepository,
        _authService = authService,
@@ -55,6 +57,13 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
        _initialTotalCount = initialTotalCount,
        _profileRepository = profileRepository,
        _followRepository = followRepository,
+       _mentionResolutionService =
+           mentionResolutionService ??
+           (profileRepository == null
+               ? null
+               : MentionResolutionService(
+                   profileRepository: profileRepository,
+                 )),
        _includeVideoReplies = includeVideoReplies,
        super(
          CommentsState(
@@ -111,6 +120,7 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
   final ContentBlocklistRepository _contentBlocklistRepository;
   final ProfileRepository? _profileRepository;
   final FollowRepository? _followRepository;
+  final MentionResolutionService? _mentionResolutionService;
   final bool _includeVideoReplies;
   bool _isInitialBackfillComplete = true;
 
@@ -274,6 +284,8 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
         state.copyWith(
           activeReplyCommentId: event.commentId,
           replyInputText: '',
+          activeMentions: const {},
+          activeMentionBindings: const [],
         ),
       );
     }
@@ -295,26 +307,23 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
       return;
     }
 
-    // Convert @displayName mentions to nostr:npub format
-    if (state.activeMentions.isNotEmpty) {
-      // Sort by display name length descending to prevent partial replacements
-      final sortedEntries = state.activeMentions.entries.toList()
-        ..sort((a, b) => b.key.length.compareTo(a.key.length));
-      for (final entry in sortedEntries) {
-        text = text.replaceAll('@${entry.key}', 'nostr:${entry.value}');
-      }
-    }
-
     // Snapshot input fields for rollback if the publish fails.
     final previousMain = state.mainInputText;
     final previousReply = state.replyInputText;
     final previousMentions = state.activeMentions;
+    final previousMentionBindings = state.activeMentionBindings;
 
     final myPubkey = _authService.currentPublicKeyHex;
     if (myPubkey == null) {
       emit(state.copyWith(error: CommentsError.notAuthenticated));
       return;
     }
+
+    final resolvedMentions = await _resolveMentionsForText(
+      text,
+      currentUserPubkey: myPubkey,
+    );
+    text = resolvedMentions.canonicalText;
 
     // 1. Optimistic placeholder — comment lands in the list and the input
     // clears before the network call. Mirrors the Follow pattern used for
@@ -346,6 +355,7 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
           commentsById: withPlaceholder,
           mainInputText: '',
           activeMentions: const {},
+          activeMentionBindings: const [],
         ),
       );
     }
@@ -360,6 +370,7 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
         rootAddressableId: state.rootAddressableId,
         replyToEventId: event.parentCommentId,
         replyToAuthorPubkey: event.parentAuthorPubkey,
+        mentionedPubkeys: resolvedMentions.resolvedPubkeys,
       );
 
       // If _onNewCommentReceived has already swapped the placeholder for the
@@ -403,11 +414,52 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
           mainInputText: isReply ? state.mainInputText : previousMain,
           replyInputText: isReply ? previousReply : state.replyInputText,
           activeMentions: previousMentions,
+          activeMentionBindings: previousMentionBindings,
           error: isReply
               ? CommentsError.postReplyFailed
               : CommentsError.postCommentFailed,
         ),
       );
+    }
+  }
+
+  Future<_ResolvedCommentMentions> _resolveMentionsForText(
+    String text, {
+    required String currentUserPubkey,
+  }) async {
+    final service = _mentionResolutionService;
+    if (service == null) {
+      return _ResolvedCommentMentions(canonicalText: text);
+    }
+
+    final selectedMentions = state.activeMentionBindings.isNotEmpty
+        ? state.activeMentionBindings
+        : state.activeMentions.entries
+              .map(
+                (entry) => MentionBinding(
+                  display: entry.key,
+                  pubkey: entry.value,
+                ),
+              )
+              .toList();
+
+    try {
+      final result = await service.resolveTextMentions(
+        rawText: text,
+        selectedMentions: selectedMentions,
+        currentUserPubkey: currentUserPubkey,
+      );
+      return _ResolvedCommentMentions(
+        canonicalText: result.canonicalText,
+        resolvedPubkeys: result.resolvedPubkeys,
+      );
+    } catch (e) {
+      Log.warning(
+        'Mention resolution failed: $e',
+        name: 'CommentsBloc',
+        category: LogCategory.ui,
+      );
+      return _ResolvedCommentMentions(canonicalText: text);
     }
   }
 
@@ -740,6 +792,16 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
     if (originalComment == null) return;
 
     try {
+      final myPubkey = _authService.currentPublicKeyHex;
+      if (myPubkey == null) {
+        emit(state.copyWith(error: CommentsError.notAuthenticated));
+        return;
+      }
+      final resolvedMentions = await _resolveMentionsForText(
+        editedText,
+        currentUserPubkey: myPubkey,
+      );
+
       // Step 1: Delete the original comment
       await _commentsRepository.deleteComment(
         commentId: originalCommentId,
@@ -748,13 +810,14 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
 
       // Step 2: Post new comment with same threading tags
       final postedComment = await _commentsRepository.postComment(
-        content: editedText,
+        content: resolvedMentions.canonicalText,
         rootEventId: state.rootEventId,
         rootEventKind: state.rootEventKind,
         rootEventAuthorPubkey: state.rootAuthorPubkey,
         rootAddressableId: state.rootAddressableId,
         replyToEventId: originalComment.replyToEventId,
         replyToAuthorPubkey: originalComment.replyToAuthorPubkey,
+        mentionedPubkeys: resolvedMentions.resolvedPubkeys,
       );
 
       // Remove old comment, add new one
@@ -894,8 +957,22 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
     Emitter<CommentsState> emit,
   ) {
     final updatedMentions = Map<String, String>.from(state.activeMentions)
-      ..[event.displayName] = event.npub;
-    emit(state.copyWith(activeMentions: updatedMentions));
+      ..[event.displayName] = event.pubkey;
+    final updatedBindings = [
+      ...state.activeMentionBindings,
+      MentionBinding(
+        display: event.displayName,
+        pubkey: event.pubkey,
+        start: event.start,
+        end: event.end,
+      ),
+    ];
+    emit(
+      state.copyWith(
+        activeMentions: updatedMentions,
+        activeMentionBindings: updatedBindings,
+      ),
+    );
   }
 
   void _onMentionSuggestionsCleared(
@@ -1107,6 +1184,16 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
 
     return lastBatchCount >= _pageSize;
   }
+}
+
+class _ResolvedCommentMentions {
+  const _ResolvedCommentMentions({
+    required this.canonicalText,
+    this.resolvedPubkeys = const [],
+  });
+
+  final String canonicalText;
+  final List<String> resolvedPubkeys;
 }
 
 /// Wraps a [StreamSubscription] so that cancelling it also cancels the
