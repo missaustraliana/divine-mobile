@@ -692,10 +692,10 @@ class FunnelcakeApiClient {
       throw const FunnelcakeException('Pubkey cannot be empty');
     }
 
-    final queryParams = _videoQueryParameters({
+    final queryParams = <String, String>{
       'limit': limit.toString(),
       'sort': sort,
-    });
+    };
     if (before != null) {
       queryParams['before'] = before.toString();
     }
@@ -1916,7 +1916,11 @@ class FunnelcakeApiClient {
 
         final source = raw['source'] as String? ?? 'unknown';
 
-        return RecommendationsResponse(videos: videos, source: source);
+        return RecommendationsResponse(
+          videos: videos,
+          source: source,
+          rawBody: response.body,
+        );
       } else if (response.statusCode == 404) {
         throw FunnelcakeNotFoundException(
           resource: 'Recommendations',
