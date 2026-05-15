@@ -3,6 +3,7 @@
 // ABOUTME: plus the app bar and input bar rendering.
 
 import 'package:bloc_test/bloc_test.dart';
+import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -13,11 +14,14 @@ import 'package:openvine/blocs/dm/conversation/collaborator_invite_actions_cubit
 import 'package:openvine/blocs/dm/conversation/conversation_bloc.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/models/collaborator_invite.dart';
+import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/user_profile_providers.dart';
 import 'package:openvine/screens/inbox/conversation/conversation_view.dart';
 import 'package:openvine/screens/inbox/conversation/widgets/widgets.dart';
-import 'package:openvine/screens/video_detail_screen.dart';
+import 'package:openvine/services/video_event_service.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 
+import '../../../builders/video_event_builder.dart';
 import '../../../helpers/go_router.dart';
 import '../../../helpers/test_provider_overrides.dart';
 
@@ -28,6 +32,8 @@ class _MockConversationBloc
 class _MockCollaboratorInviteActionsCubit
     extends MockCubit<CollaboratorInviteActionsState>
     implements CollaboratorInviteActionsCubit {}
+
+class _MockVideoEventService extends Mock implements VideoEventService {}
 
 class _MockAuthService extends MockAuthService {
   _MockAuthService(this._pubkey);
@@ -59,6 +65,8 @@ void main() {
   group(ConversationView, () {
     late _MockConversationBloc mockBloc;
     late _MockCollaboratorInviteActionsCubit mockInviteActionsCubit;
+    late _MockVideoEventService mockVideoEventService;
+    late MockNostrClient mockNostrClient;
     late _MockAuthService mockAuthService;
 
     setUpAll(() {
@@ -76,8 +84,11 @@ void main() {
     });
 
     setUp(() {
+      VisibilityDetectorController.instance.updateInterval = Duration.zero;
       mockBloc = _MockConversationBloc();
       mockInviteActionsCubit = _MockCollaboratorInviteActionsCubit();
+      mockVideoEventService = _MockVideoEventService();
+      mockNostrClient = createMockNostrService();
       mockAuthService = _MockAuthService(currentPubkey);
 
       when(() => mockInviteActionsCubit.state).thenReturn(
@@ -89,6 +100,13 @@ void main() {
       when(
         () => mockInviteActionsCubit.ignoreInvite(any()),
       ).thenAnswer((_) async {});
+      when(() => mockVideoEventService.getVideoById(any())).thenReturn(null);
+      when(
+        () => mockVideoEventService.getVideoEventByVineId(any()),
+      ).thenReturn(null);
+      when(
+        () => mockNostrClient.fetchEventById(any()),
+      ).thenAnswer((_) async => null);
     });
 
     Widget buildSubject({
@@ -105,7 +123,9 @@ void main() {
 
       final app = testMaterialApp(
         mockAuthService: mockAuthService,
+        mockNostrService: mockNostrClient,
         additionalOverrides: [
+          videoEventServiceProvider.overrideWithValue(mockVideoEventService),
           fetchUserProfileProvider(
             otherPubkey,
           ).overrideWith((ref) async => otherProfile),
@@ -284,6 +304,83 @@ void main() {
       });
 
       testWidgets(
+        'renders collaborator invite as an inline video preview with co-post actions',
+        (tester) async {
+          const thumbnailUrl = 'https://cdn.divine.video/thumbs/skate-loop.jpg';
+          final message = DmMessage(
+            id: '9999999999999999999999999999999999999999999999999999999999999999',
+            conversationId:
+                'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+            senderPubkey: otherPubkey,
+            content: 'You were invited to collaborate.',
+            createdAt: now.millisecondsSinceEpoch ~/ 1000,
+            giftWrapId:
+                'aaaaaaaabbbbbbbbccccccccddddddddaaaaaaaabbbbbbbbccccccccdddddddd',
+            tags: const [
+              ['divine', 'collab-invite'],
+              [
+                'a',
+                '34236:1122334411223344112233441122334411223344112233441122334411223344:skate-loop',
+                'wss://relay.divine.video',
+              ],
+              ['p', otherPubkey],
+              ['role', 'Collaborator'],
+              ['title', 'Skate loop'],
+              ['thumb', thumbnailUrl],
+            ],
+          );
+
+          await tester.pumpWidget(
+            buildSubject(
+              state: ConversationState(
+                status: ConversationStatus.loaded,
+                messages: [message],
+              ),
+            ),
+          );
+          await tester.pump();
+
+          final previewTitle = l10n.inboxCollabInvitePreviewTitle;
+          expect(find.textContaining(previewTitle), findsOneWidget);
+          expect(find.textContaining('Skate loop'), findsOneWidget);
+          expect(
+            find.text(l10n.inboxCollabInviteTimelineConsequence),
+            findsOneWidget,
+          );
+          expect(find.text(l10n.inboxCollabInviteCoPostButton), findsOneWidget);
+          expect(
+            find.text(l10n.inboxCollabInviteNotMineButton),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const ValueKey('collaborator_invite_thumbnail')),
+            findsOneWidget,
+          );
+          expect(
+            find.bySemanticsLabel(
+              l10n.notificationsVideoThumbnailFor('Skate loop'),
+            ),
+            findsOneWidget,
+          );
+          expect(
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is DivineIcon &&
+                  widget.icon == DivineIconName.playFill,
+            ),
+            findsOneWidget,
+          );
+
+          await tester.tap(find.text(l10n.inboxCollabInviteCoPostButton));
+          await tester.pump();
+
+          verify(
+            () => mockInviteActionsCubit.acceptInvite(any()),
+          ).called(1);
+        },
+      );
+
+      testWidgets(
         'renders collaborator invite card instead of plaintext invite copy',
         (tester) async {
           final message = DmMessage(
@@ -318,13 +415,19 @@ void main() {
           );
           await tester.pump();
 
-          expect(find.text(l10n.inboxCollabInviteCardTitle), findsOneWidget);
+          expect(
+            find.textContaining(l10n.inboxCollabInvitePreviewTitle),
+            findsOneWidget,
+          );
           expect(find.textContaining('Skate loop'), findsOneWidget);
-          expect(find.text(l10n.inboxCollabInviteAcceptButton), findsOneWidget);
-          expect(find.text(l10n.inboxCollabInviteIgnoreButton), findsOneWidget);
+          expect(find.text(l10n.inboxCollabInviteCoPostButton), findsOneWidget);
+          expect(
+            find.text(l10n.inboxCollabInviteNotMineButton),
+            findsOneWidget,
+          );
           expect(find.text('You were invited to collaborate.'), findsNothing);
 
-          await tester.tap(find.text(l10n.inboxCollabInviteAcceptButton));
+          await tester.tap(find.text(l10n.inboxCollabInviteCoPostButton));
           await tester.pump();
 
           verify(
@@ -381,10 +484,24 @@ void main() {
       );
 
       testWidgets(
-        'opens collaborator invite video when card is tapped',
+        'renders collaborator invite video inline without navigating away',
         (tester) async {
+          await tester.binding.setSurfaceSize(const Size(1800, 1200));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+
           final mockGoRouter = MockGoRouter();
           when(() => mockGoRouter.push(any())).thenAnswer((_) async => null);
+          when(
+            () => mockVideoEventService.getVideoEventByVineId('skate-loop'),
+          ).thenReturn(
+            VideoEventBuilder(
+              id: '7777777777777777777777777777777777777777777777777777777777777777',
+              pubkey: otherPubkey,
+              title: 'Skate loop',
+              videoUrl: 'https://cdn.divine.video/videos/skate-loop.mp4',
+              thumbnailUrl: 'https://cdn.divine.video/thumbs/skate-loop.jpg',
+            ).build(),
+          );
 
           final message = DmMessage(
             id: '9999999999999999999999999999999999999999999999999999999999999999',
@@ -418,17 +535,24 @@ void main() {
             ),
           );
           await tester.pump();
-
-          await tester.tap(find.byType(CollaboratorInviteCard));
           await tester.pump();
 
-          verify(
-            () => mockGoRouter.push(
-              VideoDetailScreen.pathForId(
-                '34236:1122334411223344112233441122334411223344112233441122334411223344:skate-loop',
-              ),
-            ),
-          ).called(1);
+          expect(
+            find.byKey(const ValueKey('collaborator_invite_inline_player')),
+            findsOneWidget,
+          );
+          expect(find.text(l10n.inboxCollabInviteCoPostButton), findsOneWidget);
+          expect(
+            find.text(l10n.inboxCollabInviteNotMineButton),
+            findsOneWidget,
+          );
+          final playerSize = tester.getSize(
+            find.byKey(const ValueKey('collaborator_invite_inline_player')),
+          );
+          expect(playerSize.width, lessThanOrEqualTo(420));
+          expect(playerSize.height, lessThanOrEqualTo(748));
+
+          verifyNever(() => mockGoRouter.push(any()));
         },
       );
 
@@ -476,8 +600,8 @@ void main() {
           expect(find.text(l10n.inboxCollabInviteCardTitle), findsOneWidget);
           expect(find.textContaining('Skate loop'), findsOneWidget);
           expect(find.text(l10n.inboxCollabInviteSentStatus), findsOneWidget);
-          expect(find.text(l10n.inboxCollabInviteAcceptButton), findsNothing);
-          expect(find.text(l10n.inboxCollabInviteIgnoreButton), findsNothing);
+          expect(find.text('Co-post'), findsNothing);
+          expect(find.text('Not mine'), findsNothing);
           expect(find.text('You were invited to collaborate.'), findsNothing);
 
           // Stronger assertion than "no acceptInvite call": sender-side

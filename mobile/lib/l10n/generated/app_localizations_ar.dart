@@ -5240,11 +5240,6 @@ class AppLocalizationsAr extends AppLocalizations {
   String get inboxCollabInviteCardTitle => 'دعوة للتعاون';
 
   @override
-  String inboxCollabInviteCardRoleLabel(String role) {
-    return '$role على هذا المنشور';
-  }
-
-  @override
   String get inboxCollabInviteCardUntitledVideo => 'فيديو بلا عنوان';
 
   @override
@@ -5262,10 +5257,22 @@ class AppLocalizationsAr extends AppLocalizations {
   String get messageExternalLinkDialogOpen => 'فتح';
 
   @override
-  String get inboxCollabInviteAcceptButton => 'قبول';
+  String get inboxCollabInviteCoPostButton => 'نشر مشترك';
 
   @override
-  String get inboxCollabInviteIgnoreButton => 'تجاهل';
+  String get inboxCollabInviteNotMineButton => 'ليس لي';
+
+  @override
+  String get inboxCollabInvitePreviewTitle => 'دعوة نشر مشترك';
+
+  @override
+  String inboxCollabInvitePreviewTitleFrom(String displayName) {
+    return 'دعوة نشر مشترك من $displayName';
+  }
+
+  @override
+  String get inboxCollabInviteTimelineConsequence =>
+      'سيضيف النشر المشترك هذا الفيديو إلى يومياتك كتعاون.';
 
   @override
   String get inboxCollabInviteAcceptedStatus => 'تم القبول';

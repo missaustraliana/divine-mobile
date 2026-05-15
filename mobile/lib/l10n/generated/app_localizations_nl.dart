@@ -5309,11 +5309,6 @@ class AppLocalizationsNl extends AppLocalizations {
   String get inboxCollabInviteCardTitle => 'Uitnodiging om samen te werken';
 
   @override
-  String inboxCollabInviteCardRoleLabel(String role) {
-    return '$role bij deze post';
-  }
-
-  @override
   String get inboxCollabInviteCardUntitledVideo => 'Video zonder titel';
 
   @override
@@ -5331,10 +5326,23 @@ class AppLocalizationsNl extends AppLocalizations {
   String get messageExternalLinkDialogOpen => 'Openen';
 
   @override
-  String get inboxCollabInviteAcceptButton => 'Accepteren';
+  String get inboxCollabInviteCoPostButton => 'Samen plaatsen';
 
   @override
-  String get inboxCollabInviteIgnoreButton => 'Negeren';
+  String get inboxCollabInviteNotMineButton => 'Niet van mij';
+
+  @override
+  String get inboxCollabInvitePreviewTitle =>
+      'Uitnodiging om samen te plaatsen';
+
+  @override
+  String inboxCollabInvitePreviewTitleFrom(String displayName) {
+    return 'Uitnodiging om samen te plaatsen van $displayName';
+  }
+
+  @override
+  String get inboxCollabInviteTimelineConsequence =>
+      'Samen plaatsen voegt deze video als samenwerking toe aan je tijdlijn.';
 
   @override
   String get inboxCollabInviteAcceptedStatus => 'Geaccepteerd';

@@ -5421,11 +5421,6 @@ class AppLocalizationsPl extends AppLocalizations {
   String get inboxCollabInviteCardTitle => 'Zaproszenie do współpracy';
 
   @override
-  String inboxCollabInviteCardRoleLabel(String role) {
-    return '$role przy tym poście';
-  }
-
-  @override
   String get inboxCollabInviteCardUntitledVideo => 'Film bez tytułu';
 
   @override
@@ -5443,10 +5438,23 @@ class AppLocalizationsPl extends AppLocalizations {
   String get messageExternalLinkDialogOpen => 'Otwórz';
 
   @override
-  String get inboxCollabInviteAcceptButton => 'Akceptuj';
+  String get inboxCollabInviteCoPostButton => 'Współopublikuj';
 
   @override
-  String get inboxCollabInviteIgnoreButton => 'Ignoruj';
+  String get inboxCollabInviteNotMineButton => 'Nie moje';
+
+  @override
+  String get inboxCollabInvitePreviewTitle =>
+      'Zaproszenie do współopublikowania';
+
+  @override
+  String inboxCollabInvitePreviewTitleFrom(String displayName) {
+    return 'Zaproszenie do współopublikowania od $displayName';
+  }
+
+  @override
+  String get inboxCollabInviteTimelineConsequence =>
+      'Współopublikowanie doda ten film do Twojej osi czasu jako współpracę.';
 
   @override
   String get inboxCollabInviteAcceptedStatus => 'Zaakceptowano';

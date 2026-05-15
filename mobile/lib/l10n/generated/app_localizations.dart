@@ -9374,12 +9374,6 @@ abstract class AppLocalizations {
   /// **'Collaborator invite'**
   String get inboxCollabInviteCardTitle;
 
-  /// Subtitle on the collaborator invite card describing the offered collaborator role.
-  ///
-  /// In en, this message translates to:
-  /// **'{role} on this post'**
-  String inboxCollabInviteCardRoleLabel(String role);
-
   /// Fallback shown as the collaborator invite card title when the invited video has no title. Avoids exposing the raw d-tag identifier.
   ///
   /// In en, this message translates to:
@@ -9410,17 +9404,35 @@ abstract class AppLocalizations {
   /// **'Open'**
   String get messageExternalLinkDialogOpen;
 
-  /// No description provided for @inboxCollabInviteAcceptButton.
+  /// Primary action on a collaborator invite card. Accepts the invite and co-posts the video to the recipient's timeline as a collaboration.
   ///
   /// In en, this message translates to:
-  /// **'Accept'**
-  String get inboxCollabInviteAcceptButton;
+  /// **'Co-post'**
+  String get inboxCollabInviteCoPostButton;
 
-  /// No description provided for @inboxCollabInviteIgnoreButton.
+  /// Secondary action on a collaborator invite card. Ignores the invite because the recipient does not claim the video as their collaboration.
   ///
   /// In en, this message translates to:
-  /// **'Ignore'**
-  String get inboxCollabInviteIgnoreButton;
+  /// **'Not mine'**
+  String get inboxCollabInviteNotMineButton;
+
+  /// Header label shown over the video preview on a collaborator invite card.
+  ///
+  /// In en, this message translates to:
+  /// **'Co-post invite'**
+  String get inboxCollabInvitePreviewTitle;
+
+  /// Header label shown over the video preview on a collaborator invite card when the inviter's display name is known.
+  ///
+  /// In en, this message translates to:
+  /// **'Co-post invite from {displayName}'**
+  String inboxCollabInvitePreviewTitleFrom(String displayName);
+
+  /// Explains what accepting a collaborator invite does.
+  ///
+  /// In en, this message translates to:
+  /// **'Co-posting adds this video to your timeline as a collaboration.'**
+  String get inboxCollabInviteTimelineConsequence;
 
   /// No description provided for @inboxCollabInviteAcceptedStatus.
   ///

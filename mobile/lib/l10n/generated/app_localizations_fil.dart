@@ -5357,11 +5357,6 @@ class AppLocalizationsFil extends AppLocalizations {
   String get inboxCollabInviteCardTitle => 'Imbitasyon bilang collaborator';
 
   @override
-  String inboxCollabInviteCardRoleLabel(String role) {
-    return '$role sa post na ito';
-  }
-
-  @override
   String get inboxCollabInviteCardUntitledVideo => 'Video na walang pamagat';
 
   @override
@@ -5379,10 +5374,22 @@ class AppLocalizationsFil extends AppLocalizations {
   String get messageExternalLinkDialogOpen => 'Buksan';
 
   @override
-  String get inboxCollabInviteAcceptButton => 'Tanggapin';
+  String get inboxCollabInviteCoPostButton => 'Co-post';
 
   @override
-  String get inboxCollabInviteIgnoreButton => 'Balewalain';
+  String get inboxCollabInviteNotMineButton => 'Hindi akin';
+
+  @override
+  String get inboxCollabInvitePreviewTitle => 'Imbitasyon sa co-post';
+
+  @override
+  String inboxCollabInvitePreviewTitleFrom(String displayName) {
+    return 'Imbitasyon sa co-post mula kay $displayName';
+  }
+
+  @override
+  String get inboxCollabInviteTimelineConsequence =>
+      'Idaragdag ng co-posting ang video na ito sa timeline mo bilang collaboration.';
 
   @override
   String get inboxCollabInviteAcceptedStatus => 'Tinanggap';
