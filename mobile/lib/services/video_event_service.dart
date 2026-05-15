@@ -45,6 +45,7 @@ import 'package:openvine/services/repost_resolver.dart';
 import 'package:openvine/services/subscription_manager.dart';
 import 'package:openvine/services/video_filter_builder.dart';
 import 'package:openvine/utils/log_batcher.dart';
+import 'package:openvine/utils/log_tag_sanitizer.dart';
 import 'package:profile_repository/profile_repository.dart';
 import 'package:unified_logger/unified_logger.dart';
 import 'package:video_event_cache/video_event_cache.dart';
@@ -2241,7 +2242,7 @@ class VideoEventService extends ChangeNotifier implements VideoEventCache {
         }
 
         Log.verbose(
-          'Direct event tags: ${event.tags}',
+          'Direct event tags: ${_formatEventTagsForLog(event.tags)}',
           name: 'VideoEventService',
           category: LogCategory.video,
         );
@@ -2409,7 +2410,7 @@ class VideoEventService extends ChangeNotifier implements VideoEventCache {
             category: LogCategory.video,
           );
           Log.verbose(
-            '  - Tags: ${event.tags}',
+            '  - Tags: ${_formatEventTagsForLog(event.tags)}',
             name: 'VideoEventService',
             category: LogCategory.video,
           );
@@ -5098,6 +5099,12 @@ class VideoEventService extends ChangeNotifier implements VideoEventCache {
     unsubscribeFromVideoFeed();
     unawaited(_removedVideoIdsController.close());
     super.dispose();
+  }
+
+  /// Sanitizes event tags for log output: redacts sensitive tag values and
+  /// truncates long parts to keep log lines manageable.
+  String _formatEventTagsForLog(List<List<String>> tags) {
+    return tags.map(sanitizeTagForLog).toList(growable: false).toString();
   }
 
   /// Generate deterministic subscription ID based on subscription parameters

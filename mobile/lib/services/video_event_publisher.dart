@@ -29,6 +29,7 @@ import 'package:openvine/services/upload_manager.dart';
 import 'package:openvine/services/video_event_service.dart';
 import 'package:openvine/services/video_thumbnail_service.dart';
 import 'package:openvine/utils/collaborator_tags.dart';
+import 'package:openvine/utils/log_tag_sanitizer.dart';
 import 'package:openvine/utils/proofmode_publishing_helpers.dart';
 import 'package:profile_repository/profile_repository.dart';
 import 'package:unified_logger/unified_logger.dart';
@@ -123,12 +124,7 @@ List<List<String>> _buildMentionPTags(
       continue;
     }
 
-    tags.add([
-      'p',
-      normalizedPubkey,
-      collaboratorInviteRelayHint,
-      'mention',
-    ]);
+    tags.add(['p', normalizedPubkey, collaboratorInviteRelayHint, 'mention']);
   }
 
   return tags;
@@ -206,10 +202,7 @@ class VideoEventPublisher {
           context.parentAuthorPubkey ?? context.rootAuthorPubkey,
         ])
         ..add(['k', EventKind.comment.toString()])
-        ..add([
-          'p',
-          context.parentAuthorPubkey ?? context.rootAuthorPubkey,
-        ]);
+        ..add(['p', context.parentAuthorPubkey ?? context.rootAuthorPubkey]);
       return;
     }
 
@@ -319,8 +312,9 @@ class VideoEventPublisher {
         category: LogCategory.video,
       );
       for (final tag in event.tags) {
+        final sanitizedTag = sanitizeTagForLog(tag);
         Log.info(
-          '    - ${tag.join(", ")}',
+          '    - ${sanitizedTag.join(", ")}',
           name: 'VideoEventPublisher',
           category: LogCategory.video,
         );
@@ -343,7 +337,7 @@ class VideoEventPublisher {
 
       // Log the raw JSON representation
       try {
-        final eventMap = event.toJson();
+        final eventMap = sanitizeEventJsonForLog(event.toJson());
         final jsonStr = jsonEncode(eventMap);
         Log.info(
           '📋 FULL EVENT JSON:',
@@ -587,12 +581,10 @@ class VideoEventPublisher {
       if (replyContext != null) {
         _addReplyTags(tags, replyContext);
         if (addReplyToFeed) {
-          tags.add(
-            const [
-              videoReplyVisibilityTagName,
-              videoReplyVisibilityFeedValue,
-            ],
-          );
+          tags.add(const [
+            videoReplyVisibilityTagName,
+            videoReplyVisibilityFeedValue,
+          ]);
         }
       }
 
