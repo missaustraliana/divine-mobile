@@ -28,7 +28,7 @@ import 'package:likes_repository/likes_repository.dart';
 import 'package:models/models.dart' hide LogCategory;
 import 'package:nostr_app_bridge_repository/nostr_app_bridge_repository.dart';
 import 'package:nostr_client/nostr_client.dart'
-    show RelayConnectionStatus, RelayState;
+    show NostrClient, RelayConnectionStatus, RelayState;
 import 'package:nostr_key_manager/nostr_key_manager.dart';
 import 'package:openvine/config/app_config.dart';
 import 'package:openvine/constants/app_constants.dart';
@@ -38,6 +38,7 @@ import 'package:openvine/features/feature_flags/providers/feature_flag_providers
 import 'package:openvine/models/auth_rpc_capability.dart';
 import 'package:openvine/models/environment_config.dart';
 import 'package:openvine/models/known_account.dart';
+import 'package:openvine/models/notification_preferences.dart';
 import 'package:openvine/providers/app_foreground_provider.dart';
 import 'package:openvine/providers/curation_providers.dart';
 import 'package:openvine/providers/database_provider.dart';
@@ -100,6 +101,7 @@ import 'package:openvine/services/pending_verification_service.dart';
 import 'package:openvine/services/performance_monitoring_service.dart';
 import 'package:openvine/services/personal_event_cache_service.dart';
 import 'package:openvine/services/push_notification_service.dart';
+import 'package:openvine/services/push_notification_session_coordinator.dart';
 import 'package:openvine/services/relay_capability_service.dart';
 import 'package:openvine/services/relay_statistics_service.dart';
 import 'package:openvine/services/seen_videos_service.dart';
@@ -189,18 +191,22 @@ final collaboratorInviteStateStoreProvider =
     });
 
 /// Per-video collaborator confirmation status. Returns `null` until
-/// [isNostrReadyProvider] flips, so consumers render a safe fallback
-/// instead of capturing a stale Nostr client.
+/// [nostrSessionProvider] has a ready active client, so consumers render a safe
+/// fallback instead of capturing a stale Nostr client.
 final collaboratorConfirmationRepositoryProvider =
     Provider<CollaboratorConfirmationRepository?>((ref) {
-      if (!ref.watch(isNostrReadyProvider)) return null;
       final authService = ref.watch(authServiceProvider);
-      final currentUserPubkey = authService.currentPublicKeyHex;
-      if (currentUserPubkey == null || currentUserPubkey.isEmpty) {
+      final readiness = ref.watch(nostrSessionProvider);
+      final currentUserPubkey = readiness.pubkey;
+      final nostrClient = readiness.client;
+      if (!readiness.isReadyForActiveClient ||
+          currentUserPubkey == null ||
+          currentUserPubkey.isEmpty ||
+          nostrClient == null ||
+          authService.currentIdentity?.pubkey != currentUserPubkey) {
         return null;
       }
 
-      final nostrClient = ref.watch(nostrServiceProvider);
       final localStore = ref.watch(collaboratorInviteStateStoreProvider);
       final repo = CollaboratorConfirmationRepository(
         nostrClient: nostrClient,
@@ -211,37 +217,187 @@ final collaboratorConfirmationRepositoryProvider =
       return repo;
     });
 
-final pushNotificationServiceProvider = Provider<PushNotificationService>((
+final pushNotificationServiceProvider = Provider<PushNotificationService?>((
   ref,
 ) {
+  final readiness = ref.watch(nostrSessionProvider);
+  if (!readiness.isReadyForActiveClient || readiness.client == null) {
+    return null;
+  }
+
   final authService = ref.watch(authServiceProvider);
-  final nostrClient = ref.watch(nostrServiceProvider);
+  if (authService.currentIdentity?.pubkey != readiness.pubkey) {
+    return null;
+  }
+
   final notificationService = ref.watch(notificationServiceProvider);
   final envConfig = ref.watch(currentEnvironmentProvider);
   final firebaseMessaging = ref.watch(firebaseMessagingProvider);
 
   final pushService = PushNotificationService(
     authService: authService,
-    nostrClient: nostrClient,
+    nostrClient: readiness.client!,
     notificationService: notificationService,
     environmentConfig: envConfig,
     getToken: firebaseMessaging.getToken,
-    onTokenRefresh: firebaseMessaging.onTokenRefresh,
+    isCurrent: () {
+      final currentReadiness = ref.read(nostrSessionProvider);
+      return currentReadiness.isReadyForActiveClient &&
+          currentReadiness.pubkey == readiness.pubkey &&
+          identical(currentReadiness.client, readiness.client) &&
+          authService.currentIdentity?.pubkey == readiness.pubkey;
+    },
   );
 
   ref.onDispose(pushService.dispose);
   return pushService;
 });
 
+Future<bool> _updateNotificationPreferencesSafely(
+  PushNotificationService pushService,
+  NotificationPreferences preferences,
+) async {
+  try {
+    return await pushService.updatePreferences(preferences);
+  } catch (e) {
+    Log.warning(
+      'Push notification preference publish failed: $e',
+      name: 'PushNotificationSync',
+      category: LogCategory.system,
+    );
+    return false;
+  }
+}
+
+final Provider<void Function(String)>
+notificationPreferencesDirtySyncBridgeProvider =
+    Provider<void Function(String)>((ref) {
+      const maxDirtySyncRetries = 3;
+      var disposed = false;
+      var drainGeneration = 0;
+      final activeDrainPubkeys = <String>{};
+      final retryCountsByPubkey = <String, int>{};
+
+      ref.onDispose(() {
+        disposed = true;
+        drainGeneration += 1;
+      });
+
+      bool isReadyForPubkey(
+        String pubkey, {
+        PushNotificationService? pushService,
+      }) {
+        if (disposed) return false;
+
+        final authService = ref.read(authServiceProvider);
+        if (authService.currentIdentity?.pubkey != pubkey) return false;
+
+        final readiness = ref.read(nostrSessionProvider);
+        if (!readiness.isReadyForActiveClient || readiness.pubkey != pubkey) {
+          return false;
+        }
+
+        return pushService == null ||
+            identical(ref.read(pushNotificationServiceProvider), pushService);
+      }
+
+      Future<void> drainDirtyPreferences(String pubkey) async {
+        if (!activeDrainPubkeys.add(pubkey)) return;
+        final generation = ++drainGeneration;
+        var shouldRetry = false;
+        try {
+          final preferencesService = ref.read(
+            notificationPreferencesServiceProvider,
+          );
+          if (!isReadyForPubkey(pubkey)) return;
+          final outcome = await preferencesService
+              .syncDirtyPreferencesForPubkey(
+                pubkey,
+              );
+          if (disposed || generation != drainGeneration) return;
+          switch (outcome) {
+            case NotificationPreferencesSyncOutcome.publishedAndCleared:
+            case NotificationPreferencesSyncOutcome.nothingToDrain:
+              retryCountsByPubkey.remove(pubkey);
+            case NotificationPreferencesSyncOutcome.stillDirty:
+              shouldRetry = isReadyForPubkey(pubkey);
+          }
+        } catch (e) {
+          Log.warning(
+            'Push notification preference drain failed: $e',
+            name: 'PushNotificationSync',
+            category: LogCategory.system,
+          );
+        } finally {
+          activeDrainPubkeys.remove(pubkey);
+        }
+
+        if (!shouldRetry || disposed) return;
+        final retryCount = retryCountsByPubkey[pubkey] ?? 0;
+        if (retryCount >= maxDirtySyncRetries) return;
+        retryCountsByPubkey[pubkey] = retryCount + 1;
+        Future<void>.microtask(() {
+          if (disposed || !isReadyForPubkey(pubkey)) return;
+          unawaited(drainDirtyPreferences(pubkey));
+        });
+      }
+
+      void scheduleDirtyPreferencesDrain(String pubkey) {
+        if (disposed || !isReadyForPubkey(pubkey)) return;
+        Future<void>.microtask(() {
+          if (disposed || !isReadyForPubkey(pubkey)) return;
+          unawaited(drainDirtyPreferences(pubkey));
+        });
+      }
+
+      void handleReadiness(NostrSessionReadiness readiness) {
+        final readinessPubkey = readiness.pubkey;
+        if (readiness.isReadyForActiveClient && readinessPubkey != null) {
+          unawaited(drainDirtyPreferences(readinessPubkey));
+        }
+      }
+
+      ref.listen<NostrSessionReadiness>(nostrSessionProvider, (_, readiness) {
+        handleReadiness(readiness);
+      });
+
+      Future.microtask(() => handleReadiness(ref.read(nostrSessionProvider)));
+      return scheduleDirtyPreferencesDrain;
+    });
+
 final notificationPreferencesServiceProvider =
     Provider<NotificationPreferencesService>((ref) {
+      final authService = ref.watch(authServiceProvider);
+
       return NotificationPreferencesService(
-        openBox: NotificationPreferencesService.openBox,
-        publishPreferences: (prefs) {
-          return ref
-              .read(pushNotificationServiceProvider)
-              .updatePreferences(prefs);
+        store: ref.watch(notificationPreferencesStoreProvider),
+        currentPubkey: () => authService.currentIdentity?.pubkey,
+        onStillDirty: (pubkey) {
+          if (!ref.mounted) return;
+          ref.read(notificationPreferencesDirtySyncBridgeProvider)(pubkey);
         },
+        publishPreferences: (pubkey, prefs) {
+          if (authService.currentIdentity?.pubkey != pubkey) {
+            return Future<bool>.value(false);
+          }
+
+          final pushService = ref.read(pushNotificationServiceProvider);
+          final readiness = ref.read(nostrSessionProvider);
+          if (pushService == null ||
+              !readiness.isReadyForActiveClient ||
+              readiness.pubkey != pubkey) {
+            return Future<bool>.value(false);
+          }
+
+          return _updateNotificationPreferencesSafely(pushService, prefs);
+        },
+      );
+    });
+
+final notificationPreferencesStoreProvider =
+    Provider<NotificationPreferencesStore>((ref) {
+      return const HiveNotificationPreferencesStore(
+        openBox: HiveNotificationPreferencesStore.openBox,
       );
     });
 
@@ -356,11 +512,10 @@ PendingActionService? pendingActionService(Ref ref) {
 /// eagerly at app shell startup (`main.dart`) so the foreground
 /// subscription is wired up.
 ///
-/// Returns null when the user is not authenticated or when
-/// [isNostrReadyProvider] hasn't flipped yet — the underlying
-/// [DmRepository.recoverSelfWrap] requires `setCredentials` to have
-/// run, and gating here is cleaner than catching `StateError` in
-/// every sweep pass.
+/// Returns null when the user is not authenticated or when the current Nostr
+/// session is not ready — the underlying [DmRepository.recoverSelfWrap]
+/// requires `setCredentials` to have run, and gating here is cleaner than
+/// catching `StateError` in every sweep pass.
 @Riverpod(keepAlive: true)
 OutgoingDmRetryService? outgoingDmRetryService(Ref ref) {
   final authService = ref.watch(authServiceProvider);
@@ -371,9 +526,12 @@ OutgoingDmRetryService? outgoingDmRetryService(Ref ref) {
   final userPubkey = authService.currentPublicKeyHex;
   if (userPubkey == null) return null;
 
-  // Gate on Nostr readiness so DmRepository.setCredentials has run by
+  // Gate on matching Nostr readiness so DmRepository.setCredentials has run by
   // the time the service's first foreground sweep fires.
-  if (!ref.watch(isNostrReadyProvider)) return null;
+  final readiness = ref.watch(nostrSessionProvider);
+  if (!readiness.isReadyForActiveClient || readiness.pubkey != userPubkey) {
+    return null;
+  }
 
   final dmRepository = ref.watch(dmRepositoryProvider);
   final db = ref.watch(databaseProvider);
@@ -967,11 +1125,11 @@ class BlocklistVersion extends _$BlocklistVersion {
   void increment() => state++;
 }
 
-/// Bridge that starts blocklist sync when the user becomes authenticated.
+/// Bridge that starts blocklist sync when the Nostr session becomes ready.
 ///
-/// Watch this at app shell level. It listens to [authStateStream] and
+/// Watch this at app shell level. It listens to [nostrSessionProvider] and
 /// triggers [syncMuteListsInBackground] + [syncBlockListsInBackground]
-/// the first time the user is authenticated. This covers:
+/// the first time the signer-backed Nostr client is initialized. This covers:
 /// - Already-authenticated startup (iOS keychain persists across reinstalls)
 /// - Post-login authentication (Android wipes credentials on uninstall)
 ///
@@ -980,21 +1138,24 @@ class BlocklistVersion extends _$BlocklistVersion {
 @Riverpod(keepAlive: true)
 void blocklistSyncBridge(Ref ref) {
   final authService = ref.watch(authServiceProvider);
-  final nostrService = ref.watch(nostrServiceProvider);
   final blocklistRepository = ref.watch(contentBlocklistRepositoryProvider);
 
-  Future<void> startSync() async {
-    // Use authService.currentPublicKeyHex — it is available immediately
-    // after authentication, unlike nostrKeyManagerProvider which loads
-    // its keys asynchronously via RPC and may not be ready yet.
-    final pubkey = authService.currentPublicKeyHex;
-    if (pubkey == null) return;
+  Future<void> startSync(NostrSessionReadiness readiness) async {
+    final pubkey = readiness.pubkey;
+    final client = readiness.client;
+    if (!readiness.isReadyForActiveClient || pubkey == null || client == null) {
+      return;
+    }
+
+    if (authService.currentIdentity?.pubkey != pubkey) {
+      return;
+    }
 
     try {
       await Future.wait([
-        blocklistRepository.syncMuteListsInBackground(nostrService, pubkey),
+        blocklistRepository.syncMuteListsInBackground(client, pubkey),
         blocklistRepository.syncBlockListsInBackground(
-          nostrService,
+          client,
           authService,
           pubkey,
         ),
@@ -1013,19 +1174,11 @@ void blocklistSyncBridge(Ref ref) {
     }
   }
 
-  // Sync immediately if already authenticated
-  if (authService.isAuthenticated && authService.currentPublicKeyHex != null) {
-    unawaited(startSync());
-  }
+  unawaited(startSync(ref.read(nostrSessionProvider)));
 
-  // Also listen for future auth transitions (e.g. post-reinstall login)
-  final subscription = authService.authStateStream.listen((authState) {
-    if (authState == AuthState.authenticated) {
-      unawaited(startSync());
-    }
+  ref.listen<NostrSessionReadiness>(nostrSessionProvider, (_, next) {
+    unawaited(startSync(next));
   });
-
-  ref.onDispose(subscription.cancel);
 }
 
 /// Draft storage service for persisting vine drafts
@@ -1184,87 +1337,6 @@ final cawgVerifierClientProvider = Provider<CawgVerifierClient>((ref) {
   return client;
 });
 
-/// Provider that returns true only when NostrClient is fully ready for operations.
-/// Combines auth state check AND nostrClient.hasKeys verification.
-/// Use this to guard providers that require authenticated NostrClient access.
-///
-/// This prevents race conditions where auth state is 'authenticated' but
-/// the NostrClient hasn't yet rebuilt with the new keys.
-///
-/// `NostrClient.initialize()` runs asynchronously in a `Future.microtask`
-/// after `NostrService.build()` returns. Riverpod cannot detect that
-/// transition through the client reference because it's the same instance
-/// before and after. Instead, when the client reports `!hasKeys` we await
-/// its `ready` future (completed by `initialize()`) and invalidate this
-/// provider once — replacing the previous 50 ms polling timer (#3352).
-@Riverpod(keepAlive: true)
-bool isNostrReady(Ref ref) {
-  final authService = ref.watch(authServiceProvider);
-
-  // Watch auth state to rebuild when auth changes
-  ref.watch(currentAuthStateProvider);
-
-  if (!authService.isAuthenticated) {
-    return false;
-  }
-
-  final nostrClient = ref.watch(nostrServiceProvider);
-  final ready = nostrClient.hasKeys;
-
-  if (!ready) {
-    // If the ready future has already settled but `hasKeys` is still
-    // false, `refreshPublicKey()` returned an empty string during
-    // initialize() (signer not yet configured at cold boot). Attaching
-    // another `.then(...)` here would fire on the next microtask and
-    // re-invalidate this provider in a tight loop — every rebuild adds
-    // a fresh subscription to the already-resolved completer. Just
-    // return false and wait for an external rebuild trigger (auth
-    // state change or a new NostrClient instance from
-    // nostrServiceProvider).
-    if (nostrClient.isReadyResolved) {
-      return false;
-    }
-
-    // One-shot listener: wait for initialize() to complete on the current
-    // client, then invalidate so this provider re-reads hasKeys.
-    final readyFuture = nostrClient.ready;
-    final clientAtSubscribe = nostrClient;
-    unawaited(
-      readyFuture.then(
-        (_) {
-          // Guard against late completion after the provider has rebuilt
-          // for a different reason (e.g. account switch produced a new
-          // NostrClient instance). Only invalidate if we're still pointing
-          // at the same client.
-          if (!ref.mounted) return;
-          if (!identical(ref.read(nostrServiceProvider), clientAtSubscribe)) {
-            return;
-          }
-          Log.info(
-            'isNostrReady: NostrClient.ready completed, invalidating',
-            name: 'isNostrReadyProvider',
-            category: LogCategory.system,
-          );
-          ref.invalidateSelf();
-        },
-        onError: (Object error) {
-          // A disposed client surfaces here when the auth flow tears the
-          // NostrService down before initialize() resolves. The provider
-          // will rebuild on the next auth state change.
-          Log.debug(
-            'isNostrReady: NostrClient.ready errored ($error) — '
-            'awaiting next auth-state rebuild',
-            name: 'isNostrReadyProvider',
-            category: LogCategory.system,
-          );
-        },
-      ),
-    );
-  }
-
-  return ready;
-}
-
 /// Provider that sets Zendesk user identity when auth state changes
 /// Watch this provider at app startup to keep Zendesk identity in sync with auth
 @Riverpod(keepAlive: true)
@@ -1301,82 +1373,45 @@ void zendeskIdentitySync(Ref ref) {
   ref.onDispose(subscription.cancel);
 }
 
-/// Bridges auth state changes to push notification registration.
+/// Bridges Nostr session readiness to push notification registration.
 ///
-/// Registers FCM token on login, deregisters on logout.
-/// Same pattern as [zendeskIdentitySync].
+/// Registers FCM token only after the signer-backed Nostr client is ready.
+/// Deregisters the last ready client through AuthService's pre-teardown hook so
+/// outgoing-session cleanup runs before signers and callbacks are cleared.
 @Riverpod(keepAlive: true)
 void pushNotificationSync(Ref ref) {
   final authService = ref.watch(authServiceProvider);
+  ref.watch(notificationPreferencesDirtySyncBridgeProvider);
 
-  Future<void> requestPermissionAndRegister(String pubkey) async {
-    try {
-      final firebaseMessaging = ref.read(firebaseMessagingProvider);
-      final pushService = ref.read(pushNotificationServiceProvider);
-
-      // Only prompt the user if permission has never been decided. Rapid
-      // auth state changes (account switching, E2E tests) otherwise cause
-      // concurrent `requestPermission` calls, and Firebase throws
-      // `PlatformException([firebase_messaging/unknown] A request for
-      // permissions is already running)` — silently losing FCM registration
-      // in production and failing E2E tests via unhandled async errors.
-      final current = await firebaseMessaging.getNotificationSettings();
-      final settings =
-          current.authorizationStatus == AuthorizationStatus.notDetermined
-          ? await firebaseMessaging.requestPermission()
-          : current;
-
-      if (settings.authorizationStatus == AuthorizationStatus.denied) {
-        Log.info(
-          'Push notification permission denied by user',
-          name: 'PushNotificationSync',
-          category: LogCategory.system,
-        );
-        return;
-      }
-
-      await pushService.register(pubkey);
-    } catch (e) {
-      // Push registration is non-critical — a failure must not propagate
-      // out of this async stream listener. If it did, the uncaught error
-      // would reach the test binding's `handleUncaughtError` and fail the
-      // surrounding integration test.
-      Log.warning(
-        'Push notification registration failed: $e',
-        name: 'PushNotificationSync',
-        category: LogCategory.system,
+  final coordinator = PushNotificationSessionCoordinator(
+    authService: authService,
+    firebaseMessaging: ref.read(firebaseMessagingProvider),
+    readReadiness: () => ref.read(nostrSessionProvider),
+    readPushService: () => ref.read(pushNotificationServiceProvider),
+    createCleanupClient: (identity) {
+      final factory = ref.read(nostrClientFactoryProvider);
+      return factory(
+        signer: identity,
+        statisticsService: ref.read(relayStatisticsServiceProvider),
+        environmentConfig: ref.read(currentEnvironmentProvider),
+        dbClient: ref.read(appDbClientProvider),
       );
-    }
-  }
+    },
+  );
 
-  String? lastAuthenticatedPubkey = authService.currentPublicKeyHex;
-  if (authService.authState == AuthState.authenticated &&
-      lastAuthenticatedPubkey != null) {
-    unawaited(requestPermissionAndRegister(lastAuthenticatedPubkey));
-  }
-
-  // React to auth state changes
-  final subscription = authService.authStateStream.listen((authState) async {
-    try {
-      final currentPubkey = authService.currentPublicKeyHex;
-      if (authState == AuthState.authenticated && currentPubkey != null) {
-        lastAuthenticatedPubkey = currentPubkey;
-        await requestPermissionAndRegister(currentPubkey);
-      } else if (authState == AuthState.unauthenticated &&
-          lastAuthenticatedPubkey != null) {
-        await ref
-            .read(pushNotificationServiceProvider)
-            .deregister(lastAuthenticatedPubkey!);
-      }
-    } catch (e) {
-      // Never let push/deregister errors escape the listener — see
-      // `requestPermissionAndRegister` for context.
-      Log.warning(
-        'Push notification sync listener failed: $e',
-        name: 'PushNotificationSync',
-        category: LogCategory.system,
+  final unregisterBeforeSessionTeardown = authService
+      .registerBeforeSessionTeardownCallback(
+        coordinator.deregisterLastReadyPubkey,
       );
-    }
+
+  final authStateSubscription = authService.authStateStream.listen((_) {
+    coordinator.handleAuthStateChange();
+  });
+
+  coordinator.handleReadiness(ref.read(nostrSessionProvider));
+
+  ref.listen<NostrSessionReadiness>(nostrSessionProvider, (_, next) {
+    coordinator.handleReadiness(next);
   });
 
   // Set up foreground message handler
@@ -1384,11 +1419,13 @@ void pushNotificationSync(Ref ref) {
     message,
   ) {
     final pushService = ref.read(pushNotificationServiceProvider);
-    pushService.handleForegroundMessage(message.data);
+    pushService?.handleForegroundMessage(message.data);
   });
 
   ref.onDispose(() {
-    subscription.cancel();
+    coordinator.dispose();
+    unregisterBeforeSessionTeardown();
+    authStateSubscription.cancel();
     onMessageSubscription.cancel();
   });
 }
@@ -1722,10 +1759,13 @@ FollowRepository followRepository(Ref ref) {
     );
   });
 
-  // Listen for isNostrReady changes to re-initialize when keys become available.
-  // This handles the case where the provider was created before keys were loaded.
-  ref.listen<bool>(isNostrReadyProvider, (previous, next) {
-    if (previous == false && next && !repository.isInitialized) {
+  // Listen for Nostr session readiness changes to re-initialize when keys become
+  // available. This handles the case where the provider was created before keys
+  // were loaded.
+  ref.listen<NostrSessionReadiness>(nostrSessionProvider, (previous, next) {
+    if (!(previous?.isReadyForActiveClient ?? false) &&
+        next.isReadyForActiveClient &&
+        !repository.isInitialized) {
       Log.info(
         'NostrClient became ready, re-initializing FollowRepository',
         name: 'AppProviders',
@@ -1824,11 +1864,10 @@ CategoriesRepository categoriesRepository(Ref ref) {
 /// - FunnelcakeApiClient for fast REST-based profile search
 @Riverpod(keepAlive: true)
 ProfileRepository? profileRepository(Ref ref) {
-  // Return null if NostrClient is not ready yet
-  // This prevents race conditions during auth where auth state is 'authenticated'
-  // but NostrClient hasn't yet rebuilt with the new keys.
-  // The provider will rebuild when isNostrReady becomes true.
-  if (!ref.watch(isNostrReadyProvider)) {
+  // Return null until the signer-backed NostrClient is ready for the active
+  // identity. This prevents races where auth state is authenticated before the
+  // client has rebuilt with the new keys.
+  if (!ref.watch(nostrSessionProvider).isReadyForActiveClient) {
     return null;
   }
 
@@ -2300,16 +2339,20 @@ Future<MuteService> muteService(Ref ref) async {
 /// When a [DmRepository] is available the service sends videos via NIP-17
 /// encrypted DMs (NIP-17). Otherwise falls back to NIP-04 kind 4.
 @riverpod
-VideoSharingService videoSharingService(Ref ref) {
+VideoSharingService? videoSharingService(Ref ref) {
   final nostrService = ref.watch(nostrServiceProvider);
   final authService = ref.watch(authServiceProvider);
   final profileRepository = ref.watch(profileRepositoryProvider);
   final dmRepository = ref.watch(dmRepositoryProvider);
 
+  if (profileRepository == null) {
+    return null;
+  }
+
   return VideoSharingService(
     nostrService: nostrService,
     authService: authService,
-    profileRepository: profileRepository!,
+    profileRepository: profileRepository,
     dmRepository: dmRepository,
   );
 }
@@ -2408,7 +2451,7 @@ BugReportService bugReportService(Ref ref) {
 ///   `dm_decryption_worker.dart`, keeping the UI thread responsive.
 ///
 /// Uses `keepAlive: true` because the repository must survive transient
-/// dependency rebuilds (e.g. `isNostrReadyProvider` polling,
+/// dependency rebuilds (e.g. `nostrSessionProvider` readiness changes,
 /// `nostrServiceProvider` auth-state changes).
 ///
 /// Non-nullable: the repository works without keys at construction time.
@@ -2433,7 +2476,7 @@ DmRepository dmRepository(Ref ref) {
   // signer is ready. The subscription is auth-session-scoped (not inbox-
   // scoped) so DMs are ingested even when the user never visits /inbox.
   // See docs/plans/2026-04-05-dm-scaling-fix-design.md and #2931.
-  if (ref.watch(isNostrReadyProvider)) {
+  if (ref.watch(nostrSessionProvider).isReadyForActiveClient) {
     final publicKey = nostrService.publicKey;
     if (publicKey.isNotEmpty) {
       final signer = nostrService.signer;

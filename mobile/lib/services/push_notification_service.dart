@@ -8,10 +8,13 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:models/models.dart' hide LogCategory;
 import 'package:nostr_client/nostr_client.dart';
+import 'package:nostr_sdk/nostr_sdk.dart';
 import 'package:openvine/models/environment_config.dart';
 import 'package:openvine/models/notification_preferences.dart';
 import 'package:openvine/services/auth_service.dart';
+import 'package:openvine/services/nostr_identity.dart';
 import 'package:openvine/services/notification_service.dart';
+import 'package:openvine/utils/nostr_timestamp.dart';
 import 'package:unified_logger/unified_logger.dart';
 
 /// Manages FCM push notification registration and lifecycle via Nostr events.
@@ -46,21 +49,30 @@ class PushNotificationService {
     required NotificationService notificationService,
     required EnvironmentConfig environmentConfig,
     required Future<String?> Function() getToken,
-    required Stream<String> onTokenRefresh,
+    FutureOr<bool> Function()? isCurrent,
   }) : _authService = authService,
        _nostrClient = nostrClient,
        _notificationService = notificationService,
        _environmentConfig = environmentConfig,
-       _getToken = getToken {
-    _tokenRefreshSubscription = onTokenRefresh.listen(_onTokenRefreshed);
-  }
+       _getToken = getToken,
+       _isCurrent = isCurrent;
 
   final AuthService _authService;
   final NostrClient _nostrClient;
   final NotificationService _notificationService;
   final EnvironmentConfig _environmentConfig;
   final Future<String?> Function() _getToken;
-  StreamSubscription<String>? _tokenRefreshSubscription;
+  final FutureOr<bool> Function()? _isCurrent;
+  bool _acceptsRegistration = true;
+
+  /// Prevents future token registration publishes for this session.
+  ///
+  /// Teardown cleanup may still use the captured identity to deregister the
+  /// outgoing token, but active registration and token refresh must stop once
+  /// sign-out or account-switch cleanup begins.
+  void deactivateRegistration() {
+    _acceptsRegistration = false;
+  }
 
   /// Registers this device with the divine push service.
   ///
@@ -68,13 +80,18 @@ class PushNotificationService {
   /// [pushRegistrationKind] Nostr event to the push service pubkey.
   ///
   /// Does nothing on web ([kIsWeb] is true).
-  Future<void> register(String userPubkey) async {
+  Future<void> register(
+    String userPubkey, {
+    FutureOr<bool> Function()? isCurrent,
+  }) async {
     if (kIsWeb) return;
 
     final pushServicePubkey = _configuredPushServicePubkey();
     if (pushServicePubkey == null) return;
+    if (!await _isPublishCurrent(isCurrent)) return;
 
     final token = await _getToken();
+    if (!await _isPublishCurrent(isCurrent)) return;
     if (token == null) {
       Log.warning(
         'FCM token is null — skipping push notification registration',
@@ -84,7 +101,30 @@ class PushNotificationService {
       return;
     }
 
-    await _publishRegistration(token, pushServicePubkey);
+    await _publishRegistration(
+      token,
+      pushServicePubkey,
+      isCurrent: isCurrent,
+    );
+  }
+
+  Future<void> registerToken(
+    String userPubkey,
+    String token, {
+    FutureOr<bool> Function()? isCurrent,
+  }) async {
+    if (kIsWeb) return;
+    if (userPubkey != _authService.currentIdentity?.pubkey) return;
+
+    final pushServicePubkey = _configuredPushServicePubkey();
+    if (pushServicePubkey == null) return;
+    if (!await _isPublishCurrent(isCurrent)) return;
+
+    await _publishRegistration(
+      token,
+      pushServicePubkey,
+      isCurrent: isCurrent,
+    );
   }
 
   /// Deregisters this device from the divine push service.
@@ -93,21 +133,45 @@ class PushNotificationService {
   /// service pubkey, signalling that notifications should no longer be
   /// delivered to this device.
   ///
+  /// If [signingIdentity] is provided, deregistration signs with that captured
+  /// outgoing identity instead of the live auth session. This is used by
+  /// teardown cleanup that may finish after AuthService clears current identity.
+  ///
   /// Does nothing on web ([kIsWeb] is true).
-  Future<void> deregister(String userPubkey) async {
+  Future<void> deregister(
+    String userPubkey, {
+    FutureOr<bool> Function()? isCurrent,
+    NostrIdentity? signingIdentity,
+    NostrClient? publishClient,
+  }) async {
     if (kIsWeb) return;
 
     final pushServicePubkey = _configuredPushServicePubkey();
     if (pushServicePubkey == null) return;
+    if (!await _isPublishCurrent(
+      isCurrent,
+      checkServiceCurrent: signingIdentity == null,
+    )) {
+      return;
+    }
 
-    final event = await _authService.createAndSignEvent(
-      kind: pushDeregistrationKind,
-      content: '',
-      tags: [
-        ['p', pushServicePubkey],
-        ['app', pushAppIdentifier],
-      ],
-    );
+    final event = signingIdentity == null
+        ? await _authService.createAndSignEvent(
+            kind: pushDeregistrationKind,
+            content: '',
+            tags: _deregistrationTags(pushServicePubkey),
+          )
+        : await createSignedDeregistrationEvent(
+            userPubkey,
+            signingIdentity: signingIdentity,
+            isCurrent: isCurrent,
+          );
+    if (!await _isPublishCurrent(
+      isCurrent,
+      checkServiceCurrent: signingIdentity == null,
+    )) {
+      return;
+    }
 
     if (event == null) {
       Log.error(
@@ -117,8 +181,47 @@ class PushNotificationService {
       );
       return;
     }
+    if (!await _isPublishCurrent(
+      isCurrent,
+      checkServiceCurrent: signingIdentity == null,
+    )) {
+      return;
+    }
 
-    final published = await _nostrClient.publishEvent(event);
+    await publishDeregistrationEvent(event, publishClient: publishClient);
+  }
+
+  Future<Event?> createSignedDeregistrationEvent(
+    String userPubkey, {
+    required NostrIdentity signingIdentity,
+    FutureOr<bool> Function()? isCurrent,
+  }) async {
+    if (kIsWeb) return null;
+    if (userPubkey != signingIdentity.pubkey) return null;
+
+    final pushServicePubkey = _configuredPushServicePubkey();
+    if (pushServicePubkey == null) return null;
+    if (!await _isPublishCurrent(isCurrent, checkServiceCurrent: false)) {
+      return null;
+    }
+
+    final event = await _createAndSignEventWithIdentity(
+      signingIdentity,
+      kind: pushDeregistrationKind,
+      content: '',
+      tags: _deregistrationTags(pushServicePubkey),
+    );
+    if (!await _isPublishCurrent(isCurrent, checkServiceCurrent: false)) {
+      return null;
+    }
+    return event;
+  }
+
+  Future<void> publishDeregistrationEvent(
+    Event event, {
+    NostrClient? publishClient,
+  }) async {
+    final published = await (publishClient ?? _nostrClient).publishEvent(event);
     final failureReason = published.failureReason;
     if (failureReason != null) {
       Log.error(
@@ -135,17 +238,23 @@ class PushNotificationService {
     }
   }
 
+  List<List<String>> _deregistrationTags(String pushServicePubkey) => [
+    ['p', pushServicePubkey],
+    ['app', pushAppIdentifier],
+  ];
+
   /// Updates notification preferences on the divine push service.
   ///
   /// NIP-44 encrypts the list of enabled Nostr event kinds and publishes a
   /// kind [pushPreferencesKind] event to the push service pubkey.
   ///
   /// Does nothing on web ([kIsWeb] is true).
-  Future<void> updatePreferences(NotificationPreferences prefs) async {
-    if (kIsWeb) return;
+  Future<bool> updatePreferences(NotificationPreferences prefs) async {
+    if (kIsWeb) return false;
 
     final pushServicePubkey = _configuredPushServicePubkey();
-    if (pushServicePubkey == null) return;
+    if (pushServicePubkey == null) return false;
+    if (!await _isPublishCurrent(null)) return false;
     final kinds = prefs.toKindsList();
     final plaintext = jsonEncode({'kinds': kinds});
 
@@ -153,6 +262,7 @@ class PushNotificationService {
       pushServicePubkey,
       plaintext,
     );
+    if (!await _isPublishCurrent(null)) return false;
 
     if (encrypted == null) {
       Log.error(
@@ -160,7 +270,7 @@ class PushNotificationService {
         name: 'PushNotificationService',
         category: LogCategory.system,
       );
-      return;
+      return false;
     }
 
     final event = await _authService.createAndSignEvent(
@@ -171,6 +281,7 @@ class PushNotificationService {
         ['app', pushAppIdentifier],
       ],
     );
+    if (!await _isPublishCurrent(null)) return false;
 
     if (event == null) {
       Log.error(
@@ -178,8 +289,9 @@ class PushNotificationService {
         name: 'PushNotificationService',
         category: LogCategory.system,
       );
-      return;
+      return false;
     }
+    if (!await _isPublishCurrent(null)) return false;
 
     final published = await _nostrClient.publishEvent(event);
     final failureReason = published.failureReason;
@@ -189,12 +301,14 @@ class PushNotificationService {
         name: 'PushNotificationService',
         category: LogCategory.system,
       );
+      return false;
     } else {
       Log.info(
         'Push notification preferences updated',
         name: 'PushNotificationService',
         category: LogCategory.system,
       );
+      return true;
     }
   }
 
@@ -219,13 +333,7 @@ class PushNotificationService {
   }
 
   /// Releases resources held by this service.
-  ///
-  /// Cancels the FCM token refresh subscription. The service should not be
-  /// used after [dispose] is called.
-  void dispose() {
-    _tokenRefreshSubscription?.cancel();
-    _tokenRefreshSubscription = null;
-  }
+  void dispose() {}
 
   // ---------------------------------------------------------------------------
   // Private helpers
@@ -233,14 +341,18 @@ class PushNotificationService {
 
   Future<void> _publishRegistration(
     String token,
-    String pushServicePubkey,
-  ) async {
+    String pushServicePubkey, {
+    FutureOr<bool> Function()? isCurrent,
+  }) async {
+    if (!await _isPublishCurrent(isCurrent)) return;
+
     final plaintext = jsonEncode({'token': token});
 
     final encrypted = await _nostrClient.signer.nip44Encrypt(
       pushServicePubkey,
       plaintext,
     );
+    if (!await _isPublishCurrent(isCurrent)) return;
 
     if (encrypted == null) {
       Log.error(
@@ -266,6 +378,7 @@ class PushNotificationService {
         ['expiration', expirationTimestamp.toString()],
       ],
     );
+    if (!await _isPublishCurrent(isCurrent)) return;
 
     if (event == null) {
       Log.error(
@@ -275,6 +388,7 @@ class PushNotificationService {
       );
       return;
     }
+    if (!await _isPublishCurrent(isCurrent)) return;
 
     final published = await _nostrClient.publishEvent(event);
     final failureReason = published.failureReason;
@@ -293,17 +407,54 @@ class PushNotificationService {
     }
   }
 
-  void _onTokenRefreshed(String newToken) {
-    Log.info(
-      'FCM token refreshed — re-registering',
-      name: 'PushNotificationService',
-      category: LogCategory.system,
-    );
-    final pushServicePubkey = _configuredPushServicePubkey();
-    if (pushServicePubkey == null) return;
+  Future<Event?> _createAndSignEventWithIdentity(
+    NostrIdentity identity, {
+    required int kind,
+    required String content,
+    required List<List<String>> tags,
+  }) async {
+    try {
+      final driftTolerance = NostrTimestamp.getDriftToleranceForKind(kind);
+      final event = Event(
+        identity.pubkey,
+        kind,
+        List<List<String>>.from(tags),
+        content,
+        createdAt: NostrTimestamp.now(driftTolerance: driftTolerance),
+      );
+      final signedEvent = await identity.signEvent(event);
+      if (signedEvent == null ||
+          !signedEvent.isSigned ||
+          !signedEvent.isValid) {
+        Log.error(
+          'Failed to sign deregistration event with captured identity',
+          name: 'PushNotificationService',
+          category: LogCategory.system,
+        );
+        return null;
+      }
+      return signedEvent;
+    } catch (e) {
+      Log.error(
+        'Failed to create or sign deregistration event: $e',
+        name: 'PushNotificationService',
+        category: LogCategory.system,
+      );
+      return null;
+    }
+  }
 
-    // Fire-and-forget: errors are logged inside _publishRegistration
-    _publishRegistration(newToken, pushServicePubkey);
+  Future<bool> _isPublishCurrent(
+    FutureOr<bool> Function()? isCurrent, {
+    bool checkServiceCurrent = true,
+  }) async {
+    if (checkServiceCurrent && !_acceptsRegistration) {
+      return false;
+    }
+    if (checkServiceCurrent && _isCurrent != null && !await _isCurrent()) {
+      return false;
+    }
+    return isCurrent == null || await isCurrent();
   }
 
   String? _configuredPushServicePubkey() {

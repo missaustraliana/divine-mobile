@@ -9,8 +9,17 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:nostr_client/nostr_client.dart';
+import 'package:nostr_sdk/nostr_sdk.dart';
+import 'package:openvine/models/environment_config.dart';
+import 'package:openvine/models/notification_preferences.dart';
 import 'package:openvine/providers/app_providers.dart';
+import 'package:openvine/providers/environment_provider.dart';
+import 'package:openvine/providers/nostr_client_provider.dart';
 import 'package:openvine/services/auth_service.dart';
+import 'package:openvine/services/nostr_identity.dart';
+import 'package:openvine/services/notification_preferences_service.dart';
+import 'package:openvine/services/notification_service.dart';
 import 'package:openvine/services/push_notification_service.dart';
 
 class _MockFirebaseMessaging extends Mock implements FirebaseMessaging {}
@@ -19,6 +28,100 @@ class _MockAuthService extends Mock implements AuthService {}
 
 class _MockPushNotificationService extends Mock
     implements PushNotificationService {}
+
+class _MockNostrClient extends Mock implements NostrClient {}
+
+class _MockNostrSigner extends Mock implements NostrSigner {}
+
+class _MockNotificationService extends Mock implements NotificationService {}
+
+class _FakeEvent extends Fake implements Event {}
+
+class _MockEvent extends Mock implements Event {}
+
+class _FakeNotificationPreferencesStore
+    implements NotificationPreferencesStore {
+  NotificationPreferences? savedPreferences;
+  final dirtyPreferencesByPubkey = <String, NotificationPreferences>{};
+  final _clearWaitersByPubkey = <String, List<Completer<void>>>{};
+
+  Future<void> waitForClear(String pubkey) {
+    if (!dirtyPreferencesByPubkey.containsKey(pubkey)) {
+      return Future<void>.value();
+    }
+
+    final completer = Completer<void>();
+    _clearWaitersByPubkey.putIfAbsent(pubkey, () => []).add(completer);
+    return completer.future;
+  }
+
+  @override
+  Future<NotificationPreferences> loadPreferences() async {
+    return savedPreferences ?? const NotificationPreferences();
+  }
+
+  @override
+  Future<void> savePreferences(NotificationPreferences preferences) async {
+    savedPreferences = preferences;
+  }
+
+  @override
+  Future<void> markDirty(
+    String pubkey,
+    NotificationPreferences preferences,
+  ) async {
+    dirtyPreferencesByPubkey[pubkey] = preferences;
+  }
+
+  @override
+  Future<NotificationPreferences?> loadDirty(String pubkey) async {
+    return dirtyPreferencesByPubkey[pubkey];
+  }
+
+  @override
+  Future<void> clearDirty(String pubkey) async {
+    dirtyPreferencesByPubkey.remove(pubkey);
+    final waiters = _clearWaitersByPubkey.remove(pubkey) ?? const [];
+    for (final waiter in waiters) {
+      if (!waiter.isCompleted) waiter.complete();
+    }
+  }
+
+  @override
+  Future<void> clearDirtyIfMatches(
+    String pubkey,
+    NotificationPreferences preferences,
+  ) async {
+    if (dirtyPreferencesByPubkey[pubkey] == preferences) {
+      await clearDirty(pubkey);
+    }
+  }
+}
+
+class _ConfiguredEnvironmentConfig extends EnvironmentConfig {
+  const _ConfiguredEnvironmentConfig({
+    required super.environment,
+    required this.configuredPushServicePubkey,
+  });
+
+  final String configuredPushServicePubkey;
+
+  @override
+  String get pushServicePubkey => configuredPushServicePubkey;
+}
+
+class _TestNostrSession extends NostrSession {
+  _TestNostrSession(this._initialReadiness);
+
+  final NostrSessionReadiness _initialReadiness;
+
+  @override
+  NostrSessionReadiness build() => _initialReadiness;
+
+  void setReadiness(NostrSessionReadiness readiness) {
+    state = readiness;
+  }
+}
 
 NotificationSettings _settings(AuthorizationStatus status) =>
     NotificationSettings(
@@ -36,62 +139,871 @@ NotificationSettings _settings(AuthorizationStatus status) =>
       providesAppNotificationSettings: AppleNotificationSetting.disabled,
     );
 
+NostrIdentity _identity(String pubkey) =>
+    KeycastNostrIdentity(pubkey: pubkey, rpcSigner: _MockNostrSigner());
+
 void main() {
   late _MockFirebaseMessaging messaging;
   late _MockAuthService authService;
   late _MockPushNotificationService pushService;
+  late _MockNostrClient nostrClient;
+  late _MockNostrClient defaultCleanupClient;
+  late _FakeNotificationPreferencesStore preferenceStore;
   late StreamController<AuthState> authStateController;
+  late StreamController<String> defaultTokenRefreshController;
+  BeforeSessionTeardownCallback? beforeSessionTeardownCallback;
 
   const pubkeyA =
       '1111111111111111111111111111111111111111111111111111111111111111';
   const pubkeyB =
       '2222222222222222222222222222222222222222222222222222222222222222';
+  const pushServicePubkey =
+      '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
+  const pushEnvironment = _ConfiguredEnvironmentConfig(
+    environment: AppEnvironment.test,
+    configuredPushServicePubkey: pushServicePubkey,
+  );
+
+  setUpAll(() {
+    registerFallbackValue(const NotificationPreferences());
+    registerFallbackValue(_FakeEvent());
+    registerFallbackValue(_identity(pubkeyA));
+  });
 
   setUp(() {
     messaging = _MockFirebaseMessaging();
     authService = _MockAuthService();
     pushService = _MockPushNotificationService();
+    nostrClient = _MockNostrClient();
+    defaultCleanupClient = _MockNostrClient();
+    preferenceStore = _FakeNotificationPreferencesStore();
     authStateController = StreamController<AuthState>.broadcast();
+    defaultTokenRefreshController = StreamController<String>.broadcast();
 
     when(
       () => authService.authStateStream,
     ).thenAnswer((_) => authStateController.stream);
+    when(
+      () => messaging.onTokenRefresh,
+    ).thenAnswer((_) => defaultTokenRefreshController.stream);
     when(() => authService.authState).thenReturn(AuthState.unauthenticated);
+    when(() => authService.currentIdentity).thenReturn(null);
     when(() => authService.currentPublicKeyHex).thenReturn(null);
+    when(
+      () => authService.registerBeforeSessionTeardownCallback(any()),
+    ).thenAnswer((invocation) {
+      beforeSessionTeardownCallback =
+          invocation.positionalArguments.single
+              as BeforeSessionTeardownCallback;
+      return () => beforeSessionTeardownCallback = null;
+    });
 
-    when(() => pushService.register(any())).thenAnswer((_) async {});
-    when(() => pushService.deregister(any())).thenAnswer((_) async {});
+    when(
+      () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+    ).thenAnswer((_) async {});
+    when(
+      () => pushService.deregister(any(), isCurrent: any(named: 'isCurrent')),
+    ).thenAnswer((_) async {});
+    when(
+      () => pushService.deregister(
+        any(),
+        isCurrent: any(named: 'isCurrent'),
+        signingIdentity: any(named: 'signingIdentity'),
+        publishClient: any(named: 'publishClient'),
+      ),
+    ).thenAnswer((_) async {});
+    when(
+      () => pushService.deregister(
+        any(),
+        signingIdentity: any(named: 'signingIdentity'),
+      ),
+    ).thenAnswer((_) async {});
+    when(
+      () => pushService.deregister(
+        any(),
+        signingIdentity: any(named: 'signingIdentity'),
+        publishClient: any(named: 'publishClient'),
+      ),
+    ).thenAnswer((_) async {});
+    when(
+      () => pushService.createSignedDeregistrationEvent(
+        any(),
+        signingIdentity: any(named: 'signingIdentity'),
+      ),
+    ).thenAnswer((_) async => _FakeEvent());
+    when(
+      () => pushService.publishDeregistrationEvent(
+        any(),
+        publishClient: any(named: 'publishClient'),
+      ),
+    ).thenAnswer((_) async {});
+    when(() => nostrClient.hasKeys).thenReturn(true);
+    when(() => nostrClient.publicKey).thenReturn(pubkeyA);
+    when(() => defaultCleanupClient.initialize()).thenAnswer((_) async {});
+    when(() => defaultCleanupClient.dispose()).thenAnswer((_) async {});
+    when(
+      () => defaultCleanupClient.publishEvent(any()),
+    ).thenAnswer((_) async => PublishSuccess(event: _FakeEvent()));
   });
 
   tearDown(() async {
     await authStateController.close();
+    await defaultTokenRefreshController.close();
   });
 
-  ProviderContainer buildContainer() {
+  ProviderContainer buildContainer({
+    _TestNostrSession? nostrSession,
+    List<dynamic> extraOverrides = const [],
+  }) {
     final container = ProviderContainer(
       overrides: [
         firebaseMessagingProvider.overrideWithValue(messaging),
         authServiceProvider.overrideWithValue(authService),
         pushNotificationServiceProvider.overrideWithValue(pushService),
+        notificationPreferencesStoreProvider.overrideWithValue(preferenceStore),
+        nostrSessionProvider.overrideWith(
+          () =>
+              nostrSession ??
+              _TestNostrSession(const NostrSessionReadiness.signedOut()),
+        ),
+        if (extraOverrides.isEmpty)
+          nostrClientFactoryProvider.overrideWithValue(
+            ({dbClient, environmentConfig, signer, statisticsService}) =>
+                defaultCleanupClient,
+          ),
+        ...extraOverrides,
       ],
     );
     addTearDown(container.dispose);
     return container;
   }
 
+  Future<void> emitReady(
+    _TestNostrSession nostrSession,
+    String pubkey,
+  ) async {
+    when(() => authService.currentIdentity).thenReturn(_identity(pubkey));
+    when(() => authService.currentPublicKeyHex).thenReturn(pubkey);
+    when(() => nostrClient.publicKey).thenReturn(pubkey);
+    nostrSession.setReadiness(
+      NostrSessionReadiness.nostrReady(pubkey: pubkey, client: nostrClient),
+    );
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+  }
+
+  void recordMockDeregistration(
+    List<String> events, {
+    String Function(NostrClient? publishClient)? suffixForPublishClient,
+  }) {
+    final pubkeysByEvent = <Event, String>{};
+    when(
+      () => pushService.createSignedDeregistrationEvent(
+        any(),
+        signingIdentity: any(named: 'signingIdentity'),
+      ),
+    ).thenAnswer((invocation) async {
+      final event = _MockEvent();
+      pubkeysByEvent[event] = invocation.positionalArguments.single as String;
+      return event;
+    });
+    when(
+      () => pushService.publishDeregistrationEvent(
+        any(),
+        publishClient: any(named: 'publishClient'),
+      ),
+    ).thenAnswer((invocation) async {
+      final event = invocation.positionalArguments.single as Event;
+      final publishClient =
+          invocation.namedArguments[#publishClient] as NostrClient?;
+      final suffix = suffixForPublishClient == null
+          ? ''
+          : ' ${suffixForPublishClient(publishClient)}';
+      events.add('deregister ${pubkeysByEvent[event]}$suffix');
+    });
+  }
+
   group('pushNotificationSync', () {
+    test(
+      'does not publish stale registration when auth changes mid-flight',
+      () async {
+        const encryptedPayload = 'encrypted-token-payload';
+        final tokenCompleter = Completer<String?>();
+        final tokenRefreshController = StreamController<String>.broadcast();
+        final signer = _MockNostrSigner();
+        final event = _FakeEvent();
+        addTearDown(tokenRefreshController.close);
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+        when(
+          () => messaging.getToken(),
+        ).thenAnswer((_) => tokenCompleter.future);
+        when(
+          () => messaging.onTokenRefresh,
+        ).thenAnswer((_) => tokenRefreshController.stream);
+        when(() => nostrClient.signer).thenReturn(signer);
+        when(
+          () => signer.nip44Encrypt(any(), any()),
+        ).thenAnswer((_) async => encryptedPayload);
+        when(
+          () => authService.createAndSignEvent(
+            kind: PushNotificationService.pushRegistrationKind,
+            content: encryptedPayload,
+            tags: any(named: 'tags'),
+          ),
+        ).thenAnswer((_) async => event);
+        when(
+          () => nostrClient.publishEvent(event),
+        ).thenAnswer((_) async => PublishSuccess(event: event));
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            notificationServiceProvider.overrideWithValue(
+              _MockNotificationService(),
+            ),
+            currentEnvironmentProvider.overrideWith(
+              (_) => const EnvironmentConfig(environment: AppEnvironment.test),
+            ),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(pushNotificationSyncProvider);
+
+        await emitReady(nostrSession, pubkeyA);
+        await Future<void>.delayed(Duration.zero);
+        verify(() => messaging.getToken()).called(1);
+
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyB));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyB);
+        authStateController.add(AuthState.authenticated);
+        await Future<void>.delayed(Duration.zero);
+
+        tokenCompleter.complete('fcm-token-for-stale-session');
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        verifyNever(() => nostrClient.publishEvent(any()));
+      },
+    );
+
+    test('registers only after Nostr session is ready', () async {
+      when(
+        () => messaging.getNotificationSettings(),
+      ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+
+      final nostrSession = _TestNostrSession(
+        const NostrSessionReadiness.signedOut(),
+      );
+      final container = buildContainer(nostrSession: nostrSession);
+      container.read(pushNotificationSyncProvider);
+
+      when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+      when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+      authStateController.add(AuthState.authenticated);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      verifyNever(
+        () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+      );
+
+      await emitReady(nostrSession, pubkeyA);
+
+      verify(
+        () => pushService.register(
+          pubkeyA,
+          isCurrent: any(named: 'isCurrent'),
+        ),
+      ).called(1);
+    });
+
+    test('ignores stale readiness for an old account', () async {
+      when(
+        () => messaging.getNotificationSettings(),
+      ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+
+      final nostrSession = _TestNostrSession(
+        const NostrSessionReadiness.signedOut(),
+      );
+      final container = buildContainer(nostrSession: nostrSession);
+      container.read(pushNotificationSyncProvider);
+
+      when(() => authService.currentIdentity).thenReturn(_identity(pubkeyB));
+      when(() => authService.currentPublicKeyHex).thenReturn(pubkeyB);
+      nostrSession.setReadiness(
+        NostrSessionReadiness.nostrReady(pubkey: pubkeyA, client: nostrClient),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      verifyNever(
+        () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+      );
+
+      await emitReady(nostrSession, pubkeyB);
+
+      verify(
+        () => pushService.register(
+          pubkeyB,
+          isCurrent: any(named: 'isCurrent'),
+        ),
+      ).called(1);
+    });
+
+    test(
+      'clears teardown target when ready session no longer matches auth',
+      () async {
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = buildContainer(nostrSession: nostrSession);
+        container.read(pushNotificationSyncProvider);
+
+        await emitReady(nostrSession, pubkeyA);
+        verify(
+          () => pushService.register(
+            pubkeyA,
+            isCurrent: any(named: 'isCurrent'),
+          ),
+        ).called(1);
+        clearInteractions(pushService);
+
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyB));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyB);
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        await beforeSessionTeardownCallback!();
+
+        verifyNever(
+          () => pushService.createSignedDeregistrationEvent(
+            any(),
+            signingIdentity: any(named: 'signingIdentity'),
+          ),
+        );
+      },
+    );
+
+    test('aborts deferred registration when ready session changes', () async {
+      final settingsCompleter = Completer<NotificationSettings>();
+      when(
+        () => messaging.getNotificationSettings(),
+      ).thenAnswer((_) => settingsCompleter.future);
+
+      final nostrSession = _TestNostrSession(
+        const NostrSessionReadiness.signedOut(),
+      );
+      final container = buildContainer(nostrSession: nostrSession);
+      container.read(pushNotificationSyncProvider);
+
+      when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+      when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+      nostrSession.setReadiness(
+        NostrSessionReadiness.nostrReady(pubkey: pubkeyA, client: nostrClient),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      when(() => authService.currentIdentity).thenReturn(null);
+      when(() => authService.currentPublicKeyHex).thenReturn(null);
+      nostrSession.setReadiness(const NostrSessionReadiness.signedOut());
+
+      settingsCompleter.complete(_settings(AuthorizationStatus.authorized));
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      verifyNever(
+        () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+      );
+    });
+
+    test(
+      'deregisters last ready pubkey when permission check blocks registration',
+      () async {
+        final settingsCompleter = Completer<NotificationSettings>();
+        final events = <String>[];
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) => settingsCompleter.future);
+        when(
+          () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+        ).thenAnswer((invocation) async {
+          events.add('register ${invocation.positionalArguments.single}');
+        });
+        recordMockDeregistration(events);
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = buildContainer(nostrSession: nostrSession);
+        container.read(pushNotificationSyncProvider);
+
+        await emitReady(nostrSession, pubkeyA);
+
+        final teardownFuture = beforeSessionTeardownCallback!().timeout(
+          const Duration(milliseconds: 100),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        await teardownFuture;
+        when(() => authService.currentIdentity).thenReturn(null);
+        when(() => authService.currentPublicKeyHex).thenReturn(null);
+        expect(events, ['deregister $pubkeyA']);
+
+        settingsCompleter.complete(_settings(AuthorizationStatus.authorized));
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(events, ['deregister $pubkeyA']);
+        verifyNever(
+          () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+        );
+      },
+    );
+
+    test(
+      'does not publish duplicate registration when queued preferences drain',
+      () async {
+        final settingsCompleter = Completer<NotificationSettings>();
+        final publishCompleter = Completer<void>();
+        var registerCalls = 0;
+        const prefs = NotificationPreferences(commentsEnabled: false);
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) => settingsCompleter.future);
+        when(
+          () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+        ).thenAnswer((invocation) async {
+          registerCalls += 1;
+          final isCurrent =
+              invocation.namedArguments[#isCurrent]
+                  as FutureOr<bool> Function();
+          if (await isCurrent()) {
+            await publishCompleter.future;
+          }
+        });
+        when(
+          () => pushService.updatePreferences(prefs),
+        ).thenAnswer((_) async => true);
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = buildContainer(nostrSession: nostrSession);
+        container.read(pushNotificationSyncProvider);
+
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        await container
+            .read(notificationPreferencesServiceProvider)
+            .updatePreferences(prefs);
+
+        await emitReady(nostrSession, pubkeyA);
+        await Future<void>.delayed(Duration.zero);
+
+        settingsCompleter.complete(_settings(AuthorizationStatus.authorized));
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        expect(registerCalls, equals(1));
+
+        publishCompleter.complete();
+        await Future<void>.delayed(Duration.zero);
+      },
+    );
+
+    test(
+      'waits for in-flight registration that reached push service before deregistering',
+      () async {
+        final registerCompleter = Completer<void>();
+        final events = <String>[];
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+        when(
+          () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+        ).thenAnswer((invocation) {
+          events.add('register ${invocation.positionalArguments.single}');
+          return registerCompleter.future;
+        });
+        recordMockDeregistration(events);
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = buildContainer(nostrSession: nostrSession);
+        container.read(pushNotificationSyncProvider);
+
+        await emitReady(nostrSession, pubkeyA);
+        await Future<void>.delayed(Duration.zero);
+        expect(events, ['register $pubkeyA']);
+
+        final teardownFuture = beforeSessionTeardownCallback!();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(events, ['register $pubkeyA']);
+
+        registerCompleter.complete();
+        await teardownFuture;
+
+        expect(events, ['register $pubkeyA', 'deregister $pubkeyA']);
+      },
+    );
+
+    test(
+      'signs deferred cleanup before teardown returns',
+      () {
+        fakeAsync((async) {
+          final registerCompleter = Completer<void>();
+          final cleanupClient = _MockNostrClient();
+          final events = <String>[];
+          final pubkeysByEvent = <Event, String>{};
+          when(
+            () => messaging.getNotificationSettings(),
+          ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+          when(
+            () =>
+                pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+          ).thenAnswer((invocation) {
+            events.add('register ${invocation.positionalArguments.single}');
+            return registerCompleter.future;
+          });
+          when(
+            () => pushService.createSignedDeregistrationEvent(
+              any(),
+              signingIdentity: any(named: 'signingIdentity'),
+            ),
+          ).thenAnswer((invocation) async {
+            final event = _MockEvent();
+            final pubkey = invocation.positionalArguments.single as String;
+            pubkeysByEvent[event] = pubkey;
+            events.add('sign $pubkey');
+            return event;
+          });
+          when(
+            () => pushService.publishDeregistrationEvent(
+              any(),
+              publishClient: any(named: 'publishClient'),
+            ),
+          ).thenAnswer((invocation) async {
+            final event = invocation.positionalArguments.single as Event;
+            final publishClient =
+                invocation.namedArguments[#publishClient] as NostrClient?;
+            events.add(
+              'publish ${pubkeysByEvent[event]} cleanup ${identical(publishClient, cleanupClient)}',
+            );
+          });
+          // ignore: unnecessary_lambdas
+          when(() => cleanupClient.initialize()).thenAnswer((_) async {});
+          // ignore: unnecessary_lambdas
+          when(() => cleanupClient.dispose()).thenAnswer((_) async {});
+
+          final nostrSession = _TestNostrSession(
+            const NostrSessionReadiness.signedOut(),
+          );
+          final container = buildContainer(
+            nostrSession: nostrSession,
+            extraOverrides: [
+              nostrClientFactoryProvider.overrideWithValue(
+                ({dbClient, environmentConfig, signer, statisticsService}) =>
+                    cleanupClient,
+              ),
+            ],
+          );
+          container.read(pushNotificationSyncProvider);
+
+          when(() => authService.currentIdentity).thenReturn(
+            _identity(pubkeyA),
+          );
+          when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+          when(() => nostrClient.publicKey).thenReturn(pubkeyA);
+          nostrSession.setReadiness(
+            NostrSessionReadiness.nostrReady(
+              pubkey: pubkeyA,
+              client: nostrClient,
+            ),
+          );
+          async.flushMicrotasks();
+
+          var teardownCompleted = false;
+          unawaited(
+            beforeSessionTeardownCallback!().then((_) {
+              teardownCompleted = true;
+            }),
+          );
+          async.flushMicrotasks();
+
+          expect(teardownCompleted, isFalse);
+          expect(events, ['register $pubkeyA', 'sign $pubkeyA']);
+
+          async.elapse(const Duration(seconds: 5));
+          async.flushMicrotasks();
+
+          expect(teardownCompleted, isTrue);
+          expect(events, ['register $pubkeyA', 'sign $pubkeyA']);
+
+          when(() => authService.currentIdentity).thenReturn(null);
+          when(() => authService.currentPublicKeyHex).thenReturn(null);
+          registerCompleter.complete();
+          async.flushMicrotasks();
+
+          expect(events, [
+            'register $pubkeyA',
+            'sign $pubkeyA',
+            'publish $pubkeyA cleanup true',
+          ]);
+        });
+      },
+    );
+
+    test(
+      'retains deregistration cleanup when reached registration outlives teardown wait',
+      () {
+        fakeAsync((async) {
+          final registerCompleter = Completer<void>();
+          final cleanupClient = _MockNostrClient();
+          final events = <String>[];
+          when(
+            () => messaging.getNotificationSettings(),
+          ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+          when(
+            () =>
+                pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+          ).thenAnswer((invocation) {
+            events.add('register ${invocation.positionalArguments.single}');
+            return registerCompleter.future;
+          });
+          recordMockDeregistration(events);
+          // ignore: unnecessary_lambdas
+          when(() => cleanupClient.initialize()).thenAnswer((_) async {});
+          // ignore: unnecessary_lambdas
+          when(() => cleanupClient.dispose()).thenAnswer((_) async {});
+
+          final nostrSession = _TestNostrSession(
+            const NostrSessionReadiness.signedOut(),
+          );
+          final container = buildContainer(
+            nostrSession: nostrSession,
+            extraOverrides: [
+              nostrClientFactoryProvider.overrideWithValue(
+                ({dbClient, environmentConfig, signer, statisticsService}) =>
+                    cleanupClient,
+              ),
+            ],
+          );
+          container.read(pushNotificationSyncProvider);
+
+          when(() => authService.currentIdentity).thenReturn(
+            _identity(pubkeyA),
+          );
+          when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+          when(() => nostrClient.publicKey).thenReturn(pubkeyA);
+          nostrSession.setReadiness(
+            NostrSessionReadiness.nostrReady(
+              pubkey: pubkeyA,
+              client: nostrClient,
+            ),
+          );
+          async.flushMicrotasks();
+
+          expect(events, ['register $pubkeyA']);
+
+          var teardownCompleted = false;
+          unawaited(
+            beforeSessionTeardownCallback!().then((_) {
+              teardownCompleted = true;
+            }),
+          );
+          async.flushMicrotasks();
+          async.elapse(const Duration(seconds: 5));
+          async.flushMicrotasks();
+
+          expect(teardownCompleted, isTrue);
+          expect(events, ['register $pubkeyA']);
+
+          registerCompleter.complete();
+          async.flushMicrotasks();
+
+          expect(events, ['register $pubkeyA', 'deregister $pubkeyA']);
+        });
+      },
+    );
+
+    test(
+      'deferred cleanup can deregister after auth has been cleared',
+      () {
+        fakeAsync((async) {
+          final registerCompleter = Completer<void>();
+          final cleanupClient = _MockNostrClient();
+          final events = <String>[];
+          when(
+            () => messaging.getNotificationSettings(),
+          ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+          when(
+            () =>
+                pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+          ).thenAnswer((invocation) {
+            events.add('register ${invocation.positionalArguments.single}');
+            return registerCompleter.future;
+          });
+          recordMockDeregistration(events);
+          // ignore: unnecessary_lambdas
+          when(() => cleanupClient.initialize()).thenAnswer((_) async {});
+          // ignore: unnecessary_lambdas
+          when(() => cleanupClient.dispose()).thenAnswer((_) async {});
+
+          final nostrSession = _TestNostrSession(
+            const NostrSessionReadiness.signedOut(),
+          );
+          final container = buildContainer(
+            nostrSession: nostrSession,
+            extraOverrides: [
+              nostrClientFactoryProvider.overrideWithValue(
+                ({dbClient, environmentConfig, signer, statisticsService}) =>
+                    cleanupClient,
+              ),
+            ],
+          );
+          container.read(pushNotificationSyncProvider);
+
+          when(() => authService.currentIdentity).thenReturn(
+            _identity(pubkeyA),
+          );
+          when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+          when(() => nostrClient.publicKey).thenReturn(pubkeyA);
+          nostrSession.setReadiness(
+            NostrSessionReadiness.nostrReady(
+              pubkey: pubkeyA,
+              client: nostrClient,
+            ),
+          );
+          async.flushMicrotasks();
+
+          expect(events, ['register $pubkeyA']);
+
+          var teardownCompleted = false;
+          unawaited(
+            beforeSessionTeardownCallback!().then((_) {
+              teardownCompleted = true;
+            }),
+          );
+          async.flushMicrotasks();
+          async.elapse(const Duration(seconds: 5));
+          async.flushMicrotasks();
+          expect(teardownCompleted, isTrue);
+
+          when(() => authService.currentIdentity).thenReturn(null);
+          when(() => authService.currentPublicKeyHex).thenReturn(null);
+          registerCompleter.complete();
+          async.flushMicrotasks();
+
+          expect(events, ['register $pubkeyA', 'deregister $pubkeyA']);
+        });
+      },
+    );
+
+    test('deferred cleanup uses a retained publish client', () {
+      fakeAsync((async) {
+        final registerCompleter = Completer<void>();
+        final cleanupClient = _MockNostrClient();
+        final events = <String>[];
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+        when(
+          () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+        ).thenAnswer((invocation) {
+          events.add('register ${invocation.positionalArguments.single}');
+          return registerCompleter.future;
+        });
+        // ignore: unnecessary_lambdas
+        when(() => cleanupClient.initialize()).thenAnswer((_) async {});
+        // ignore: unnecessary_lambdas
+        when(() => cleanupClient.dispose()).thenAnswer((_) async {});
+        recordMockDeregistration(
+          events,
+          suffixForPublishClient: (publishClient) =>
+              'with cleanup client ${identical(publishClient, cleanupClient)}',
+        );
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = buildContainer(
+          nostrSession: nostrSession,
+          extraOverrides: [
+            nostrClientFactoryProvider.overrideWithValue(
+              ({dbClient, environmentConfig, signer, statisticsService}) =>
+                  cleanupClient,
+            ),
+          ],
+        );
+        container.read(pushNotificationSyncProvider);
+
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        when(() => nostrClient.publicKey).thenReturn(pubkeyA);
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+        async.flushMicrotasks();
+
+        expect(events, ['register $pubkeyA']);
+
+        unawaited(beforeSessionTeardownCallback!());
+        async.flushMicrotasks();
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+
+        when(() => authService.currentIdentity).thenReturn(null);
+        when(() => authService.currentPublicKeyHex).thenReturn(null);
+        registerCompleter.complete();
+        async.flushMicrotasks();
+
+        expect(events, [
+          'register $pubkeyA',
+          'deregister $pubkeyA with cleanup client true',
+        ]);
+        // ignore: unnecessary_lambdas
+        verify(() => cleanupClient.initialize()).called(1);
+        // ignore: unnecessary_lambdas
+        verify(() => cleanupClient.dispose()).called(1);
+      });
+    });
+
     test('skips requestPermission when status is already authorized', () async {
       when(
         () => messaging.getNotificationSettings(),
       ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
 
       final container = buildContainer();
+      final nostrSession =
+          container.read(nostrSessionProvider.notifier) as _TestNostrSession;
       container.read(pushNotificationSyncProvider);
 
-      when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
-      authStateController.add(AuthState.authenticated);
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
+      await emitReady(nostrSession, pubkeyA);
 
       verify(() => messaging.getNotificationSettings()).called(1);
       verifyNever(
@@ -108,7 +1020,12 @@ void main() {
           ),
         ),
       );
-      verify(() => pushService.register(pubkeyA)).called(1);
+      verify(
+        () => pushService.register(
+          pubkeyA,
+          isCurrent: any(named: 'isCurrent'),
+        ),
+      ).called(1);
     });
 
     test('requests permission when status is notDetermined', () async {
@@ -131,12 +1048,11 @@ void main() {
       ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
 
       final container = buildContainer();
+      final nostrSession =
+          container.read(nostrSessionProvider.notifier) as _TestNostrSession;
       container.read(pushNotificationSyncProvider);
 
-      when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
-      authStateController.add(AuthState.authenticated);
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
+      await emitReady(nostrSession, pubkeyA);
 
       verify(
         () => messaging.requestPermission(
@@ -152,7 +1068,12 @@ void main() {
           ),
         ),
       ).called(1);
-      verify(() => pushService.register(pubkeyA)).called(1);
+      verify(
+        () => pushService.register(
+          pubkeyA,
+          isCurrent: any(named: 'isCurrent'),
+        ),
+      ).called(1);
     });
 
     test(
@@ -190,7 +1111,18 @@ void main() {
         final unhandled = <Object>[];
         await runZonedGuarded(() async {
           when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
-          authStateController.add(AuthState.authenticated);
+          when(
+            () => authService.currentIdentity,
+          ).thenReturn(_identity(pubkeyA));
+          final nostrSession =
+              container.read(nostrSessionProvider.notifier)
+                  as _TestNostrSession;
+          nostrSession.setReadiness(
+            NostrSessionReadiness.nostrReady(
+              pubkey: pubkeyA,
+              client: nostrClient,
+            ),
+          );
           await Future<void>.delayed(Duration.zero);
           await Future<void>.delayed(Duration.zero);
           await Future<void>.delayed(Duration.zero);
@@ -205,7 +1137,9 @@ void main() {
               'zone and fails the surrounding integration test.',
         );
         // Permission failed, so pushService.register must not be invoked.
-        verifyNever(() => pushService.register(any()));
+        verifyNever(
+          () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+        );
       },
     );
 
@@ -214,7 +1148,7 @@ void main() {
         () => messaging.getNotificationSettings(),
       ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
       when(
-        () => pushService.register(any()),
+        () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
       ).thenThrow(StateError('relay unreachable'));
 
       final container = buildContainer();
@@ -223,7 +1157,15 @@ void main() {
       final unhandled = <Object>[];
       await runZonedGuarded(() async {
         when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
-        authStateController.add(AuthState.authenticated);
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        final nostrSession =
+            container.read(nostrSessionProvider.notifier) as _TestNostrSession;
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
         await Future<void>.delayed(Duration.zero);
         await Future<void>.delayed(Duration.zero);
       }, (error, stack) => unhandled.add(error));
@@ -231,34 +1173,1266 @@ void main() {
       expect(unhandled, isEmpty);
     });
 
-    test('catches errors from pushService.deregister', () async {
+    test(
+      'catches errors from pushService.publishDeregistrationEvent',
+      () async {
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+        when(
+          () => pushService.publishDeregistrationEvent(
+            any(),
+            publishClient: any(named: 'publishClient'),
+          ),
+        ).thenThrow(StateError('relay unreachable'));
+
+        final container = buildContainer();
+        container.read(pushNotificationSyncProvider);
+
+        final unhandled = <Object>[];
+        await runZonedGuarded(() async {
+          // First emit readiness to set the last ready pubkey.
+          when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+          when(
+            () => authService.currentIdentity,
+          ).thenReturn(_identity(pubkeyA));
+          final nostrSession =
+              container.read(nostrSessionProvider.notifier)
+                  as _TestNostrSession;
+          nostrSession.setReadiness(
+            NostrSessionReadiness.nostrReady(
+              pubkey: pubkeyA,
+              client: nostrClient,
+            ),
+          );
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+
+          // Then start sign-out teardown — publishing deregistration throws.
+          await beforeSessionTeardownCallback!();
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        }, (error, stack) => unhandled.add(error));
+
+        expect(unhandled, isEmpty);
+      },
+    );
+
+    test('deregisters ready pubkey before session teardown', () async {
       when(
         () => messaging.getNotificationSettings(),
       ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
-      when(
-        () => pushService.deregister(any()),
-      ).thenThrow(StateError('relay unreachable'));
 
       final container = buildContainer();
       container.read(pushNotificationSyncProvider);
 
-      final unhandled = <Object>[];
-      await runZonedGuarded(() async {
-        // First authenticate to set lastAuthenticatedPubkey.
-        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
-        authStateController.add(AuthState.authenticated);
-        await Future<void>.delayed(Duration.zero);
-        await Future<void>.delayed(Duration.zero);
+      final nostrSession =
+          container.read(nostrSessionProvider.notifier) as _TestNostrSession;
+      await emitReady(nostrSession, pubkeyA);
 
-        // Then sign out — deregister throws.
-        when(() => authService.currentPublicKeyHex).thenReturn(null);
-        authStateController.add(AuthState.unauthenticated);
-        await Future<void>.delayed(Duration.zero);
-        await Future<void>.delayed(Duration.zero);
-      }, (error, stack) => unhandled.add(error));
+      expect(beforeSessionTeardownCallback, isNotNull);
 
-      expect(unhandled, isEmpty);
+      await beforeSessionTeardownCallback!();
+
+      verify(
+        () => pushService.createSignedDeregistrationEvent(
+          pubkeyA,
+          signingIdentity: any(named: 'signingIdentity'),
+        ),
+      ).called(1);
+      verify(
+        () => pushService.publishDeregistrationEvent(
+          any(),
+          publishClient: any(named: 'publishClient'),
+        ),
+      ).called(1);
     });
+
+    test('does not deregister stale pubkey after readiness clears', () async {
+      when(
+        () => messaging.getNotificationSettings(),
+      ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+
+      final container = buildContainer();
+      container.read(pushNotificationSyncProvider);
+
+      final nostrSession =
+          container.read(nostrSessionProvider.notifier) as _TestNostrSession;
+      await emitReady(nostrSession, pubkeyA);
+      verify(
+        () => pushService.register(
+          pubkeyA,
+          isCurrent: any(named: 'isCurrent'),
+        ),
+      ).called(1);
+      clearInteractions(pushService);
+
+      when(() => authService.currentIdentity).thenReturn(null);
+      when(() => authService.currentPublicKeyHex).thenReturn(null);
+      nostrSession.setReadiness(const NostrSessionReadiness.signedOut());
+      await Future<void>.delayed(Duration.zero);
+
+      await beforeSessionTeardownCallback!();
+
+      verifyNever(
+        () => pushService.createSignedDeregistrationEvent(
+          any(),
+          signingIdentity: any(named: 'signingIdentity'),
+        ),
+      );
+    });
+
+    test(
+      'deregisters ready pubkey after same-pubkey readiness downgrade',
+      () async {
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+
+        final container = buildContainer();
+        container.read(pushNotificationSyncProvider);
+
+        final nostrSession =
+            container.read(nostrSessionProvider.notifier) as _TestNostrSession;
+        await emitReady(nostrSession, pubkeyA);
+        clearInteractions(pushService);
+
+        nostrSession.setReadiness(
+          const NostrSessionReadiness.identityKnown(pubkey: pubkeyA),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        await beforeSessionTeardownCallback!();
+
+        verify(
+          () => pushService.createSignedDeregistrationEvent(
+            pubkeyA,
+            signingIdentity: any(named: 'signingIdentity'),
+          ),
+        ).called(1);
+        verify(
+          () => pushService.publishDeregistrationEvent(
+            any(),
+            publishClient: any(named: 'publishClient'),
+          ),
+        ).called(1);
+      },
+    );
+
+    test(
+      'real push service deregisters after same-pubkey readiness downgrade',
+      () async {
+        final tokenRefreshController = StreamController<String>.broadcast();
+        addTearDown(tokenRefreshController.close);
+        final signer = _MockNostrSigner();
+        final identity = KeycastNostrIdentity(
+          pubkey: pubkeyA,
+          rpcSigner: signer,
+        );
+        final event = _MockEvent();
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.denied));
+        when(
+          () => messaging.onTokenRefresh,
+        ).thenAnswer((_) => tokenRefreshController.stream);
+        when(() => authService.currentIdentity).thenReturn(identity);
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        when(() => event.isSigned).thenReturn(true);
+        when(() => event.isValid).thenReturn(true);
+        when(() => signer.signEvent(any())).thenAnswer((_) async => event);
+        when(
+          () => nostrClient.publishEvent(event),
+        ).thenAnswer((_) async => PublishSuccess(event: event));
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            notificationServiceProvider.overrideWithValue(
+              _MockNotificationService(),
+            ),
+            currentEnvironmentProvider.overrideWith((_) => pushEnvironment),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+            nostrClientFactoryProvider.overrideWithValue(
+              ({dbClient, environmentConfig, signer, statisticsService}) =>
+                  defaultCleanupClient,
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(pushNotificationSyncProvider);
+
+        when(() => nostrClient.publicKey).thenReturn(pubkeyA);
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        nostrSession.setReadiness(
+          const NostrSessionReadiness.identityKnown(pubkey: pubkeyA),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        await beforeSessionTeardownCallback!();
+
+        verify(() => signer.signEvent(any())).called(1);
+        verify(() => defaultCleanupClient.publishEvent(event)).called(1);
+      },
+    );
+
+    test(
+      'real push service deregisters captured pubkey after auth identity clears',
+      () async {
+        final tokenRefreshController = StreamController<String>.broadcast();
+        addTearDown(tokenRefreshController.close);
+        final signer = _MockNostrSigner();
+        final identity = KeycastNostrIdentity(
+          pubkey: pubkeyA,
+          rpcSigner: signer,
+        );
+        final event = _MockEvent();
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.denied));
+        when(
+          () => messaging.onTokenRefresh,
+        ).thenAnswer((_) => tokenRefreshController.stream);
+        when(() => authService.currentIdentity).thenReturn(identity);
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        when(() => event.isSigned).thenReturn(true);
+        when(() => event.isValid).thenReturn(true);
+        when(() => signer.signEvent(any())).thenAnswer((_) async => event);
+        when(
+          () => nostrClient.publishEvent(event),
+        ).thenAnswer((_) async => PublishSuccess(event: event));
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            notificationServiceProvider.overrideWithValue(
+              _MockNotificationService(),
+            ),
+            currentEnvironmentProvider.overrideWith((_) => pushEnvironment),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+            nostrClientFactoryProvider.overrideWithValue(
+              ({dbClient, environmentConfig, signer, statisticsService}) =>
+                  defaultCleanupClient,
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(pushNotificationSyncProvider);
+
+        when(() => nostrClient.publicKey).thenReturn(pubkeyA);
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        when(() => authService.currentIdentity).thenReturn(null);
+        when(() => authService.currentPublicKeyHex).thenReturn(null);
+
+        await beforeSessionTeardownCallback!();
+
+        verify(() => signer.signEvent(any())).called(1);
+        verify(() => defaultCleanupClient.publishEvent(event)).called(1);
+      },
+    );
+
+    test(
+      'direct pre-teardown deregistration uses a captured cleanup client',
+      () async {
+        final tokenRefreshController = StreamController<String>.broadcast();
+        addTearDown(tokenRefreshController.close);
+        final signer = _MockNostrSigner();
+        final identity = KeycastNostrIdentity(
+          pubkey: pubkeyA,
+          rpcSigner: signer,
+        );
+        final cleanupClient = _MockNostrClient();
+        final event = _MockEvent();
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.denied));
+        when(
+          () => messaging.onTokenRefresh,
+        ).thenAnswer((_) => tokenRefreshController.stream);
+        when(() => authService.currentIdentity).thenReturn(identity);
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        when(() => event.isSigned).thenReturn(true);
+        when(() => event.isValid).thenReturn(true);
+        when(() => signer.signEvent(any())).thenAnswer((_) async => event);
+        when(
+          () => cleanupClient.publishEvent(event),
+        ).thenAnswer((_) async => PublishSuccess(event: event));
+        final initializeCompleter = Completer<void>();
+        when(cleanupClient.initialize).thenAnswer(
+          (_) => initializeCompleter.future,
+        );
+        // ignore: unnecessary_lambdas
+        when(() => cleanupClient.dispose()).thenAnswer((_) async {});
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            notificationServiceProvider.overrideWithValue(
+              _MockNotificationService(),
+            ),
+            currentEnvironmentProvider.overrideWith((_) => pushEnvironment),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+            nostrClientFactoryProvider.overrideWithValue(
+              ({dbClient, environmentConfig, signer, statisticsService}) =>
+                  cleanupClient,
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(pushNotificationSyncProvider);
+
+        when(() => nostrClient.publicKey).thenReturn(pubkeyA);
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        final teardownFuture = beforeSessionTeardownCallback!();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        verify(() => signer.signEvent(any())).called(1);
+        verify(cleanupClient.initialize).called(1);
+        verifyNever(() => cleanupClient.publishEvent(event));
+
+        initializeCompleter.complete();
+        await teardownFuture;
+
+        verify(() => cleanupClient.publishEvent(event)).called(1);
+        verify(cleanupClient.dispose).called(1);
+        verifyNever(() => nostrClient.publishEvent(event));
+      },
+    );
+
+    test(
+      'token refresh does not register once teardown cleanup has begun',
+      () async {
+        final tokenRefreshController = StreamController<String>.broadcast();
+        addTearDown(tokenRefreshController.close);
+        final signer = _MockNostrSigner();
+        final identity = KeycastNostrIdentity(
+          pubkey: pubkeyA,
+          rpcSigner: signer,
+        );
+        final deregistrationEvent = _MockEvent();
+        final registrationEvent = _MockEvent();
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.denied));
+        when(
+          () => messaging.onTokenRefresh,
+        ).thenAnswer((_) => tokenRefreshController.stream);
+        when(() => authService.currentIdentity).thenReturn(identity);
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        when(() => nostrClient.signer).thenReturn(signer);
+        when(
+          () => signer.nip44Encrypt(pushServicePubkey, any()),
+        ).thenAnswer((_) async => 'encrypted-token');
+        when(
+          () => authService.createAndSignEvent(
+            kind: PushNotificationService.pushRegistrationKind,
+            content: 'encrypted-token',
+            tags: any(named: 'tags'),
+          ),
+        ).thenAnswer((_) async => registrationEvent);
+        when(() => deregistrationEvent.isSigned).thenReturn(true);
+        when(() => deregistrationEvent.isValid).thenReturn(true);
+        when(
+          () => signer.signEvent(any()),
+        ).thenAnswer((_) async => deregistrationEvent);
+        when(
+          () => nostrClient.publishEvent(any()),
+        ).thenAnswer((_) async => PublishSuccess(event: _FakeEvent()));
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            notificationServiceProvider.overrideWithValue(
+              _MockNotificationService(),
+            ),
+            currentEnvironmentProvider.overrideWith((_) => pushEnvironment),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+            nostrClientFactoryProvider.overrideWithValue(
+              ({dbClient, environmentConfig, signer, statisticsService}) =>
+                  defaultCleanupClient,
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(pushNotificationSyncProvider);
+
+        when(() => nostrClient.publicKey).thenReturn(pubkeyA);
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        await beforeSessionTeardownCallback!();
+        tokenRefreshController.add('refreshed-token-during-teardown');
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        verifyNever(
+          () => authService.createAndSignEvent(
+            kind: PushNotificationService.pushRegistrationKind,
+            content: 'encrypted-token',
+            tags: any(named: 'tags'),
+          ),
+        );
+        verifyNever(() => nostrClient.publishEvent(registrationEvent));
+      },
+    );
+
+    test(
+      'waits for in-flight token refresh registration before deregistering',
+      () async {
+        const encryptedPayload = 'encrypted-refreshed-token';
+        final events = <String>[];
+        final tokenRefreshController = StreamController<String>.broadcast();
+        final registrationPublishCompleter = Completer<PublishResult>();
+        addTearDown(tokenRefreshController.close);
+        final signer = _MockNostrSigner();
+        final identity = KeycastNostrIdentity(
+          pubkey: pubkeyA,
+          rpcSigner: signer,
+        );
+        final registrationEvent = _MockEvent();
+        final deregistrationEvent = _MockEvent();
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+        when(() => messaging.getToken()).thenAnswer((_) async => null);
+        when(
+          () => messaging.onTokenRefresh,
+        ).thenAnswer((_) => tokenRefreshController.stream);
+        when(() => authService.currentIdentity).thenReturn(identity);
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        when(() => nostrClient.signer).thenReturn(signer);
+        when(
+          () => signer.nip44Encrypt(pushServicePubkey, any()),
+        ).thenAnswer((_) async => encryptedPayload);
+        when(
+          () => authService.createAndSignEvent(
+            kind: PushNotificationService.pushRegistrationKind,
+            content: encryptedPayload,
+            tags: any(named: 'tags'),
+          ),
+        ).thenAnswer((_) async => registrationEvent);
+        when(() => deregistrationEvent.isSigned).thenReturn(true);
+        when(() => deregistrationEvent.isValid).thenReturn(true);
+        when(
+          () => signer.signEvent(any()),
+        ).thenAnswer((_) async => deregistrationEvent);
+        when(() => nostrClient.publishEvent(registrationEvent)).thenAnswer((
+          _,
+        ) async {
+          events.add('registration publish started');
+          final result = await registrationPublishCompleter.future;
+          events.add('registration publish completed');
+          return result;
+        });
+        when(() => defaultCleanupClient.initialize()).thenAnswer((_) async {});
+        when(() => defaultCleanupClient.dispose()).thenAnswer((_) async {});
+        when(
+          () => defaultCleanupClient.publishEvent(deregistrationEvent),
+        ).thenAnswer((_) async {
+          events.add('deregister');
+          return PublishSuccess(event: deregistrationEvent);
+        });
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            notificationServiceProvider.overrideWithValue(
+              _MockNotificationService(),
+            ),
+            currentEnvironmentProvider.overrideWith((_) => pushEnvironment),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+            nostrClientFactoryProvider.overrideWithValue(
+              ({dbClient, environmentConfig, signer, statisticsService}) =>
+                  defaultCleanupClient,
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(pushNotificationSyncProvider);
+
+        when(() => nostrClient.publicKey).thenReturn(pubkeyA);
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        tokenRefreshController.add('refreshed-token-during-session');
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        expect(events, ['registration publish started']);
+
+        final teardownFuture = beforeSessionTeardownCallback!();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        expect(events, ['registration publish started']);
+
+        registrationPublishCompleter.complete(
+          PublishSuccess(event: registrationEvent),
+        );
+        await teardownFuture;
+
+        expect(events, [
+          'registration publish started',
+          'registration publish completed',
+          'deregister',
+        ]);
+      },
+    );
+
+    test(
+      'deregisters account A before teardown then registers account B',
+      () async {
+        final events = <String>[];
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+        when(
+          () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+        ).thenAnswer((invocation) async {
+          events.add('register ${invocation.positionalArguments.single}');
+        });
+        recordMockDeregistration(events);
+
+        final container = buildContainer();
+        container.read(pushNotificationSyncProvider);
+        final nostrSession =
+            container.read(nostrSessionProvider.notifier) as _TestNostrSession;
+
+        await emitReady(nostrSession, pubkeyA);
+        await beforeSessionTeardownCallback!();
+        events.add('teardown $pubkeyA');
+        await emitReady(nostrSession, pubkeyB);
+
+        expect(events, [
+          'register $pubkeyA',
+          'deregister $pubkeyA',
+          'teardown $pubkeyA',
+          'register $pubkeyB',
+        ]);
+      },
+    );
+
+    test(
+      'does not subscribe token refresh before Nostr session is ready',
+      () async {
+        final tokenRefreshController = StreamController<String>.broadcast();
+        addTearDown(tokenRefreshController.close);
+
+        when(
+          () => messaging.onTokenRefresh,
+        ).thenAnswer((_) => tokenRefreshController.stream);
+        when(() => messaging.getToken()).thenAnswer((_) async => 'token');
+
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            notificationServiceProvider.overrideWithValue(
+              _MockNotificationService(),
+            ),
+            currentEnvironmentProvider.overrideWithValue(
+              const EnvironmentConfig(environment: AppEnvironment.test),
+            ),
+            nostrSessionProvider.overrideWith(
+              () => _TestNostrSession(const NostrSessionReadiness.signedOut()),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        expect(container.read(pushNotificationServiceProvider), isNull);
+
+        tokenRefreshController.add('refreshed-token');
+        await Future<void>.delayed(Duration.zero);
+
+        verifyNever(() => nostrClient.signer);
+      },
+    );
+
+    test(
+      'does not create push service when ready session does not match auth',
+      () async {
+        final tokenRefreshController = StreamController<String>.broadcast();
+        addTearDown(tokenRefreshController.close);
+
+        when(
+          () => messaging.onTokenRefresh,
+        ).thenAnswer((_) => tokenRefreshController.stream);
+        when(() => messaging.getToken()).thenAnswer((_) async => 'token');
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyB));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyB);
+
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            notificationServiceProvider.overrideWithValue(
+              _MockNotificationService(),
+            ),
+            currentEnvironmentProvider.overrideWithValue(
+              const EnvironmentConfig(environment: AppEnvironment.test),
+            ),
+            nostrSessionProvider.overrideWith(
+              () => _TestNostrSession(
+                NostrSessionReadiness.nostrReady(
+                  pubkey: pubkeyA,
+                  client: nostrClient,
+                ),
+              ),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        expect(container.read(pushNotificationServiceProvider), isNull);
+      },
+    );
+
+    test(
+      'publishes queued preferences when matching session becomes ready',
+      () async {
+        const prefs = NotificationPreferences(commentsEnabled: false);
+        final published = Completer<NotificationPreferences>();
+        when(
+          () => pushService.updatePreferences(any()),
+        ).thenAnswer((invocation) async {
+          final preferences =
+              invocation.positionalArguments.single as NotificationPreferences;
+          if (!published.isCompleted) published.complete(preferences);
+          return true;
+        });
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+            pushNotificationServiceProvider.overrideWith((ref) {
+              final readiness = ref.watch(nostrSessionProvider);
+              return readiness.isReadyForActiveClient ? pushService : null;
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(notificationPreferencesDirtySyncBridgeProvider);
+
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+        container.read(pushNotificationSyncProvider);
+
+        await container
+            .read(notificationPreferencesServiceProvider)
+            .updatePreferences(prefs);
+
+        verifyNever(() => pushService.updatePreferences(any()));
+
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+        expect(await published.future, prefs);
+        await preferenceStore.waitForClear(pubkeyA);
+
+        verify(() => pushService.updatePreferences(prefs)).called(1);
+        expect(
+          preferenceStore.dirtyPreferencesByPubkey,
+          isNot(contains(pubkeyA)),
+        );
+      },
+    );
+
+    test(
+      'drains dirty preferences when bridge is mounted without push sync listener',
+      () async {
+        const prefs = NotificationPreferences(commentsEnabled: false);
+        final published = Completer<NotificationPreferences>();
+        when(
+          () => pushService.updatePreferences(any()),
+        ).thenAnswer((invocation) async {
+          final preferences =
+              invocation.positionalArguments.single as NotificationPreferences;
+          if (!published.isCompleted) published.complete(preferences);
+          return true;
+        });
+
+        await preferenceStore.markDirty(pubkeyA, prefs);
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+            pushNotificationServiceProvider.overrideWithValue(pushService),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        container.read(notificationPreferencesDirtySyncBridgeProvider);
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+
+        expect(await published.future, prefs);
+        await preferenceStore.waitForClear(pubkeyA);
+
+        verify(() => pushService.updatePreferences(prefs)).called(1);
+        expect(
+          preferenceStore.dirtyPreferencesByPubkey,
+          isNot(contains(pubkeyA)),
+        );
+      },
+    );
+
+    test(
+      'publishes queued preferences without push sync listener mounted',
+      () async {
+        const prefs = NotificationPreferences(commentsEnabled: false);
+        final published = Completer<NotificationPreferences>();
+        when(
+          () => pushService.updatePreferences(any()),
+        ).thenAnswer((invocation) async {
+          final preferences =
+              invocation.positionalArguments.single as NotificationPreferences;
+          if (!published.isCompleted) published.complete(preferences);
+          return true;
+        });
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+            pushNotificationServiceProvider.overrideWith((ref) {
+              final readiness = ref.watch(nostrSessionProvider);
+              return readiness.isReadyForActiveClient ? pushService : null;
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(notificationPreferencesDirtySyncBridgeProvider);
+
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+
+        await container
+            .read(notificationPreferencesServiceProvider)
+            .updatePreferences(prefs);
+
+        verifyNever(() => pushService.updatePreferences(any()));
+
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+        expect(await published.future, prefs);
+        await preferenceStore.waitForClear(pubkeyA);
+
+        verify(() => pushService.updatePreferences(prefs)).called(1);
+        expect(
+          preferenceStore.dirtyPreferencesByPubkey,
+          isNot(contains(pubkeyA)),
+        );
+      },
+    );
+
+    test(
+      'queues preferences when push service exists before matching readiness',
+      () async {
+        const prefs = NotificationPreferences(commentsEnabled: false);
+        final published = Completer<NotificationPreferences>();
+        when(
+          () => pushService.updatePreferences(any()),
+        ).thenAnswer((invocation) async {
+          final preferences =
+              invocation.positionalArguments.single as NotificationPreferences;
+          if (!published.isCompleted) published.complete(preferences);
+          return true;
+        });
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+            pushNotificationServiceProvider.overrideWithValue(pushService),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(notificationPreferencesDirtySyncBridgeProvider);
+
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+
+        await container
+            .read(notificationPreferencesServiceProvider)
+            .updatePreferences(prefs);
+
+        verifyNever(() => pushService.updatePreferences(any()));
+
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+        expect(await published.future, prefs);
+        await preferenceStore.waitForClear(pubkeyA);
+
+        verify(() => pushService.updatePreferences(prefs)).called(1);
+        expect(
+          preferenceStore.dirtyPreferencesByPubkey,
+          isNot(contains(pubkeyA)),
+        );
+      },
+    );
+
+    test(
+      'keeps dirty preferences for original pubkey when another identity becomes known',
+      () async {
+        const prefs = NotificationPreferences(commentsEnabled: false);
+        final published = Completer<NotificationPreferences>();
+        when(
+          () => pushService.updatePreferences(any()),
+        ).thenAnswer((invocation) async {
+          final preferences =
+              invocation.positionalArguments.single as NotificationPreferences;
+          if (!published.isCompleted) published.complete(preferences);
+          return true;
+        });
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.identityKnown(pubkey: pubkeyA),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+            pushNotificationServiceProvider.overrideWithValue(pushService),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(notificationPreferencesDirtySyncBridgeProvider);
+
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+
+        await container
+            .read(notificationPreferencesServiceProvider)
+            .updatePreferences(prefs);
+
+        nostrSession.setReadiness(
+          const NostrSessionReadiness.identityKnown(pubkey: pubkeyB),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(preferenceStore.dirtyPreferencesByPubkey[pubkeyA], prefs);
+
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+        expect(await published.future, prefs);
+        await preferenceStore.waitForClear(pubkeyA);
+
+        verify(() => pushService.updatePreferences(prefs)).called(1);
+        expect(
+          preferenceStore.dirtyPreferencesByPubkey,
+          isNot(contains(pubkeyA)),
+        );
+      },
+    );
+
+    test(
+      'keeps dirty preferences for original pubkey across sign out',
+      () async {
+        const prefs = NotificationPreferences(commentsEnabled: false);
+        final published = Completer<NotificationPreferences>();
+        when(
+          () => pushService.updatePreferences(any()),
+        ).thenAnswer((invocation) async {
+          final preferences =
+              invocation.positionalArguments.single as NotificationPreferences;
+          if (!published.isCompleted) published.complete(preferences);
+          return true;
+        });
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.identityKnown(pubkey: pubkeyA),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+            pushNotificationServiceProvider.overrideWithValue(pushService),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(notificationPreferencesDirtySyncBridgeProvider);
+
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+
+        await container
+            .read(notificationPreferencesServiceProvider)
+            .updatePreferences(prefs);
+
+        nostrSession.setReadiness(const NostrSessionReadiness.signedOut());
+        await Future<void>.delayed(Duration.zero);
+        expect(preferenceStore.dirtyPreferencesByPubkey[pubkeyA], prefs);
+
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyA,
+            client: nostrClient,
+          ),
+        );
+        expect(await published.future, prefs);
+        await preferenceStore.waitForClear(pubkeyA);
+
+        verify(() => pushService.updatePreferences(prefs)).called(1);
+        expect(
+          preferenceStore.dirtyPreferencesByPubkey,
+          isNot(contains(pubkeyA)),
+        );
+      },
+    );
+
+    test(
+      'catches errors from queued preference publish after readiness',
+      () async {
+        const prefs = NotificationPreferences(commentsEnabled: false);
+        when(
+          () => pushService.updatePreferences(any()),
+        ).thenThrow(StateError('relay unreachable'));
+
+        final nostrSession = _TestNostrSession(
+          const NostrSessionReadiness.signedOut(),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            firebaseMessagingProvider.overrideWithValue(messaging),
+            authServiceProvider.overrideWithValue(authService),
+            notificationPreferencesStoreProvider.overrideWithValue(
+              preferenceStore,
+            ),
+            nostrSessionProvider.overrideWith(() => nostrSession),
+            pushNotificationServiceProvider.overrideWith((ref) {
+              final readiness = ref.watch(nostrSessionProvider);
+              return readiness.isReadyForActiveClient ? pushService : null;
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+        container.read(pushNotificationSyncProvider);
+
+        await container
+            .read(notificationPreferencesServiceProvider)
+            .updatePreferences(prefs);
+
+        final unhandled = <Object>[];
+        await runZonedGuarded(() async {
+          nostrSession.setReadiness(
+            NostrSessionReadiness.nostrReady(
+              pubkey: pubkeyA,
+              client: nostrClient,
+            ),
+          );
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        }, (error, stack) => unhandled.add(error));
+
+        expect(unhandled, isEmpty);
+        verify(() => pushService.updatePreferences(prefs)).called(4);
+        expect(preferenceStore.dirtyPreferencesByPubkey[pubkeyA], prefs);
+      },
+    );
+
+    test(
+      'catches errors from direct preference publish retries when already ready',
+      () async {
+        const prefs = NotificationPreferences(commentsEnabled: false);
+        when(
+          () => pushService.updatePreferences(any()),
+        ).thenThrow(StateError('relay unreachable'));
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+
+        final container = buildContainer(
+          nostrSession: _TestNostrSession(
+            NostrSessionReadiness.nostrReady(
+              pubkey: pubkeyA,
+              client: nostrClient,
+            ),
+          ),
+        );
+
+        await expectLater(
+          container
+              .read(notificationPreferencesServiceProvider)
+              .updatePreferences(prefs),
+          completes,
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        verify(() => pushService.updatePreferences(prefs)).called(5);
+        expect(preferenceStore.dirtyPreferencesByPubkey[pubkeyA], prefs);
+      },
+    );
+
+    test(
+      'retries newer dirty preferences after stale direct publish succeeds',
+      () async {
+        const publishedPrefs = NotificationPreferences(commentsEnabled: false);
+        const newerPrefs = NotificationPreferences(likesEnabled: false);
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        when(() => pushService.updatePreferences(any())).thenAnswer((
+          invocation,
+        ) async {
+          final preferences =
+              invocation.positionalArguments.single as NotificationPreferences;
+          if (preferences == publishedPrefs) {
+            await preferenceStore.markDirty(pubkeyA, newerPrefs);
+          }
+          return true;
+        });
+
+        final container = buildContainer(
+          nostrSession: _TestNostrSession(
+            NostrSessionReadiness.nostrReady(
+              pubkey: pubkeyA,
+              client: nostrClient,
+            ),
+          ),
+        );
+
+        await container
+            .read(notificationPreferencesServiceProvider)
+            .updatePreferences(publishedPrefs);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        verify(() => pushService.updatePreferences(publishedPrefs)).called(1);
+        verify(() => pushService.updatePreferences(newerPrefs)).called(1);
+        expect(
+          preferenceStore.dirtyPreferencesByPubkey,
+          isNot(contains(pubkeyA)),
+        );
+      },
+    );
+
+    test(
+      'retries dirty preferences after direct publish failure',
+      () async {
+        const prefs = NotificationPreferences(commentsEnabled: false);
+        var attempts = 0;
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+        when(() => pushService.updatePreferences(prefs)).thenAnswer((_) async {
+          attempts += 1;
+          if (attempts == 1) {
+            throw StateError('relay unreachable');
+          }
+          return true;
+        });
+
+        final container = buildContainer(
+          nostrSession: _TestNostrSession(
+            NostrSessionReadiness.nostrReady(
+              pubkey: pubkeyA,
+              client: nostrClient,
+            ),
+          ),
+        );
+
+        await container
+            .read(notificationPreferencesServiceProvider)
+            .updatePreferences(prefs);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(attempts, equals(2));
+        expect(
+          preferenceStore.dirtyPreferencesByPubkey,
+          isNot(contains(pubkeyA)),
+        );
+      },
+    );
+
+    test(
+      'retries dirty preferences after same-session publish returns false',
+      () async {
+        const prefs = NotificationPreferences(commentsEnabled: false);
+        var attempts = 0;
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyA));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.authorized));
+        when(() => pushService.updatePreferences(prefs)).thenAnswer((_) async {
+          attempts += 1;
+          return attempts > 1;
+        });
+        await preferenceStore.markDirty(pubkeyA, prefs);
+
+        final container = buildContainer(
+          nostrSession: _TestNostrSession(
+            NostrSessionReadiness.nostrReady(
+              pubkey: pubkeyA,
+              client: nostrClient,
+            ),
+          ),
+        );
+        container.read(pushNotificationSyncProvider);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(attempts, equals(2));
+        expect(
+          preferenceStore.dirtyPreferencesByPubkey,
+          isNot(contains(pubkeyA)),
+        );
+      },
+    );
 
     test('survives rapid account switch (A → B) without unhandled error', () {
       // This is the exact E2E scenario: register A, sign out, register B.
@@ -299,20 +2473,110 @@ void main() {
         final unhandled = <Object>[];
         runZonedGuarded(() {
           when(() => authService.currentPublicKeyHex).thenReturn(pubkeyA);
-          authStateController.add(AuthState.authenticated);
+          when(
+            () => authService.currentIdentity,
+          ).thenReturn(_identity(pubkeyA));
+          final nostrSession =
+              container.read(nostrSessionProvider.notifier)
+                  as _TestNostrSession;
+          nostrSession.setReadiness(
+            NostrSessionReadiness.nostrReady(
+              pubkey: pubkeyA,
+              client: nostrClient,
+            ),
+          );
           async.flushMicrotasks();
 
           when(() => authService.currentPublicKeyHex).thenReturn(null);
+          when(() => authService.currentIdentity).thenReturn(null);
           authStateController.add(AuthState.unauthenticated);
           async.flushMicrotasks();
 
           when(() => authService.currentPublicKeyHex).thenReturn(pubkeyB);
-          authStateController.add(AuthState.authenticated);
+          when(
+            () => authService.currentIdentity,
+          ).thenReturn(_identity(pubkeyB));
+          when(() => nostrClient.publicKey).thenReturn(pubkeyB);
+          nostrSession.setReadiness(
+            NostrSessionReadiness.nostrReady(
+              pubkey: pubkeyB,
+              client: nostrClient,
+            ),
+          );
           async.flushMicrotasks();
         }, (error, stack) => unhandled.add(error));
 
         expect(unhandled, isEmpty);
       });
     });
+
+    test(
+      'retries current account after overlapping permission request settles',
+      () async {
+        final events = <String>[];
+        final permissionCompleter = Completer<NotificationSettings>();
+        var requestCount = 0;
+        when(
+          () => messaging.getNotificationSettings(),
+        ).thenAnswer((_) async => _settings(AuthorizationStatus.notDetermined));
+        when(
+          () => messaging.requestPermission(
+            alert: any(named: 'alert'),
+            announcement: any(named: 'announcement'),
+            badge: any(named: 'badge'),
+            carPlay: any(named: 'carPlay'),
+            criticalAlert: any(named: 'criticalAlert'),
+            provisional: any(named: 'provisional'),
+            sound: any(named: 'sound'),
+            providesAppNotificationSettings: any(
+              named: 'providesAppNotificationSettings',
+            ),
+          ),
+        ).thenAnswer((_) {
+          requestCount += 1;
+          if (requestCount > 1) {
+            throw PlatformException(
+              code: 'firebase_messaging/unknown',
+              message: 'A request for permissions is already running',
+            );
+          }
+          return permissionCompleter.future;
+        });
+        when(
+          () => pushService.register(any(), isCurrent: any(named: 'isCurrent')),
+        ).thenAnswer((invocation) async {
+          events.add('register ${invocation.positionalArguments.single}');
+        });
+
+        final container = buildContainer();
+        container.read(pushNotificationSyncProvider);
+        final nostrSession =
+            container.read(nostrSessionProvider.notifier) as _TestNostrSession;
+
+        await emitReady(nostrSession, pubkeyA);
+        expect(requestCount, 1);
+
+        when(() => authService.currentIdentity).thenReturn(_identity(pubkeyB));
+        when(() => authService.currentPublicKeyHex).thenReturn(pubkeyB);
+        when(() => nostrClient.publicKey).thenReturn(pubkeyB);
+        authStateController.add(AuthState.authenticated);
+        nostrSession.setReadiness(
+          NostrSessionReadiness.nostrReady(
+            pubkey: pubkeyB,
+            client: nostrClient,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        permissionCompleter.complete(_settings(AuthorizationStatus.authorized));
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(requestCount, 1);
+        expect(events, ['register $pubkeyB']);
+      },
+    );
   });
 }
