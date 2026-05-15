@@ -486,6 +486,11 @@ class AppLocalizationsRo extends AppLocalizations {
   }
 
   @override
+  String profileReportDisplayName(String displayName) {
+    return 'Raportează-l pe $displayName';
+  }
+
+  @override
   String profileAddToListDisplayName(String displayName) {
     return 'Adaugă $displayName la o listă';
   }

@@ -3,13 +3,16 @@
 
 /// Type-safe result from the More sheet actions.
 ///
-/// Used to communicate user actions from [MoreSheetPage] back to the caller.
+/// Used to communicate user actions from [MoreSheetContent] back to the caller.
 enum MoreSheetResult {
   /// User tapped copy public key.
   copy,
 
   /// User confirmed unfollow action.
   unfollow,
+
+  /// User tapped report.
+  report,
 
   /// User confirmed block action.
   blockConfirmed,

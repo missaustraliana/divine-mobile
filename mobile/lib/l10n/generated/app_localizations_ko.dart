@@ -426,6 +426,11 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
+  String profileReportDisplayName(String displayName) {
+    return '$displayName 신고';
+  }
+
+  @override
   String profileAddToListDisplayName(String displayName) {
     return '$displayName을(를) 목록에 추가';
   }

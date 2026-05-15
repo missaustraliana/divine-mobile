@@ -467,6 +467,11 @@ class AppLocalizationsBg extends AppLocalizations {
   }
 
   @override
+  String profileReportDisplayName(String displayName) {
+    return 'Докладвай $displayName';
+  }
+
+  @override
   String profileAddToListDisplayName(String displayName) {
     return 'Добави $displayName към списък';
   }

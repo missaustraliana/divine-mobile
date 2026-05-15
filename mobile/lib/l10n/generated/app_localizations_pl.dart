@@ -473,6 +473,11 @@ class AppLocalizationsPl extends AppLocalizations {
   }
 
   @override
+  String profileReportDisplayName(String displayName) {
+    return 'Zgłoś $displayName';
+  }
+
+  @override
   String profileAddToListDisplayName(String displayName) {
     return 'Dodaj $displayName do listy';
   }

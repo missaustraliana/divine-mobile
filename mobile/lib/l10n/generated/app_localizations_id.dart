@@ -446,6 +446,11 @@ class AppLocalizationsId extends AppLocalizations {
   }
 
   @override
+  String profileReportDisplayName(String displayName) {
+    return 'Laporkan $displayName';
+  }
+
+  @override
   String profileAddToListDisplayName(String displayName) {
     return 'Tambahkan $displayName ke daftar';
   }

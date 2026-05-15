@@ -447,6 +447,11 @@ class AppLocalizationsAr extends AppLocalizations {
   }
 
   @override
+  String profileReportDisplayName(String displayName) {
+    return 'أبلغ عن $displayName';
+  }
+
+  @override
   String profileAddToListDisplayName(String displayName) {
     return 'أضف $displayName إلى قائمة';
   }
