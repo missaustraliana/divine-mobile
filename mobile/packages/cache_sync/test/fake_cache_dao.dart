@@ -44,8 +44,8 @@ class FakeCacheDao implements CacheDao {
   }
 
   @override
-  Future<void> deleteAll() async {
-    _store.clear();
+  Future<void> deletePrefix(String prefix) async {
+    _store.removeWhere((key, _) => key.startsWith(prefix));
   }
 
   @override

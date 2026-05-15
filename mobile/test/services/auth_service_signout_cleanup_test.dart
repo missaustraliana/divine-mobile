@@ -20,10 +20,17 @@ class _MockSecureKeyStorage extends Mock implements SecureKeyStorage {}
 class _MockUserDataCleanupService extends Mock
     implements UserDataCleanupService {}
 
-/// Tracking [CacheDao] so assertions can check `deleteAll` was invoked.
+/// Tracking [CacheDao] so assertions can check which invalidation surface
+/// was hit on signOut. `deletePrefixCalls` records the prefix passed for
+/// each `deletePrefix` call so the multi-account assertion can verify
+/// only the leaving pubkey was targeted.
+///
+/// Setting [throwOnDeletePrefix] causes the next `deletePrefix` call to
+/// throw — used to pin that signOut tolerates cache-layer failures.
 class _TrackingCacheDao implements CacheDao {
   final Map<String, String> store = {};
-  int deleteAllCallCount = 0;
+  final List<String> deletePrefixCalls = [];
+  Object? throwOnDeletePrefix;
 
   @override
   Future<String?> read(String key) async => store[key];
@@ -43,9 +50,14 @@ class _TrackingCacheDao implements CacheDao {
   }
 
   @override
-  Future<void> deleteAll() async {
-    deleteAllCallCount++;
-    store.clear();
+  Future<void> deletePrefix(String prefix) async {
+    deletePrefixCalls.add(prefix);
+    final err = throwOnDeletePrefix;
+    if (err != null) {
+      throwOnDeletePrefix = null;
+      throw err;
+    }
+    store.removeWhere((key, _) => key.startsWith(prefix));
   }
 
   @override
@@ -187,53 +199,134 @@ void main() {
       // not that pubkey is null (since new identity sets it).
     });
 
-    test('destructive signOut invalidates CacheSync', () async {
-      // Arrange: seed the cache so we can observe it being cleared.
-      await cacheDao.write(
-        key: 'my_followers_existing_pubkey_hex_123',
-        payload: '{"pubkeys":["a","b"],"count":2}',
+    test(
+      'destructive signOut without a current pubkey skips cache invalidation',
+      () async {
+        // AuthService.signOut now invalidates by pubkey prefix only. When
+        // no current pubkey is set (this test never authenticates) the
+        // invalidation block is skipped entirely; with a current pubkey,
+        // only that pubkey's entries are deleted (see the authenticated
+        // group below).
+        await cacheDao.write(
+          key: 'aa11:my_followers',
+          payload: '{"pubkeys":["a"],"count":1}',
+        );
+
+        when(() => mockKeyStorage.deleteKeys()).thenAnswer((_) async => {});
+        when(() => mockKeyStorage.hasKeys()).thenAnswer((_) async => false);
+        when(() => mockKeyStorage.initialize()).thenAnswer((_) async => {});
+        final newKeyContainer = SecureKeyContainer.fromNsec(testNsec);
+        when(
+          () => mockKeyStorage.generateAndStoreKeys(
+            biometricPrompt: any(named: 'biometricPrompt'),
+          ),
+        ).thenAnswer((_) async => newKeyContainer);
+
+        await authService.signOut(deleteKeys: true);
+
+        expect(cacheDao.deletePrefixCalls, isEmpty);
+        // Unauthenticated → no current pubkey to scope by → cache survives.
+        expect(cacheDao.store, isNotEmpty);
+      },
+    );
+
+    test(
+      'non-destructive signOut without a current pubkey skips cache '
+      'invalidation',
+      () async {
+        await cacheDao.write(
+          key: 'aa11:my_followers',
+          payload: '{"pubkeys":["a"],"count":1}',
+        );
+        when(() => mockKeyStorage.clearCache()).thenReturn(null);
+
+        await authService.signOut();
+
+        expect(cacheDao.deletePrefixCalls, isEmpty);
+        expect(cacheDao.store, isNotEmpty);
+      },
+    );
+
+    group('account-scoped CacheSync invalidation (multi-account)', () {
+      const pubkeyA =
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      const pubkeyB =
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+      late SecureKeyContainer accountAContainer;
+
+      setUp(() {
+        accountAContainer = SecureKeyContainer.fromPublicKey(pubkeyA);
+        authService.debugSetCurrentKeyContainer(accountAContainer);
+
+        cacheDao.store
+          ..['$pubkeyA:my_followers'] = '{"pubkeys":["a"],"count":1}'
+          ..['$pubkeyA:my_following'] = '{"pubkeys":["c"],"count":1}'
+          ..['$pubkeyB:my_followers'] = '{"pubkeys":["d"],"count":1}';
+
+        when(() => mockKeyStorage.clearCache()).thenReturn(null);
+      });
+
+      test(
+        'non-destructive signOut invalidates only the leaving account prefix',
+        () async {
+          await authService.signOut();
+
+          expect(cacheDao.deletePrefixCalls, equals([pubkeyA]));
+          expect(cacheDao.store.containsKey('$pubkeyA:my_followers'), isFalse);
+          expect(cacheDao.store.containsKey('$pubkeyA:my_following'), isFalse);
+          // The headline multi-account assertion: B's cache survives.
+          expect(cacheDao.store['$pubkeyB:my_followers'], isNotNull);
+        },
       );
-      await cacheDao.write(
-        key: 'my_following_existing_pubkey_hex_123',
-        payload: '{"pubkeys":["c"],"count":1}',
+
+      test(
+        'destructive signOut also invalidates only the leaving account prefix',
+        () async {
+          when(() => mockKeyStorage.deleteKeys()).thenAnswer((_) async => {});
+          when(() => mockKeyStorage.hasKeys()).thenAnswer((_) async => false);
+          when(() => mockKeyStorage.initialize()).thenAnswer((_) async => {});
+          final newKeyContainer = SecureKeyContainer.fromNsec(testNsec);
+          when(
+            () => mockKeyStorage.generateAndStoreKeys(
+              biometricPrompt: any(named: 'biometricPrompt'),
+            ),
+          ).thenAnswer((_) async => newKeyContainer);
+
+          await authService.signOut(deleteKeys: true);
+
+          expect(cacheDao.deletePrefixCalls, equals([pubkeyA]));
+          expect(cacheDao.store.containsKey('$pubkeyA:my_followers'), isFalse);
+          expect(cacheDao.store['$pubkeyB:my_followers'], isNotNull);
+        },
       );
-      expect(cacheDao.store, isNotEmpty);
 
-      when(() => mockKeyStorage.deleteKeys()).thenAnswer((_) async => {});
-      when(() => mockKeyStorage.hasKeys()).thenAnswer((_) async => false);
-      when(() => mockKeyStorage.initialize()).thenAnswer((_) async => {});
-      final newKeyContainer = SecureKeyContainer.fromNsec(testNsec);
-      when(
-        () => mockKeyStorage.generateAndStoreKeys(
-          biometricPrompt: any(named: 'biometricPrompt'),
-        ),
-      ).thenAnswer((_) async => newKeyContainer);
+      test(
+        'signOut completes despite a throwing invalidatePrefix',
+        () async {
+          // The cache-layer failure must NOT abort the rest of signOut.
+          // Without the try/catch around CacheSync.invalidatePrefix, a
+          // disk error would short-circuit key cleanup, signer
+          // teardown, and the auth-state transition.
+          cacheDao.throwOnDeletePrefix = StateError(
+            'cache layer simulated failure',
+          );
 
-      // Act: destructive sign-out (covers nostr_settings_screen.dart and
-      // delete_account_dialog.dart paths that bypass SettingsAccountCubit).
-      await authService.signOut(deleteKeys: true);
+          await authService.signOut();
 
-      // Assert: canonical signOut path cleared every persisted cache row.
-      expect(cacheDao.deleteAllCallCount, equals(1));
-      expect(cacheDao.store, isEmpty);
-    });
-
-    test('non-destructive signOut does NOT invalidate CacheSync', () async {
-      // Arrange: seed the cache. On account-switch the SettingsAccountCubit
-      // owns invalidation (keys are pubkey-scoped so non-destructive
-      // signOut alone does not leak data across users).
-      await cacheDao.write(
-        key: 'my_followers_existing_pubkey_hex_123',
-        payload: '{"pubkeys":["a"],"count":1}',
+          // The invalidation was attempted with the right prefix...
+          expect(cacheDao.deletePrefixCalls, equals([pubkeyA]));
+          // ...the throw was swallowed and signOut still completed...
+          expect(authService.authState, equals(AuthState.unauthenticated));
+          // ...and because the fake throws before any rows are removed,
+          // every seeded entry (A's and B's) is still on disk. This pins
+          // the contract that a failed invalidation leaves the cache in
+          // its pre-call state — no partial cleanup.
+          expect(cacheDao.store['$pubkeyA:my_followers'], isNotNull);
+          expect(cacheDao.store['$pubkeyA:my_following'], isNotNull);
+          expect(cacheDao.store['$pubkeyB:my_followers'], isNotNull);
+        },
       );
-      when(() => mockKeyStorage.clearCache()).thenReturn(null);
-
-      // Act
-      await authService.signOut();
-
-      // Assert
-      expect(cacheDao.deleteAllCallCount, equals(0));
-      expect(cacheDao.store, isNotEmpty);
     });
 
     test('signOut should set auth state to unauthenticated', () async {

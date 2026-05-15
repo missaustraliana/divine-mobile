@@ -126,13 +126,39 @@ abstract final class CacheSync {
   /// Removes the cached entry for [key].
   static Future<void> invalidate(String key) => _dao.delete(key);
 
-  /// Removes all cached entries.
+  /// Removes all cached entries whose keys start with [prefix].
   ///
-  /// Call this at logout / account-switch to ensure no stale data persists:
+  /// Account-scoped invalidation: cache keys follow the
+  /// `${pubkeyHex}:${operation}` convention (RFC #4244), so calling
+  /// `invalidatePrefix(pubkeyHex)` at sign-out clears every entry for that
+  /// account without touching other accounts on the same device.
+  ///
   /// ```dart
-  /// await CacheSync.invalidateAll();
+  /// // In AuthService.signOut, after capturing currentPubkey:
+  /// await CacheSync.invalidatePrefix(currentPubkey);
   /// ```
-  static Future<void> invalidateAll() => _dao.deleteAll();
+  ///
+  /// [prefix] is matched literally — SQL `LIKE` wildcards (`%`, `_`) and
+  /// the escape character (`\`) in [prefix] are escaped before query
+  /// execution, so passing e.g. `'user_1'` matches the literal key
+  /// `'user_1:foo'` and not `'userX1:foo'`.
+  ///
+  /// Throws [ArgumentError] when [prefix] is empty: an empty prefix would
+  /// match every key and full-wipe the cache, which is never the intent of
+  /// a *scoped* invalidation call. The guard is runtime-enforced so the
+  /// blast-radius footgun cannot regress in release builds.
+  static Future<void> invalidatePrefix(String prefix) {
+    if (prefix.isEmpty) {
+      throw ArgumentError.value(
+        prefix,
+        'prefix',
+        'invalidatePrefix requires a non-empty prefix to avoid wiping '
+            'every cached entry. Pass a pubkey hex or other namespacing '
+            'prefix.',
+      );
+    }
+    return _dao.deletePrefix(prefix);
+  }
 
   static Future<void> _driveWatchOne<T>({
     required StreamController<CacheResult<T>> controller,

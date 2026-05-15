@@ -19,8 +19,18 @@ abstract interface class CacheDao {
   /// Removes the single entry for [key], if present.
   Future<void> delete(String key);
 
-  /// Removes all cached entries.
-  Future<void> deleteAll();
+  /// Removes all entries whose `cacheKey` starts with [prefix].
+  ///
+  /// Intended for account-scoped invalidation: when signing out account A,
+  /// pass A's pubkey hex as the prefix to clear all of A's cached data
+  /// without touching other accounts on the same device. Cache keys are
+  /// expected to follow the `${pubkey}:${operation}` convention (RFC #4244).
+  ///
+  /// [prefix] is matched **literally** — implementations are responsible
+  /// for escaping any SQL `LIKE` metacharacters (`%`, `_`, `\`) in
+  /// [prefix] before executing the query, so callers can pass arbitrary
+  /// string prefixes without escaping themselves.
+  Future<void> deletePrefix(String prefix);
 
   /// Returns the total size of all `payload` strings, in characters.
   ///
