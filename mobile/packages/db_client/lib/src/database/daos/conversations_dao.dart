@@ -25,9 +25,26 @@ class ConversationsDao extends DatabaseAccessor<AppDatabase>
 
   /// Upsert a conversation (create or update last-message metadata).
   ///
-  /// Throws:
+  /// On conflict the following update semantics apply in **both** branches:
   ///
-  /// * [InvalidDataException] if a column constraint is violated.
+  /// * `participantPubkeys`, `isGroup`, `isRead` — always overwritten.
+  /// * `subject`, `ownerPubkey`, `dmProtocol` — updated only when the
+  ///   incoming value is non-null; existing non-null value is preserved.
+  /// * `currentUserHasSent` — one-way ratchet: once `true` it is never
+  ///   cleared back to `false` by an incoming `false`.
+  /// * `lastMessageContent`, `lastMessageTimestamp`,
+  ///   `lastMessageSenderPubkey` — conditionally updated:
+  ///   - When [forceUpdateLastMessage] is `false` (default), these are only
+  ///     written if the incoming [lastMessageTimestamp] is strictly newer
+  ///     than the stored one. This prevents out-of-order gift-wrap arrivals
+  ///     during backfill from overwriting a fresher denormalized preview.
+  ///   - When [forceUpdateLastMessage] is `true`, these are always written.
+  ///     Use this only when the caller has already established that the
+  ///     incoming values are the correct current preview — e.g. after a
+  ///     deletion when the replacement message may be older than the one
+  ///     that was removed.
+  ///
+  /// Throws [InvalidDataException] if a column constraint is violated.
   Future<void> upsertConversation({
     required String id,
     required String participantPubkeys,
@@ -41,21 +58,67 @@ class ConversationsDao extends DatabaseAccessor<AppDatabase>
     bool currentUserHasSent = false,
     String? ownerPubkey,
     String? dmProtocol,
+    bool forceUpdateLastMessage = false,
   }) {
-    return into(conversations).insertOnConflictUpdate(
-      ConversationsCompanion.insert(
-        id: id,
-        participantPubkeys: participantPubkeys,
-        isGroup: Value(isGroup),
-        createdAt: createdAt,
-        lastMessageContent: Value(lastMessageContent),
-        lastMessageTimestamp: Value(lastMessageTimestamp),
-        lastMessageSenderPubkey: Value(lastMessageSenderPubkey),
-        subject: Value(subject),
-        isRead: Value(isRead),
-        currentUserHasSent: Value(currentUserHasSent),
-        ownerPubkey: Value(ownerPubkey),
-        dmProtocol: Value(dmProtocol),
+    final row = ConversationsCompanion.insert(
+      id: id,
+      participantPubkeys: participantPubkeys,
+      isGroup: Value(isGroup),
+      createdAt: createdAt,
+      lastMessageContent: Value(lastMessageContent),
+      lastMessageTimestamp: Value(lastMessageTimestamp),
+      lastMessageSenderPubkey: Value(lastMessageSenderPubkey),
+      subject: Value(subject),
+      isRead: Value(isRead),
+      currentUserHasSent: Value(currentUserHasSent),
+      ownerPubkey: Value(ownerPubkey),
+      dmProtocol: Value(dmProtocol),
+    );
+
+    return into(conversations).insert(
+      row,
+      onConflict: DoUpdate.withExcluded(
+        (old, excl) {
+          // Determine whether the incoming preview columns should win.
+          // When forced, always take the incoming values. Otherwise only
+          // update when the incoming timestamp is strictly newer than the
+          // stored one (NULL stored timestamp counts as 0 via COALESCE).
+          final incomingIsNewer = excl.lastMessageTimestamp.isBiggerThan(
+            coalesce([old.lastMessageTimestamp, const Constant(0)]),
+          );
+          final previewCondition = forceUpdateLastMessage
+              ? const Constant<bool>(true)
+              : incomingIsNewer;
+
+          return ConversationsCompanion.custom(
+            // Always updated.
+            participantPubkeys: excl.participantPubkeys,
+            isGroup: excl.isGroup,
+            isRead: excl.isRead,
+            // Preserve existing non-null value; only update when incoming
+            // value is non-null.
+            subject: coalesce([excl.subject, old.subject]),
+            ownerPubkey: coalesce([excl.ownerPubkey, old.ownerPubkey]),
+            dmProtocol: coalesce([excl.dmProtocol, old.dmProtocol]),
+            // One-way ratchet: never clear true back to false.
+            currentUserHasSent:
+                old.currentUserHasSent | excl.currentUserHasSent,
+            // Preview columns: conditional on timestamp guard.
+            // iif(condition, ifFalse) is called on the ifTrue expression.
+            lastMessageTimestamp: excl.lastMessageTimestamp.iif(
+              previewCondition,
+              old.lastMessageTimestamp,
+            ),
+            lastMessageContent: excl.lastMessageContent.iif(
+              previewCondition,
+              old.lastMessageContent,
+            ),
+            lastMessageSenderPubkey: excl.lastMessageSenderPubkey.iif(
+              previewCondition,
+              old.lastMessageSenderPubkey,
+            ),
+          );
+        },
       ),
     );
   }
