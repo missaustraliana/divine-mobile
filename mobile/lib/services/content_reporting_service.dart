@@ -3,6 +3,7 @@
 
 import 'dart:convert';
 
+import 'package:models/models.dart' hide LogCategory;
 import 'package:nostr_client/nostr_client.dart';
 import 'package:nostr_sdk/event.dart';
 import 'package:nostr_sdk/event_kind.dart';
@@ -150,6 +151,7 @@ class ContentReportingService {
     required String details,
     String? additionalContext,
     List<String> hashtags = const [],
+    List<String>? nip56EventIds,
   }) async {
     try {
       if (!_isInitialized) {
@@ -172,6 +174,7 @@ class ContentReportingService {
         details: details,
         additionalContext: additionalContext,
         hashtags: hashtags,
+        nip56EventIds: nip56EventIds,
       );
 
       if (reportEvent == null) {
@@ -246,6 +249,10 @@ class ContentReportingService {
     required String details,
     List<String>? relatedEventIds,
   }) async {
+    final validRelatedEventIds = relatedEventIds
+        ?.where(_isValidEventId)
+        .toList(growable: false);
+
     // Use first related event or create a user-focused report
     final eventId = (relatedEventIds != null && relatedEventIds.isNotEmpty)
         ? relatedEventIds.first
@@ -260,6 +267,7 @@ class ContentReportingService {
           ? 'Related events: ${relatedEventIds.join(', ')}'
           : null,
       hashtags: ['user-report'],
+      nip56EventIds: validRelatedEventIds ?? const [],
     );
   }
 
@@ -347,6 +355,7 @@ class ContentReportingService {
     required String details,
     String? additionalContext,
     List<String> hashtags = const [],
+    List<String>? nip56EventIds,
   }) async {
     try {
       if (!_authService.isAuthenticated) {
@@ -360,8 +369,13 @@ class ContentReportingService {
 
       // NIP-56 requires the report type as the 3rd element of the e/p tags.
       final nip56Type = _toNip56ReportType(reason);
+      // Filter at the construction boundary so every report path avoids
+      // emitting synthetic or malformed e tags, not just reportUser().
+      final eventTagIds = (nip56EventIds ?? [eventId])
+          .where(NostrHexUtils.isValidEventId)
+          .toList(growable: false);
       final tags = <List<String>>[
-        ['e', eventId, nip56Type],
+        for (final nip56EventId in eventTagIds) ['e', nip56EventId, nip56Type],
         ['p', authorPubkey, nip56Type],
         ['client', 'diVine'],
         ['L', _reportLabelNamespace],
@@ -448,6 +462,9 @@ class ContentReportingService {
       ContentFilterReason.other => 'other',
     };
   }
+
+  static bool _isValidEventId(String eventId) =>
+      NostrHexUtils.isValidEventId(eventId);
 
   /// Maps app-level [ContentFilterReason] to the NIP-32 label value used by
   /// downstream moderation UIs.
