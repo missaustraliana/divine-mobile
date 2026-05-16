@@ -113,6 +113,10 @@ class DmRepository {
   /// never race into the dedup/insert path.
   Future<void>? _eventLock;
 
+  /// Tracks the first post-auth cleanup pass so conversation queries can avoid
+  /// emitting stale denormalized previews before repairs land.
+  Future<void>? _postAuthMaintenance;
+
   /// User-scoped subscription ID to prevent collision when the provider
   /// rebuilds during auth transitions (old unsubscribe won't kill new sub).
   String _subscriptionId = 'dm_inbox';
@@ -170,7 +174,8 @@ class DmRepository {
 
     // Run post-auth maintenance sequentially so each step operates on the
     // final state of the previous one (e.g. backfill runs after merge).
-    unawaited(_runPostAuthMaintenance());
+    _postAuthMaintenance = _runPostAuthMaintenance();
+    unawaited(_postAuthMaintenance);
   }
 
   /// Reset internal state so the repository can be re-initialized for a
@@ -192,6 +197,7 @@ class DmRepository {
     } on Object {
       // Ignore if subscription doesn't exist
     }
+    _postAuthMaintenance = null;
     _userPubkey = '';
     _signer = null;
     _messageService = null;
@@ -1632,15 +1638,19 @@ class DmRepository {
   /// When [limit] is provided, only the top [limit] conversations are
   /// watched. Omit for all conversations.
   Stream<List<DmConversation>> watchConversations({int? limit}) {
-    return _conversationsDao
-        .watchAllConversations(limit: limit, ownerPubkey: _ownerPubkey)
-        .map((rows) => rows.map(_conversationFromRow).toList());
+    return _watchConversationRows(
+      () => _conversationsDao.watchAllConversations(
+        limit: limit,
+        ownerPubkey: _ownerPubkey,
+      ),
+    );
   }
 
   /// Get a single conversation by ID.
   ///
   /// Returns `null` if no conversation with the given ID exists.
   Future<DmConversation?> getConversation(String conversationId) async {
+    await _awaitInitialConversationMaintenance();
     final row = await _conversationsDao.getConversation(
       conversationId,
       ownerPubkey: _ownerPubkey,
@@ -1650,6 +1660,7 @@ class DmRepository {
 
   /// Get all conversations.
   Future<List<DmConversation>> getConversations() async {
+    await _awaitInitialConversationMaintenance();
     final rows = await _conversationsDao.getAllConversations(
       ownerPubkey: _ownerPubkey,
     );
@@ -1661,9 +1672,12 @@ class DmRepository {
   /// Supports pagination via [limit]. These conversations are never
   /// message requests.
   Stream<List<DmConversation>> watchAcceptedConversations({int? limit}) {
-    return _conversationsDao
-        .watchAcceptedConversations(limit: limit, ownerPubkey: _ownerPubkey)
-        .asyncMap(_overlayLatestMessages);
+    return _watchConversationRows(
+      () => _conversationsDao.watchAcceptedConversations(
+        limit: limit,
+        ownerPubkey: _ownerPubkey,
+      ),
+    );
   }
 
   /// Watch conversations where the user has never sent a message.
@@ -1672,49 +1686,10 @@ class DmRepository {
   /// follow state) is applied by [classifyPotentialRequests]. Returned
   /// without pagination since the list is typically small and needed in full.
   Stream<List<DmConversation>> watchPotentialRequests() {
-    return _conversationsDao
-        .watchPotentialRequestConversations(ownerPubkey: _ownerPubkey)
-        .asyncMap(_overlayLatestMessages);
-  }
-
-  /// Overlays each conversation row with the actual latest message from
-  /// `direct_messages` using a single batched query, then re-sorts by that
-  /// timestamp.
-  ///
-  /// This is a read-path safety net for existing user databases that may
-  /// contain stale `lastMessageContent` / `lastMessageTimestamp` values
-  /// written by app versions prior to the write-path fix in
-  /// `upsertConversation`. New writes are protected by that fix and will
-  /// never drift, but already-stale rows need this correction until a
-  /// backfill migration repairs them.
-  ///
-  // TODO(perf4407): Remove this method and the two asyncMap calls above once
-  // a one-time backfill migration has shipped that corrects any stale
-  // conversation rows in existing user databases.
-  // Tracking: divinevideo/divine-mobile#4407.
-  Future<List<DmConversation>> _overlayLatestMessages(
-    List<ConversationRow> rows,
-  ) async {
-    final latestMessages = await _directMessagesDao
-        .getLatestMessagesForConversations(
-          rows.map((row) => row.id),
-          ownerPubkey: _ownerPubkey,
-        );
-    final overlaid = rows.map((row) {
-      final base = _conversationFromRow(row);
-      final latest = latestMessages[row.id];
-      if (latest == null) return base;
-      final preview = latest.messageKind == EventKind.fileMessage
-          ? _filePreviewText(latest.fileType)
-          : latest.content;
-      return base.copyWith(
-        lastMessageContent: preview,
-        lastMessageTimestamp: latest.createdAt,
-        lastMessageSenderPubkey: latest.senderPubkey,
-      );
-    }).toList();
-    return overlaid..sort(
-      (a, b) => b.effectiveTimestamp.compareTo(a.effectiveTimestamp),
+    return _watchConversationRows(
+      () => _conversationsDao.watchPotentialRequestConversations(
+        ownerPubkey: _ownerPubkey,
+      ),
     );
   }
 
@@ -1870,6 +1845,22 @@ class DmRepository {
     return rows.map(_messageFromRow).toList();
   }
 
+  Future<void> _awaitInitialConversationMaintenance() async {
+    await _postAuthMaintenance;
+  }
+
+  Stream<List<DmConversation>> _watchConversationRows(
+    Stream<List<ConversationRow>> Function() watchRows,
+  ) {
+    final maintenance = _postAuthMaintenance;
+    final gatedRows = maintenance == null
+        ? watchRows()
+        : Stream.fromFuture(maintenance).asyncExpand((_) => watchRows());
+    return gatedRows.map((streamRows) {
+      return streamRows.map(_conversationFromRow).toList();
+    });
+  }
+
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
@@ -2002,6 +1993,7 @@ class DmRepository {
     await _mergeDuplicateConversations();
     await _cleanupSelfConversations();
     await _backfillCurrentUserHasSent();
+    await _backfillConversationPreviews();
   }
 
   /// Backfills `currentUserHasSent` for conversations where the column
@@ -2026,6 +2018,31 @@ class DmRepository {
     } on Object catch (e, stackTrace) {
       Log.error(
         'Failed to backfill currentUserHasSent: $e',
+        category: LogCategory.system,
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  /// Backfills denormalized latest-message preview columns in conversations.
+  ///
+  /// Fixes stale previews created before the write-path timestamp guard landed,
+  /// after which conversation rows become the source of truth again.
+  Future<void> _backfillConversationPreviews() async {
+    try {
+      final updated = await _conversationsDao.backfillLatestMessagePreviews(
+        ownerPubkey: _ownerPubkey,
+      );
+      if (updated > 0) {
+        Log.info(
+          'Backfilled latest message previews for $updated conversations',
+          category: LogCategory.system,
+        );
+      }
+    } on Object catch (e, stackTrace) {
+      Log.error(
+        'Failed to backfill latest message previews: $e',
         category: LogCategory.system,
         error: e,
         stackTrace: stackTrace,
