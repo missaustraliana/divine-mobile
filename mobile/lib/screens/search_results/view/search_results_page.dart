@@ -16,10 +16,17 @@ import 'package:openvine/screens/search_results/widgets/search_results_app_bar.d
 /// Page that creates and wires the search BLoCs, then renders
 /// [SearchResultsView].
 class SearchResultsPage extends ConsumerWidget {
-  const SearchResultsPage({this.initialQuery, super.key});
+  const SearchResultsPage({
+    this.initialQuery,
+    this.requestFocusOnMount = false,
+    super.key,
+  });
 
   /// Optional pre-filled search query from the route.
   final String? initialQuery;
+
+  /// Whether the search field should claim keyboard focus on first paint.
+  final bool requestFocusOnMount;
 
   /// Base path prefix (used for route matching and normalization skips).
   static const pathPrefix = '/search-results';
@@ -27,9 +34,22 @@ class SearchResultsPage extends ConsumerWidget {
   /// Route path pattern for GoRouter.
   static const path = '$pathPrefix/:query';
 
-  /// Build a path with the given query.
-  static String pathForQuery(String query) =>
-      '$pathPrefix/${Uri.encodeComponent(query)}';
+  /// Query parameter used to opt a prefilled route into mount focus.
+  static const requestFocusQueryParameter = 'focus';
+
+  /// Build a path with the given query and explicit mount-focus intent.
+  static String pathForQuery(
+    String query, {
+    required bool requestFocusOnMount,
+  }) {
+    final encodedQuery = Uri.encodeComponent(query);
+    if (!requestFocusOnMount) return '$pathPrefix/$encodedQuery';
+    return '$pathPrefix/$encodedQuery?$requestFocusQueryParameter=1';
+  }
+
+  /// Returns whether a routed prefilled search should claim keyboard focus.
+  static bool requestFocusOnMountForRoute(Uri uri) =>
+      uri.queryParameters[requestFocusQueryParameter] == '1';
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -67,7 +87,10 @@ class SearchResultsPage extends ConsumerWidget {
         // app bar area (which doesn't paint its own background) doesn't
         // show through to the root scaffold's darker default.
         backgroundColor: VineTheme.surfaceBackground,
-        body: _SearchResultsBody(initialQuery: initialQuery ?? ''),
+        body: _SearchResultsBody(
+          initialQuery: initialQuery ?? '',
+          requestFocusOnMount: requestFocusOnMount,
+        ),
       ),
     );
   }
@@ -75,15 +98,22 @@ class SearchResultsPage extends ConsumerWidget {
 
 /// Wires the app bar and body together.
 class _SearchResultsBody extends StatelessWidget {
-  const _SearchResultsBody({required this.initialQuery});
+  const _SearchResultsBody({
+    required this.initialQuery,
+    required this.requestFocusOnMount,
+  });
 
   final String initialQuery;
+  final bool requestFocusOnMount;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        SearchResultsAppBar(initialQuery: initialQuery),
+        SearchResultsAppBar(
+          initialQuery: initialQuery,
+          requestFocusOnMount: requestFocusOnMount,
+        ),
         const Expanded(child: SearchResultsView()),
       ],
     );

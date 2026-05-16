@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -15,10 +13,22 @@ import 'package:openvine/screens/search_results/widgets/search_filter_pill.dart'
 /// Owns the [TextEditingController] and [FocusNode] lifecycle. Dispatches
 /// [VideoSearchQueryChanged] to [VideoSearchBloc] on text changes.
 class SearchResultsAppBar extends StatefulWidget {
-  const SearchResultsAppBar({required this.initialQuery, super.key});
+  const SearchResultsAppBar({
+    required this.initialQuery,
+    this.requestFocusOnMount = false,
+    super.key,
+  });
 
-  /// Pre-filled search text. If empty the field requests focus instead.
+  /// Pre-filled search text.
   final String initialQuery;
+
+  /// When true, a prefilled search field claims focus after the first frame.
+  ///
+  /// Route call sites must opt in explicitly so prefilled destinations like
+  /// mention taps and search deep links can keep the keyboard dismissed.
+  ///
+  /// Empty-query mounts still request focus by default.
+  final bool requestFocusOnMount;
 
   @override
   State<SearchResultsAppBar> createState() => _SearchResultsAppBarState();
@@ -27,7 +37,6 @@ class SearchResultsAppBar extends StatefulWidget {
 class _SearchResultsAppBarState extends State<SearchResultsAppBar> {
   late final TextEditingController _controller;
   late final FocusNode _focusNode;
-  Timer? _debounce;
 
   @override
   void initState() {
@@ -38,7 +47,9 @@ class _SearchResultsAppBarState extends State<SearchResultsAppBar> {
 
     if (widget.initialQuery.isNotEmpty) {
       _controller.text = widget.initialQuery;
-    } else {
+    }
+
+    if (widget.requestFocusOnMount || widget.initialQuery.isEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _focusNode.requestFocus();
       });
@@ -47,7 +58,6 @@ class _SearchResultsAppBarState extends State<SearchResultsAppBar> {
 
   @override
   void dispose() {
-    _debounce?.cancel();
     _controller
       ..removeListener(_onSearchChanged)
       ..dispose();
@@ -56,15 +66,11 @@ class _SearchResultsAppBarState extends State<SearchResultsAppBar> {
   }
 
   void _onSearchChanged() {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 300), () {
-      if (!mounted) return;
-      final query = _controller.text;
-      context.read<VideoSearchBloc>().add(VideoSearchQueryChanged(query));
-      context.read<UserSearchBloc>().add(UserSearchQueryChanged(query));
-      context.read<HashtagSearchBloc>().add(HashtagSearchQueryChanged(query));
-      context.read<ListSearchBloc>().add(ListSearchQueryChanged(query));
-    });
+    final query = _controller.text;
+    context.read<VideoSearchBloc>().add(VideoSearchQueryChanged(query));
+    context.read<UserSearchBloc>().add(UserSearchQueryChanged(query));
+    context.read<HashtagSearchBloc>().add(HashtagSearchQueryChanged(query));
+    context.read<ListSearchBloc>().add(ListSearchQueryChanged(query));
   }
 
   @override
