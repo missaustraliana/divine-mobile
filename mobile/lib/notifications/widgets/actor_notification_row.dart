@@ -8,6 +8,7 @@ import 'package:models/models.dart';
 import 'package:openvine/constants/notification_constants.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/l10n/localized_time_formatter.dart';
+import 'package:openvine/notifications/widgets/notification_actor_spans.dart';
 import 'package:openvine/notifications/widgets/notification_comment_quote.dart';
 import 'package:openvine/notifications/widgets/notification_leading_type_icon.dart';
 import 'package:openvine/widgets/user_avatar.dart';
@@ -54,10 +55,7 @@ class ActorNotificationRow extends StatelessWidget {
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -101,6 +99,11 @@ class _NotificationContent extends StatelessWidget {
   bool get _hasComment =>
       notification.commentText != null && notification.commentText!.isNotEmpty;
 
+  bool _shouldStackFollowBackButton(BuildContext context) {
+    return MediaQuery.textScalerOf(context).scale(1) >
+        NotificationConstants.largeTextStackThreshold;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -134,7 +137,7 @@ class _NotificationContent extends StatelessWidget {
                 notification.actor.displayName,
               ),
             ),
-            if (_showFollowBack) ...[
+            if (_showFollowBack && !_shouldStackFollowBackButton(context)) ...[
               const Spacer(),
               // Tiny variant (32px visible) so the row's trailing
               // affordance aligns with the leading 32px type icon and
@@ -148,6 +151,17 @@ class _NotificationContent extends StatelessWidget {
             ],
           ],
         ),
+        if (_showFollowBack && _shouldStackFollowBackButton(context)) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: DivineButton(
+              label: l10n.notificationFollowBack,
+              onPressed: onFollowBack,
+              size: DivineButtonSize.tiny,
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         _MessageText(
           notification: notification,
@@ -180,30 +194,18 @@ class _MessageText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final spans = <InlineSpan>[];
     final type = notification.type;
-
-    if (type == NotificationKind.system) {
-      spans.add(
-        TextSpan(
-          text: l10n.notificationSystemUpdate,
-          style: VineTheme.bodyMediumFont(),
-        ),
-      );
-    } else {
-      spans.add(
-        TextSpan(
-          text: notification.actor.displayName,
-          style: VineTheme.labelLargeFont(),
-        ),
-      );
-      spans.add(
-        TextSpan(
-          text: ' ${_verbFor(l10n, type)}',
-          style: VineTheme.bodyMediumFont(),
-        ),
-      );
-    }
+    final spans = type == NotificationKind.system
+        ? <InlineSpan>[
+            TextSpan(
+              text: l10n.notificationSystemUpdate,
+              style: VineTheme.bodyMediumFont(),
+            ),
+          ]
+        : localizedActorSentenceSpans(
+            fullText: _messageFor(l10n, type, notification.actor.displayName),
+            actorName: notification.actor.displayName,
+          );
 
     final ts = timestamp;
     if (ts != null && ts.isNotEmpty) {
@@ -222,24 +224,18 @@ class _MessageText extends StatelessWidget {
   }
 }
 
-/// Returns just the verb portion (no actor name) for inline composition.
-///
-/// l10n verb keys carry the actor name as a leading `{actorName}`
-/// placeholder. Calling them with an empty string leaves a leading
-/// separator (a space in English, possibly something different in other
-/// locales) — strip it so the caller can prepend its own bold actor name.
-/// `notificationRepliedToYourComment` is already actor-free and used
-/// as-is.
-String _verbFor(AppLocalizations l10n, NotificationKind type) {
+String _messageFor(
+  AppLocalizations l10n,
+  NotificationKind type,
+  String actorName,
+) {
   return switch (type) {
-    NotificationKind.follow => l10n.notificationStartedFollowing('').trimLeft(),
-    NotificationKind.mention => l10n.notificationMentionedYou('').trimLeft(),
-    NotificationKind.likeComment =>
-      l10n.notificationLikedYourComment('').trimLeft(),
-    NotificationKind.reply => l10n.notificationRepliedToYourComment,
-    // System is handled inline in _MessageText. The remaining cases are
-    // unreachable because ActorNotification asserts on type — but
-    // exhaustivity requires them.
+    NotificationKind.follow => l10n.notificationStartedFollowing(actorName),
+    NotificationKind.mention => l10n.notificationMentionedYou(actorName),
+    NotificationKind.likeComment => l10n.notificationLikedYourComment(
+      actorName,
+    ),
+    NotificationKind.reply => l10n.notificationRepliedToYourComment(actorName),
     NotificationKind.system ||
     NotificationKind.like ||
     NotificationKind.comment ||

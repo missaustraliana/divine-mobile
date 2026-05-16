@@ -5,8 +5,10 @@
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:models/models.dart';
+import 'package:openvine/constants/notification_constants.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/l10n/localized_time_formatter.dart';
+import 'package:openvine/notifications/widgets/notification_actor_spans.dart';
 import 'package:openvine/notifications/widgets/notification_avatar_stack.dart';
 import 'package:openvine/notifications/widgets/notification_comment_quote.dart';
 import 'package:openvine/notifications/widgets/notification_leading_type_icon.dart';
@@ -43,9 +45,15 @@ class VideoNotificationRow extends StatelessWidget {
   /// Called when the thumbnail on the right is tapped.
   final VoidCallback onThumbnailTap;
 
+  bool _shouldStackThumbnail(BuildContext context) {
+    return MediaQuery.textScalerOf(context).scale(1) >
+        NotificationConstants.largeTextStackThreshold;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final shouldStackThumbnail = _shouldStackThumbnail(context);
     return Material(
       color: VineTheme.surfaceContainerHigh,
       child: Semantics(
@@ -61,10 +69,7 @@ class VideoNotificationRow extends StatelessWidget {
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -77,14 +82,18 @@ class VideoNotificationRow extends StatelessWidget {
                     child: _NotificationContent(
                       notification: notification,
                       onProfileTap: onProfileTap,
+                      showStackedThumbnail: shouldStackThumbnail,
+                      onThumbnailTap: onThumbnailTap,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  NotificationVideoThumbnail(
-                    imageUrl: notification.videoThumbnailUrl,
-                    title: notification.videoTitle,
-                    onTap: onThumbnailTap,
-                  ),
+                  if (!shouldStackThumbnail) ...[
+                    const SizedBox(width: 12),
+                    NotificationVideoThumbnail(
+                      imageUrl: notification.videoThumbnailUrl,
+                      title: notification.videoTitle,
+                      onTap: onThumbnailTap,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -99,10 +108,14 @@ class _NotificationContent extends StatelessWidget {
   const _NotificationContent({
     required this.notification,
     required this.onProfileTap,
+    required this.showStackedThumbnail,
+    required this.onThumbnailTap,
   });
 
   final VideoNotification notification;
   final VoidCallback onProfileTap;
+  final bool showStackedThumbnail;
+  final VoidCallback onThumbnailTap;
 
   bool get _hasComment =>
       notification.commentText != null && notification.commentText!.isNotEmpty;
@@ -145,6 +158,17 @@ class _NotificationContent extends StatelessWidget {
             timestamp: relativeTime,
           ),
         ],
+        if (showStackedThumbnail) ...[
+          const SizedBox(height: 12),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: NotificationVideoThumbnail(
+              imageUrl: notification.videoThumbnailUrl,
+              title: notification.videoTitle,
+              onTap: onThumbnailTap,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -170,14 +194,20 @@ class _MessageText extends StatelessWidget {
     final videoTitle = notification.videoTitle;
     final othersCount = notification.totalCount - 1;
 
-    spans.add(
-      TextSpan(
-        text: actors.first.displayName,
-        style: VineTheme.labelLargeFont(),
-      ),
-    );
-
-    if (othersCount > 0) {
+    if (othersCount == 0) {
+      spans.addAll(
+        localizedActorSentenceSpans(
+          fullText: _messageFor(l10n, type, actors.first.displayName),
+          actorName: actors.first.displayName,
+        ),
+      );
+    } else {
+      spans.add(
+        TextSpan(
+          text: actors.first.displayName,
+          style: VineTheme.labelLargeFont(),
+        ),
+      );
       spans.add(
         TextSpan(
           text: ' ${l10n.notificationAndConnector} ',
@@ -190,21 +220,17 @@ class _MessageText extends StatelessWidget {
           style: VineTheme.labelLargeFont(),
         ),
       );
+      spans.add(
+        TextSpan(
+          text: ' ${_verbFor(l10n, type)}',
+          style: VineTheme.bodyMediumFont(),
+        ),
+      );
     }
-
-    spans.add(
-      TextSpan(
-        text: ' ${_verbFor(l10n, type)}',
-        style: VineTheme.bodyMediumFont(),
-      ),
-    );
 
     if (videoTitle != null && _typeShowsTitle(type)) {
       spans.add(
-        TextSpan(
-          text: ' $videoTitle',
-          style: VineTheme.labelLargeFont(),
-        ),
+        TextSpan(text: ' $videoTitle', style: VineTheme.labelLargeFont()),
       );
     }
 
@@ -254,6 +280,27 @@ String _verbFor(AppLocalizations l10n, NotificationKind type) {
       l10n.notificationRepostedYourVideo('').trimLeft(),
     // VideoNotification asserts type ∈ {like, likeComment, comment,
     // repost}; the remaining cases satisfy switch exhaustivity only.
+    NotificationKind.reply ||
+    NotificationKind.follow ||
+    NotificationKind.mention ||
+    NotificationKind.system => '',
+  };
+}
+
+String _messageFor(
+  AppLocalizations l10n,
+  NotificationKind type,
+  String actorName,
+) {
+  return switch (type) {
+    NotificationKind.like => l10n.notificationLikedYourVideo(actorName),
+    NotificationKind.likeComment => l10n.notificationLikedYourComment(
+      actorName,
+    ),
+    NotificationKind.comment => l10n.notificationCommentedOnYourVideo(
+      actorName,
+    ),
+    NotificationKind.repost => l10n.notificationRepostedYourVideo(actorName),
     NotificationKind.reply ||
     NotificationKind.follow ||
     NotificationKind.mention ||
