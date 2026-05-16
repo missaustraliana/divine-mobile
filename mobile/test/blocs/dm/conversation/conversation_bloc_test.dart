@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:models/models.dart';
 import 'package:openvine/blocs/dm/conversation/conversation_bloc.dart';
+import 'package:openvine/observability/reportable_error.dart';
 
 class _MockDmRepository extends Mock implements DmRepository {}
 
@@ -1448,7 +1449,53 @@ void main() {
                 equals([rumorId1]),
               ),
         ],
-        errors: () => [isA<StateError>()],
+        errors: () => [
+          isA<Reportable<Object>>().having(
+            (r) => r.unwrap(),
+            'unwrap',
+            isA<StateError>(),
+          ),
+        ],
+      );
+
+      blocTest<ConversationBloc, ConversationState>(
+        'treats missing queue rows as terminal and clears them from the '
+        'retry set without reporting',
+        setUp: () {
+          when(
+            () => mockDmRepository.recoverSelfWrap(rumorId: rumorId1),
+          ).thenThrow(
+            ArgumentError.value(
+              rumorId1,
+              'rumorId',
+              'no queued outgoing DM with this id',
+            ),
+          );
+        },
+        seed: () => const ConversationState(
+          status: ConversationStatus.loaded,
+          sendStatus: SendStatus.sentPartial,
+          lastPartialSend: PartialSend(rumorIds: [rumorId1]),
+        ),
+        build: buildBloc,
+        act: (bloc) => bloc.add(
+          const ConversationSelfWrapRecoveryRequested(rumorIds: [rumorId1]),
+        ),
+        expect: () => [
+          isA<ConversationState>().having(
+            (s) => s.sendStatus,
+            'sendStatus',
+            SendStatus.sending,
+          ),
+          isA<ConversationState>()
+              .having((s) => s.sendStatus, 'sendStatus', SendStatus.sent)
+              .having(
+                (s) => s.lastPartialSend,
+                'clears terminal retry payload',
+                isNull,
+              ),
+        ],
+        errors: () => const <Object>[],
       );
 
       blocTest<ConversationBloc, ConversationState>(

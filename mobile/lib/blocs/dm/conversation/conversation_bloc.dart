@@ -10,6 +10,7 @@ import 'package:dm_repository/dm_repository.dart';
 import 'package:equatable/equatable.dart';
 import 'package:meta/meta.dart';
 import 'package:models/models.dart';
+import 'package:openvine/observability/reportable_error.dart';
 import 'package:uuid/uuid.dart';
 
 part 'conversation_event.dart';
@@ -225,9 +226,15 @@ class ConversationBloc extends Bloc<ConversationEvent, ConversationState> {
           stillFailing.add(rumorId);
         }
       } on Object catch (e, stackTrace) {
-        // recoverSelfWrap can throw on missing/foreign queue rows or a
-        // missing DAO. Treat each thrown rumor as still-failing so the
-        // user can retry — recording the error for telemetry.
+        if (e is ArgumentError) {
+          // The row was already removed or is no longer valid for this
+          // account. Treat it as terminal and drop it from the retry set.
+          continue;
+        }
+
+        // Missing DAO wiring is an invariant failure; any other throw
+        // is unexpected. Preserve retryability and surface it for
+        // telemetry.
         stillFailing.add(rumorId);
         lastError = e;
         lastStackTrace = stackTrace;
@@ -235,7 +242,10 @@ class ConversationBloc extends Bloc<ConversationEvent, ConversationState> {
     }
 
     if (lastError != null) {
-      addError(lastError, lastStackTrace);
+      addError(
+        Reportable(lastError, context: '_onSelfWrapRecoveryRequested'),
+        lastStackTrace,
+      );
     }
 
     if (stillFailing.isEmpty) {
