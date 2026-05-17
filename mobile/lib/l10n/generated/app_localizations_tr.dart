@@ -4003,6 +4003,10 @@ class AppLocalizationsTr extends AppLocalizations {
   String get notificationsRetry => 'Tekrar Dene';
 
   @override
+  String get notificationsRefreshError =>
+      'Yenileme başarısız — mevcut olanlar gösteriliyor';
+
+  @override
   String get notificationsCheckingNew => 'yeni bildirimler kontrol ediliyor';
 
   @override

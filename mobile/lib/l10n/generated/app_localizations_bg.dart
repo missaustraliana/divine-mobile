@@ -4068,6 +4068,10 @@ class AppLocalizationsBg extends AppLocalizations {
   String get notificationsRetry => 'Опитай пак';
 
   @override
+  String get notificationsRefreshError =>
+      'Неуспешно обновяване — показва се наличното';
+
+  @override
   String get notificationsCheckingNew => 'Проверяваме за нови известия';
 
   @override

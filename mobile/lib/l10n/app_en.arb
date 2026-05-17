@@ -2165,6 +2165,10 @@
   "notificationsTabReposts": "Reposts",
   "notificationsFailedToLoad": "Failed to load notifications",
   "notificationsRetry": "Retry",
+  "notificationsRefreshError": "Couldn't refresh — showing what you have",
+  "@notificationsRefreshError": {
+    "description": "Inline banner above the cached notifications list when the most recent refresh failed but cached items are still rendered. Retry button next to this label reuses the existing `notificationsRetry` key."
+  },
   "notificationsCheckingNew": "checking for new notifications",
   "notificationsNoneYet": "No notifications yet",
   "notificationsNoneForType": "No {type} notifications",

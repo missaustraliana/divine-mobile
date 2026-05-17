@@ -4037,6 +4037,10 @@ class AppLocalizationsNl extends AppLocalizations {
   String get notificationsRetry => 'Opnieuw';
 
   @override
+  String get notificationsRefreshError =>
+      'Vernieuwen mislukt — toont beschikbare items';
+
+  @override
   String get notificationsCheckingNew => 'checken op nieuwe meldingen';
 
   @override

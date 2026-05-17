@@ -97,51 +97,68 @@ class _NotificationsViewState extends ConsumerState<NotificationsView> {
       child: BlocBuilder<NotificationFeedBloc, NotificationFeedState>(
         builder: (context, state) {
           final visible = _applyFilter(state.notifications);
-          return switch (state.status) {
-            NotificationFeedStatus.initial ||
-            NotificationFeedStatus.loading => const Center(
-              child: CircularProgressIndicator(color: VineTheme.vineGreen),
-            ),
-            NotificationFeedStatus.failure => _FailureBody(
+
+          // Hard failure path. The bloc gates `failure` on
+          // `notifications.isEmpty`, so we only land here when the cache
+          // is also empty.
+          if (state.status == NotificationFeedStatus.failure) {
+            return _FailureBody(
               onRetry: () => context.read<NotificationFeedBloc>().add(
                 const NotificationFeedRefreshed(),
               ),
-            ),
-            NotificationFeedStatus.loaded =>
-              visible.isEmpty
-                  ? RefreshIndicator(
-                      color: VineTheme.onPrimary,
-                      backgroundColor: VineTheme.vineGreen,
-                      onRefresh: () async {
-                        context.read<NotificationFeedBloc>().add(
-                          const NotificationFeedRefreshed(),
-                        );
-                      },
-                      child: const _ScrollableEmptyState(),
-                    )
-                  : RefreshIndicator(
-                      color: VineTheme.onPrimary,
-                      backgroundColor: VineTheme.vineGreen,
-                      onRefresh: () async {
-                        context.read<NotificationFeedBloc>().add(
-                          const NotificationFeedRefreshed(),
-                        );
-                      },
-                      child: _NotificationList(
-                        notifications: visible,
-                        isLoadingMore: state.isLoadingMore,
-                        hasMore: state.hasMore,
-                        scrollController: _scrollController,
-                        onItemTap: (notification) =>
-                            _onItemTap(context, notification),
-                        onProfileTap: (pubkey) =>
-                            _navigateToProfile(context, pubkey),
-                        onFollowBack: (pubkey) => context
-                            .read<NotificationFeedBloc>()
-                            .add(NotificationFeedFollowBack(pubkey)),
-                      ),
-                    ),
-          };
+            );
+          }
+
+          // Cached or freshly-loaded items present → render the list
+          // even while the first-page refresh is still in flight. The
+          // inline refresh-error banner handles the soft-failure
+          // affordance via `state.refreshError`.
+          if (visible.isNotEmpty) {
+            return RefreshIndicator(
+              color: VineTheme.onPrimary,
+              backgroundColor: VineTheme.vineGreen,
+              onRefresh: () async {
+                context.read<NotificationFeedBloc>().add(
+                  const NotificationFeedRefreshed(),
+                );
+              },
+              child: _NotificationList(
+                notifications: visible,
+                isLoadingMore: state.isLoadingMore,
+                hasMore: state.hasMore,
+                scrollController: _scrollController,
+                showRefreshErrorBanner: state.refreshError,
+                onRetryRefresh: () => context.read<NotificationFeedBloc>().add(
+                  const NotificationFeedRefreshed(),
+                ),
+                onItemTap: (notification) => _onItemTap(context, notification),
+                onProfileTap: (pubkey) => _navigateToProfile(context, pubkey),
+                onFollowBack: (pubkey) => context
+                    .read<NotificationFeedBloc>()
+                    .add(NotificationFeedFollowBack(pubkey)),
+              ),
+            );
+          }
+
+          // Empty + still loading → full-screen spinner.
+          if (state.status == NotificationFeedStatus.initial ||
+              state.status == NotificationFeedStatus.loading) {
+            return const Center(
+              child: CircularProgressIndicator(color: VineTheme.vineGreen),
+            );
+          }
+
+          // Empty + loaded → empty state with pull-to-refresh.
+          return RefreshIndicator(
+            color: VineTheme.onPrimary,
+            backgroundColor: VineTheme.vineGreen,
+            onRefresh: () async {
+              context.read<NotificationFeedBloc>().add(
+                const NotificationFeedRefreshed(),
+              );
+            },
+            child: const _ScrollableEmptyState(),
+          );
         },
       ),
     );
@@ -428,6 +445,8 @@ class _NotificationList extends StatelessWidget {
     required this.onItemTap,
     required this.onProfileTap,
     required this.onFollowBack,
+    required this.showRefreshErrorBanner,
+    required this.onRetryRefresh,
   });
 
   final List<NotificationItem> notifications;
@@ -438,17 +457,35 @@ class _NotificationList extends StatelessWidget {
   final void Function(String pubkey) onProfileTap;
   final void Function(String pubkey) onFollowBack;
 
+  /// When `true`, renders [_RefreshErrorBanner] as the list's first item so
+  /// users see the cached snapshot together with a "couldn't refresh"
+  /// affordance instead of a Retry-only blackout.
+  final bool showRefreshErrorBanner;
+
+  /// Callback fired by the banner's Retry button. Dispatches the same
+  /// `NotificationFeedRefreshed` event the pull-to-refresh handler uses.
+  final VoidCallback onRetryRefresh;
+
   @override
   Widget build(BuildContext context) {
-    final itemCount = notifications.length + (isLoadingMore && hasMore ? 1 : 0);
+    final bannerOffset = showRefreshErrorBanner ? 1 : 0;
+    final itemCount =
+        bannerOffset +
+        notifications.length +
+        (isLoadingMore && hasMore ? 1 : 0);
 
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
       controller: scrollController,
       itemCount: itemCount,
       itemBuilder: (context, index) {
+        if (showRefreshErrorBanner && index == 0) {
+          return _RefreshErrorBanner(onRetry: onRetryRefresh);
+        }
+        final dataIndex = index - bannerOffset;
+
         // Loading indicator at bottom.
-        if (index >= notifications.length) {
+        if (dataIndex >= notifications.length) {
           return const Padding(
             padding: EdgeInsets.all(16),
             child: Center(
@@ -457,8 +494,8 @@ class _NotificationList extends StatelessWidget {
           );
         }
 
-        final notification = notifications[index];
-        final showDateHeader = _shouldShowDateHeader(index);
+        final notification = notifications[dataIndex];
+        final showDateHeader = _shouldShowDateHeader(dataIndex);
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -525,5 +562,55 @@ class _NotificationList extends StatelessWidget {
         actors.isNotEmpty ? actors.first.pubkey : null,
       ActorNotification(:final actor) => actor.pubkey,
     };
+  }
+}
+
+class _RefreshErrorBanner extends StatelessWidget {
+  const _RefreshErrorBanner({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: VineTheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              const DivineIcon(
+                icon: DivineIconName.warningCircle,
+                size: 20,
+                color: VineTheme.lightText,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  context.l10n.notificationsRefreshError,
+                  style: VineTheme.bodyMediumFont(
+                    color: VineTheme.secondaryText,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: onRetry,
+                child: Text(
+                  // Reuse the already-translated `notificationsRetry` key
+                  // so the refresh-error banner ships in every locale
+                  // without adding a duplicate English-only key.
+                  context.l10n.notificationsRetry,
+                  style: VineTheme.labelLargeFont(color: VineTheme.vineGreen),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

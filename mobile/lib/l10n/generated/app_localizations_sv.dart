@@ -4020,6 +4020,10 @@ class AppLocalizationsSv extends AppLocalizations {
   String get notificationsRetry => 'Försök igen';
 
   @override
+  String get notificationsRefreshError =>
+      'Kunde inte uppdatera — visar tillgängliga';
+
+  @override
   String get notificationsCheckingNew => 'kollar efter nya aviseringar';
 
   @override

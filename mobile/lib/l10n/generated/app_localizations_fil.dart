@@ -4079,6 +4079,10 @@ class AppLocalizationsFil extends AppLocalizations {
   String get notificationsRetry => 'Subukan ulit';
 
   @override
+  String get notificationsRefreshError =>
+      'Hindi ma-refresh — ipinapakita ang nasa iyo';
+
+  @override
   String get notificationsCheckingNew =>
       'tinitingnan kung may bagong notifications';
 

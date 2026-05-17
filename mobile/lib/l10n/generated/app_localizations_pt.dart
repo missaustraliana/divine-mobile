@@ -4048,6 +4048,10 @@ class AppLocalizationsPt extends AppLocalizations {
   String get notificationsRetry => 'Tentar novamente';
 
   @override
+  String get notificationsRefreshError =>
+      'Falha ao atualizar — mostrando o disponível';
+
+  @override
   String get notificationsCheckingNew => 'verificando novas notificações';
 
   @override

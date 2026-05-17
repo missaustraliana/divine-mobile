@@ -3936,6 +3936,9 @@ class AppLocalizationsAm extends AppLocalizations {
   String get notificationsRetry => 'እንደገና ይሞክሩ';
 
   @override
+  String get notificationsRefreshError => 'ማደስ አልተቻለም — ያለዎትን እያሳየ ነው';
+
+  @override
   String get notificationsCheckingNew => 'አዲስ ማሳወቂያዎችን በመፈተሽ ላይ';
 
   @override

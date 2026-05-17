@@ -4069,6 +4069,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get notificationsRetry => 'Reintentar';
 
   @override
+  String get notificationsRefreshError =>
+      'No se pudo actualizar — se muestra lo disponible';
+
+  @override
   String get notificationsCheckingNew => 'buscando notificaciones nuevas';
 
   @override

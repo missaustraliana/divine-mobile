@@ -3980,6 +3980,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get notificationsRetry => 'إعادة المحاولة';
 
   @override
+  String get notificationsRefreshError => 'تعذّر التحديث — يتم عرض ما هو متاح';
+
+  @override
   String get notificationsCheckingNew => 'جارٍ التحقق من الإشعارات الجديدة';
 
   @override
