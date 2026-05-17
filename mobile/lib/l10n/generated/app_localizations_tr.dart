@@ -3677,7 +3677,25 @@ class AppLocalizationsTr extends AppLocalizations {
   String get shareMenuUpdate => 'Güncelle';
 
   @override
+  String get shareMenuChangeCover => 'Kapağı Değiştir';
+
+  @override
+  String get shareMenuCoverUploadingBackground =>
+      'Küçük resim arka planda yükleniyor';
+
+  @override
   String get shareMenuVideoUpdated => 'Video başarıyla güncellendi';
+
+  @override
+  String shareMenuVideoUpdatedWithInviteFailures(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count katılımcı daveti gönderilmedi.',
+      one: '1 katılımcı daveti gönderilmedi.',
+    );
+    return 'Video güncellendi, ancak $_temp0';
+  }
 
   @override
   String shareMenuFailedToUpdateVideo(String error) {

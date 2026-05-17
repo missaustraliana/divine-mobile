@@ -3741,7 +3741,25 @@ class AppLocalizationsDe extends AppLocalizations {
   String get shareMenuUpdate => 'Aktualisieren';
 
   @override
+  String get shareMenuChangeCover => 'Cover ändern';
+
+  @override
+  String get shareMenuCoverUploadingBackground =>
+      'Vorschaubild wird im Hintergrund hochgeladen';
+
+  @override
   String get shareMenuVideoUpdated => 'Video erfolgreich aktualisiert';
+
+  @override
+  String shareMenuVideoUpdatedWithInviteFailures(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Mitwirkenden-Einladungen wurden nicht gesendet.',
+      one: '1 Mitwirkenden-Einladung wurde nicht gesendet.',
+    );
+    return 'Video aktualisiert, aber $_temp0';
+  }
 
   @override
   String shareMenuFailedToUpdateVideo(String error) {

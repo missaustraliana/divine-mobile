@@ -79,6 +79,7 @@ import 'package:openvine/screens/user_list_people_screen.dart';
 import 'package:openvine/screens/video_detail_screen.dart';
 import 'package:openvine/screens/video_editor/video_editor_screen.dart';
 import 'package:openvine/screens/video_engagement/video_engagement_list_screen.dart';
+import 'package:openvine/screens/video_metadata/video_metadata_edit_screen.dart';
 import 'package:openvine/screens/video_metadata/video_metadata_screen.dart';
 import 'package:openvine/screens/video_recorder_screen.dart';
 import 'package:openvine/services/auth_service.dart';
@@ -1093,6 +1094,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: VideoMetadataScreen.path,
         name: VideoMetadataScreen.routeName,
         builder: (_, st) => const VideoMetadataScreen(),
+      ),
+      GoRoute(
+        path: VideoMetadataEditScreen.path,
+        name: VideoMetadataEditScreen.routeName,
+        builder: (ctx, st) {
+          // TODO(#4390): Replace this extra-only route with an ID-based resolver
+          // so /video-edit can be reconstructed from URL state.
+          final video = st.extra as VideoEvent?;
+          if (video == null) {
+            return RouteErrorScreen(message: ctx.l10n.routeInvalidVideoId);
+          }
+          return VideoMetadataEditScreen(video: video);
+        },
       ),
       GoRoute(
         path: CategoryGalleryScreen.path,

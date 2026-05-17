@@ -3695,7 +3695,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get shareMenuUpdate => 'Update';
 
   @override
+  String get shareMenuChangeCover => 'Change Cover';
+
+  @override
+  String get shareMenuCoverUploadingBackground =>
+      'Thumbnail is being uploaded in the background';
+
+  @override
   String get shareMenuVideoUpdated => 'Video updated successfully';
+
+  @override
+  String shareMenuVideoUpdatedWithInviteFailures(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count collaborator invites did not send.',
+      one: '1 collaborator invite did not send.',
+    );
+    return 'Video updated, but $_temp0';
+  }
 
   @override
   String shareMenuFailedToUpdateVideo(String error) {

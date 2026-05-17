@@ -1562,7 +1562,10 @@
     "shareMenuEditMetadataNote": "Notă: Doar metadatele pot fi editate. Conținutul video nu poate fi schimbat.",
     "shareMenuDeleting": "Se șterge...",
     "shareMenuUpdate": "Actualizează",
+    "shareMenuChangeCover": "Schimbă coperta",
+    "shareMenuCoverUploadingBackground": "Miniatura se încarcă în fundal",
     "shareMenuVideoUpdated": "Videoclip actualizat cu succes",
+    "shareMenuVideoUpdatedWithInviteFailures": "Videoclip actualizat, dar {count, plural, =1{1 invitație pentru colaborator nu a fost trimisă.} other{{count} invitații pentru colaboratori nu au fost trimise.}}",
     "shareMenuFailedToUpdateVideo": "N-am putut actualiza videoclipul: {error}",
     "@shareMenuFailedToUpdateVideo": {
         "placeholders": {

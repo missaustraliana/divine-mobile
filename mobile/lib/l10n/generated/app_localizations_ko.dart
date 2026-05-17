@@ -3525,7 +3525,24 @@ class AppLocalizationsKo extends AppLocalizations {
   String get shareMenuUpdate => '업데이트';
 
   @override
+  String get shareMenuChangeCover => '커버 변경';
+
+  @override
+  String get shareMenuCoverUploadingBackground => '썸네일을 백그라운드에서 업로드 중이에요';
+
+  @override
   String get shareMenuVideoUpdated => '영상을 업데이트했어요';
+
+  @override
+  String shareMenuVideoUpdatedWithInviteFailures(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '공동 작업자 초대 $count개가 전송되지 않았습니다.',
+      one: '공동 작업자 초대 1개가 전송되지 않았습니다.',
+    );
+    return '동영상이 업데이트되었지만 $_temp0';
+  }
 
   @override
   String shareMenuFailedToUpdateVideo(String error) {

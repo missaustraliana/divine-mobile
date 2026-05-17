@@ -3751,7 +3751,25 @@ class AppLocalizationsFr extends AppLocalizations {
   String get shareMenuUpdate => 'Mettre à jour';
 
   @override
+  String get shareMenuChangeCover => 'Changer la couverture';
+
+  @override
+  String get shareMenuCoverUploadingBackground =>
+      'La miniature est envoyée en arrière-plan';
+
+  @override
   String get shareMenuVideoUpdated => 'Vidéo mise à jour avec succès';
+
+  @override
+  String shareMenuVideoUpdatedWithInviteFailures(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count invitations de collaborateur n\'\'ont pas été envoyées.',
+      one: '1 invitation de collaborateur n\'\'a pas été envoyée.',
+    );
+    return 'Vidéo mise à jour, mais $_temp0';
+  }
 
   @override
   String shareMenuFailedToUpdateVideo(String error) {

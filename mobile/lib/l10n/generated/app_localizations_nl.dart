@@ -3709,7 +3709,25 @@ class AppLocalizationsNl extends AppLocalizations {
   String get shareMenuUpdate => 'Bijwerken';
 
   @override
+  String get shareMenuChangeCover => 'Cover wijzigen';
+
+  @override
+  String get shareMenuCoverUploadingBackground =>
+      'Miniatuur wordt op de achtergrond geüpload';
+
+  @override
   String get shareMenuVideoUpdated => 'Video succesvol bijgewerkt';
+
+  @override
+  String shareMenuVideoUpdatedWithInviteFailures(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count uitnodigingen voor medewerkers zijn niet verzonden.',
+      one: '1 uitnodiging voor medewerker is niet verzonden.',
+    );
+    return 'Video bijgewerkt, maar $_temp0';
+  }
 
   @override
   String shareMenuFailedToUpdateVideo(String error) {

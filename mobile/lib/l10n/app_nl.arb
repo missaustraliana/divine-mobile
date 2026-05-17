@@ -1562,7 +1562,10 @@
     "shareMenuEditMetadataNote": "Let op: alleen metadata kan worden bewerkt. Video-inhoud kan niet worden gewijzigd.",
     "shareMenuDeleting": "Verwijderen...",
     "shareMenuUpdate": "Bijwerken",
+    "shareMenuChangeCover": "Cover wijzigen",
+    "shareMenuCoverUploadingBackground": "Miniatuur wordt op de achtergrond geüpload",
     "shareMenuVideoUpdated": "Video succesvol bijgewerkt",
+    "shareMenuVideoUpdatedWithInviteFailures": "Video bijgewerkt, maar {count, plural, =1{1 uitnodiging voor medewerker is niet verzonden.} other{{count} uitnodigingen voor medewerkers zijn niet verzonden.}}",
     "shareMenuFailedToUpdateVideo": "Video bijwerken mislukt: {error}",
     "@shareMenuFailedToUpdateVideo": {
         "placeholders": {

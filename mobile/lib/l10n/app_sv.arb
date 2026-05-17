@@ -1562,7 +1562,10 @@
     "shareMenuEditMetadataNote": "Obs: Endast metadata kan redigeras. Själva videoinnehållet kan inte ändras.",
     "shareMenuDeleting": "Tar bort...",
     "shareMenuUpdate": "Uppdatera",
+    "shareMenuChangeCover": "Byt omslag",
+    "shareMenuCoverUploadingBackground": "Miniatyren laddas upp i bakgrunden",
     "shareMenuVideoUpdated": "Videon uppdaterades",
+    "shareMenuVideoUpdatedWithInviteFailures": "Videon uppdaterades, men {count, plural, =1{1 inbjudan till medarbetare skickades inte.} other{{count} inbjudningar till medarbetare skickades inte.}}",
     "shareMenuFailedToUpdateVideo": "Kunde inte uppdatera videon: {error}",
     "@shareMenuFailedToUpdateVideo": {
         "placeholders": {

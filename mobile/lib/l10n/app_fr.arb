@@ -1562,7 +1562,10 @@
     "shareMenuEditMetadataNote": "Note : seules les métadonnées peuvent être modifiées. Le contenu vidéo ne peut pas être changé.",
     "shareMenuDeleting": "Suppression...",
     "shareMenuUpdate": "Mettre à jour",
+    "shareMenuChangeCover": "Changer la couverture",
+    "shareMenuCoverUploadingBackground": "La miniature est envoyée en arrière-plan",
     "shareMenuVideoUpdated": "Vidéo mise à jour avec succès",
+    "shareMenuVideoUpdatedWithInviteFailures": "Vidéo mise à jour, mais {count, plural, =1{1 invitation de collaborateur n''a pas été envoyée.} other{{count} invitations de collaborateur n''ont pas été envoyées.}}",
     "shareMenuFailedToUpdateVideo": "Échec de la mise à jour de la vidéo : {error}",
     "@shareMenuFailedToUpdateVideo": {
         "placeholders": {

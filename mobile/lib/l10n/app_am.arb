@@ -1853,7 +1853,10 @@
     "shareMenuEditMetadataNote": "ማስታወሻ፡ ሜታዳታ ብቻ ነው ሊስተካከል የሚችለው። የቪዲዮ ይዘት ሊቀየር አይችልም።",
     "shareMenuDeleting": "በመሰረዝ ላይ...",
     "shareMenuUpdate": "አዘምን",
+    "shareMenuChangeCover": "ሽፋን ቀይር",
+    "shareMenuCoverUploadingBackground": "ድቅን ምስሉ ዳራ ላይ እየተሰቀለ ነው",
     "shareMenuVideoUpdated": "ቪዲዮው በተሳካ ሁኔታ ተዘምኗል",
+    "shareMenuVideoUpdatedWithInviteFailures": "ቪዲዮ ተዘምኗል፣ ግን {count, plural, =1{1 የተባባሪ ግብዣ አልተላከም።} other{{count} የተባባሪ ግብዣዎች አልተላኩም።}}",
     "shareMenuFailedToUpdateVideo": "ቪዲዮውን ማዘመን አልተሳካም፦ {error}",
     "@shareMenuFailedToUpdateVideo": {
         "placeholders": {

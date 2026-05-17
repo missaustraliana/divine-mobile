@@ -13,7 +13,9 @@ import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/providers/video_editor_provider.dart';
 import 'package:openvine/services/video_thumbnail_service.dart';
-import 'package:openvine/widgets/video_metadata/modes/capture/video_metadata_capture_preview_thumbnail.dart';
+import 'package:openvine/widgets/branded_loading_indicator.dart';
+import 'package:openvine/widgets/vine_cached_image.dart';
+import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:time_formatter/time_formatter.dart';
 import 'package:unified_logger/unified_logger.dart';
 
@@ -29,10 +31,20 @@ const double _stripThumbWidth = 48;
 /// that will be used as the post cover image.
 class VideoMetadataCoverScreen extends ConsumerStatefulWidget {
   /// Creates a cover selection screen for the given [clip].
-  const VideoMetadataCoverScreen({required this.clip, super.key});
+  ///
+  /// [thumbnailUrl] is shown as a placeholder while the video player
+  /// initialises. Pass the existing cover URL in the edit flow.
+  const VideoMetadataCoverScreen({
+    required this.clip,
+    this.thumbnailUrl,
+    super.key,
+  });
 
   /// The clip whose cover is being edited.
   final DivineVideoClip clip;
+
+  /// Optional thumbnail URL shown while the player is not yet ready.
+  final String? thumbnailUrl;
 
   @override
   ConsumerState<VideoMetadataCoverScreen> createState() =>
@@ -57,6 +69,7 @@ class _VideoMetadataCoverScreenState
   bool _isConfirming = false;
 
   bool _isSeeking = false;
+  Duration _videoDuration = Duration.zero;
   Duration? _pendingSeekPosition;
   int _seekEpoch = 0;
 
@@ -65,20 +78,28 @@ class _VideoMetadataCoverScreenState
     super.initState();
     _selectedPosition = widget.clip.thumbnailTimestamp;
     unawaited(_initializePlayer());
-    _startStripGeneration();
   }
 
   Future<void> _initializePlayer() async {
+    final localPath = await widget.clip.video.safeFilePath();
+
+    if (!mounted) return;
+
+    final metadata = await ProVideoEditor.instance.getMetadata(
+      EditorVideo.file(localPath),
+    );
+    if (!mounted) return;
+    _videoDuration = metadata.duration;
+    _startStripGeneration(localPath);
+
     final controller = DivineVideoPlayerController(useTexture: true);
     await controller.initialize();
     if (!mounted) {
       await controller.dispose();
       return;
     }
-    await controller.setSource(
-      VideoClip.file(await widget.clip.video.safeFilePath()),
-    );
-    await controller.seekTo(_selectedPosition);
+    await controller.setSource(VideoClip.file(localPath));
+    if (mounted) await controller.seekTo(_selectedPosition);
     if (mounted) {
       setState(() {
         _controller = controller;
@@ -90,10 +111,7 @@ class _VideoMetadataCoverScreenState
     }
   }
 
-  void _startStripGeneration() {
-    final videoPath = widget.clip.video.file?.path;
-    if (videoPath == null) return;
-
+  Future<void> _startStripGeneration(String videoPath) async {
     final view = WidgetsBinding.instance.platformDispatcher.views.first;
     final pixelRatio = view.devicePixelRatio;
     final screenWidth = view.physicalSize.width / pixelRatio;
@@ -102,7 +120,7 @@ class _VideoMetadataCoverScreenState
       1,
       100,
     );
-    final durationMs = widget.clip.duration.inMilliseconds;
+    final durationMs = _videoDuration.inMilliseconds;
 
     // One timestamp per slot, evenly distributed across the video duration.
     // These are passed as priorityTimestamps so the first batch already
@@ -123,14 +141,14 @@ class _VideoMetadataCoverScreenState
     // on top of the priority set. Setting it to slotCount / durationSec
     // (minimum 1) keeps the total as close to slotCount as possible,
     // avoiding large numbers of thumbnails that will never be displayed.
-    final durationSec = widget.clip.duration.inSeconds.clamp(1, 99999);
+    final durationSec = _videoDuration.inSeconds.clamp(1, 99999);
     final thumbsPerSecond = (slotCount / durationSec).ceil().clamp(1, 20);
 
     _stripSubscription =
         VideoThumbnailService.generateStripThumbnails(
           videoPath: videoPath,
           clipId: widget.clip.id,
-          duration: widget.clip.duration,
+          duration: _videoDuration,
           outputSize: Size(
             _stripThumbWidth * pixelRatio,
             _stripHeight * pixelRatio,
@@ -189,20 +207,28 @@ class _VideoMetadataCoverScreenState
 
     var didSucceed = false;
     try {
-      final videoPath = widget.clip.video.file?.path;
-      if (videoPath != null) {
+      final videoPath = await widget.clip.video.safeFilePath();
+      if (videoPath.isNotEmpty) {
         final result = await VideoThumbnailService.extractThumbnail(
           videoPath: videoPath,
           targetTimestamp: _selectedPosition,
         );
         if (result != null && mounted) {
-          ref
-              .read(videoEditorProvider.notifier)
-              .updateCover(
-                thumbnailPath: result.path,
-                thumbnailTimestamp: _selectedPosition,
-              );
-          didSucceed = true;
+          if (widget.clip.video.networkUrl != null) {
+            // Published video — return the local path to the caller.
+            // The Blossom upload and republish happen when the user presses Update.
+            Navigator.of(context).pop(result.path);
+            return;
+          } else {
+            // Draft video — update via videoEditorProvider.
+            ref
+                .read(videoEditorProvider.notifier)
+                .updateCover(
+                  thumbnailPath: result.path,
+                  thumbnailTimestamp: _selectedPosition,
+                );
+            didSucceed = true;
+          }
         }
       }
     } catch (e, stackTrace) {
@@ -276,16 +302,32 @@ class _VideoMetadataCoverScreenState
                 spacing: 8,
                 children: [
                   Expanded(
-                    child: RepaintBoundary(
-                      child: _VideoArea(
-                        clip: widget.clip,
-                        controller: _playerReady ? _controller : null,
-                      ),
+                    child: Stack(
+                      fit: .expand,
+                      children: [
+                        RepaintBoundary(
+                          child: _VideoArea(
+                            clip: widget.clip,
+                            thumbnailUrl: widget.thumbnailUrl,
+                            controller: _playerReady ? _controller : null,
+                          ),
+                        ),
+
+                        if (_controller == null || !_controller!.isInitialized)
+                          const Center(child: BrandedLoadingIndicator()),
+                      ],
                     ),
                   ),
                   _BottomArea(
                     clip: widget.clip,
+                    thumbnail: (
+                      file: widget.clip.thumbnailPath != null
+                          ? File(widget.clip.thumbnailPath!)
+                          : null,
+                      networkUrl: widget.thumbnailUrl,
+                    ),
                     stripThumbnails: _stripThumbnails,
+                    clipDuration: _videoDuration,
                     selectedPosition: _selectedPosition,
                     onSeek: _seekTo,
                   ),
@@ -305,10 +347,15 @@ class _VideoMetadataCoverScreenState
 }
 
 class _VideoArea extends StatefulWidget {
-  const _VideoArea({required this.clip, required this.controller});
+  const _VideoArea({
+    required this.clip,
+    required this.controller,
+    this.thumbnailUrl,
+  });
 
   final DivineVideoClip clip;
   final DivineVideoPlayerController? controller;
+  final String? thumbnailUrl;
 
   @override
   State<_VideoArea> createState() => _VideoAreaState();
@@ -349,6 +396,18 @@ class _VideoAreaState extends State<_VideoArea> {
     super.dispose();
   }
 
+  Widget _buildPlaceholder() {
+    final networkUrl = widget.thumbnailUrl;
+    if (networkUrl != null) {
+      return VineCachedImage(imageUrl: networkUrl);
+    }
+    final localPath = widget.clip.thumbnailPath;
+    if (localPath != null) {
+      return Image.file(File(localPath), fit: BoxFit.cover);
+    }
+    return const ColoredBox(color: VineTheme.onSurfaceMuted);
+  }
+
   @override
   Widget build(BuildContext context) {
     final videoAR = _videoAR > 0
@@ -366,9 +425,7 @@ class _VideoAreaState extends State<_VideoArea> {
           height: 1000,
           child: DivineVideoPlayer(
             controller: widget.controller,
-            placeholder: VideoMetadataCapturePreviewThumbnail(
-              clip: widget.clip,
-            ),
+            placeholder: _buildPlaceholder(),
           ),
         ),
       ),
@@ -458,13 +515,17 @@ class _TopBar extends StatelessWidget {
 class _BottomArea extends StatelessWidget {
   const _BottomArea({
     required this.clip,
+    required this.thumbnail,
     required this.stripThumbnails,
+    required this.clipDuration,
     required this.selectedPosition,
     required this.onSeek,
   });
 
   final DivineVideoClip clip;
+  final ({File? file, String? networkUrl})? thumbnail;
   final List<StripThumbnail> stripThumbnails;
+  final Duration clipDuration;
   final Duration selectedPosition;
   final ValueChanged<Duration> onSeek;
 
@@ -476,7 +537,9 @@ class _BottomArea extends StatelessWidget {
         borderRadius: .circular(4),
         child: _ThumbnailStrip(
           clip: clip,
+          thumbnail: thumbnail,
           stripThumbnails: stripThumbnails,
+          clipDuration: clipDuration,
           selectedPosition: selectedPosition,
           onSeek: onSeek,
         ),
@@ -488,13 +551,17 @@ class _BottomArea extends StatelessWidget {
 class _ThumbnailStrip extends StatefulWidget {
   const _ThumbnailStrip({
     required this.clip,
+    required this.thumbnail,
     required this.stripThumbnails,
+    required this.clipDuration,
     required this.selectedPosition,
     required this.onSeek,
   });
 
   final DivineVideoClip clip;
+  final ({File? file, String? networkUrl})? thumbnail;
   final List<StripThumbnail> stripThumbnails;
+  final Duration clipDuration;
   final Duration selectedPosition;
   final ValueChanged<Duration> onSeek;
 
@@ -524,19 +591,19 @@ class _ThumbnailStripState extends State<_ThumbnailStrip> {
 
   Duration _positionFromDx(double dx, double stripWidth) {
     final fraction = (dx / stripWidth).clamp(0.0, 1.0);
-    final ms = (fraction * widget.clip.duration.inMilliseconds).round();
+    final ms = (fraction * widget.clipDuration.inMilliseconds).round();
     return Duration(milliseconds: ms);
   }
 
   double _dxFromPosition(Duration position, double stripWidth) {
-    if (widget.clip.duration <= Duration.zero) return 0;
+    if (widget.clipDuration <= Duration.zero) return 0;
     final fraction =
-        position.inMilliseconds / widget.clip.duration.inMilliseconds;
+        position.inMilliseconds / widget.clipDuration.inMilliseconds;
     return (fraction * stripWidth).clamp(0.0, stripWidth);
   }
 
   Duration _clampPosition(Duration position) {
-    final maxMs = widget.clip.duration.inMilliseconds;
+    final maxMs = widget.clipDuration.inMilliseconds;
     return Duration(
       milliseconds: position.inMilliseconds.clamp(0, maxMs),
     );
@@ -551,7 +618,7 @@ class _ThumbnailStripState extends State<_ThumbnailStrip> {
   /// time window (mirrors the logic in the timeline strip tiles).
   String? _thumbnailForSlot(int slotIndex, int slotCount) {
     if (widget.stripThumbnails.isEmpty) return null;
-    final durationMs = widget.clip.duration.inMilliseconds;
+    final durationMs = widget.clipDuration.inMilliseconds;
     if (durationMs <= 0) return widget.stripThumbnails.first.path;
 
     final slotStartMs = durationMs * slotIndex / slotCount;
@@ -634,7 +701,7 @@ class _ThumbnailStripState extends State<_ThumbnailStrip> {
                             width: slotWidth,
                             height: _stripHeight,
                             child: _SlotImage(
-                              thumbnailPath: widget.clip.thumbnailPath,
+                              thumbnail: widget.thumbnail,
                               stripThumbnailPath: _cachedPaths[i],
                             ),
                           ),
@@ -674,22 +741,34 @@ class _ThumbnailStripState extends State<_ThumbnailStrip> {
 }
 
 class _SlotImage extends StatelessWidget {
-  const _SlotImage({required this.thumbnailPath, this.stripThumbnailPath});
+  const _SlotImage({required this.thumbnail, this.stripThumbnailPath});
 
-  final String? thumbnailPath;
+  final ({File? file, String? networkUrl})? thumbnail;
   final String? stripThumbnailPath;
 
   @override
   Widget build(BuildContext context) {
-    final fallback = thumbnailPath != null
-        ? Image.file(
-            File(thumbnailPath!),
-            fit: BoxFit.cover,
-            excludeFromSemantics: true,
-            errorBuilder: (_, _, _) =>
-                const ColoredBox(color: VineTheme.surfaceContainerHigh),
+    final fallback = thumbnail?.networkUrl != null
+        ? ExcludeSemantics(
+            child: VineCachedImage(
+              imageUrl: thumbnail!.networkUrl!,
+              placeholder: (_, _) => const ColoredBox(
+                color: VineTheme.surfaceContainerHigh,
+              ),
+              errorWidget: (_, _, _) => const ColoredBox(
+                color: VineTheme.surfaceContainerHigh,
+              ),
+            ),
           )
-        : const ColoredBox(color: VineTheme.surfaceContainerHigh);
+        : thumbnail?.file != null
+        ? Image.file(
+            thumbnail!.file!,
+            fit: .cover,
+            excludeFromSemantics: true,
+          )
+        : const ColoredBox(
+            color: VineTheme.surfaceContainerHigh,
+          );
 
     if (stripThumbnailPath == null) return fallback;
 

@@ -3807,7 +3807,25 @@ class AppLocalizationsRo extends AppLocalizations {
   String get shareMenuUpdate => 'Actualizează';
 
   @override
+  String get shareMenuChangeCover => 'Schimbă coperta';
+
+  @override
+  String get shareMenuCoverUploadingBackground =>
+      'Miniatura se încarcă în fundal';
+
+  @override
   String get shareMenuVideoUpdated => 'Videoclip actualizat cu succes';
+
+  @override
+  String shareMenuVideoUpdatedWithInviteFailures(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count invitații pentru colaboratori nu au fost trimise.',
+      one: '1 invitație pentru colaborator nu a fost trimisă.',
+    );
+    return 'Videoclip actualizat, dar $_temp0';
+  }
 
   @override
   String shareMenuFailedToUpdateVideo(String error) {

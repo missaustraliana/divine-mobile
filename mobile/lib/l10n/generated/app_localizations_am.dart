@@ -3616,7 +3616,24 @@ class AppLocalizationsAm extends AppLocalizations {
   String get shareMenuUpdate => 'አዘምን';
 
   @override
+  String get shareMenuChangeCover => 'ሽፋን ቀይር';
+
+  @override
+  String get shareMenuCoverUploadingBackground => 'ድቅን ምስሉ ዳራ ላይ እየተሰቀለ ነው';
+
+  @override
   String get shareMenuVideoUpdated => 'ቪዲዮው በተሳካ ሁኔታ ተዘምኗል';
+
+  @override
+  String shareMenuVideoUpdatedWithInviteFailures(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count የተባባሪ ግብዣዎች አልተላኩም።',
+      one: '1 የተባባሪ ግብዣ አልተላከም።',
+    );
+    return 'ቪዲዮ ተዘምኗል፣ ግን $_temp0';
+  }
 
   @override
   String shareMenuFailedToUpdateVideo(String error) {

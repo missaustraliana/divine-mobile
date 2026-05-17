@@ -3751,7 +3751,25 @@ class AppLocalizationsFil extends AppLocalizations {
   String get shareMenuUpdate => 'I-update';
 
   @override
+  String get shareMenuChangeCover => 'Palitan ang Cover';
+
+  @override
+  String get shareMenuCoverUploadingBackground =>
+      'Ina-upload ang thumbnail sa background';
+
+  @override
   String get shareMenuVideoUpdated => 'Matagumpay na na-update ang video';
+
+  @override
+  String shareMenuVideoUpdatedWithInviteFailures(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count mga imbitasyon sa collaborator ang hindi naipadala.',
+      one: '1 imbitasyon sa collaborator ang hindi naipadala.',
+    );
+    return 'Na-update ang video, pero $_temp0';
+  }
 
   @override
   String shareMenuFailedToUpdateVideo(String error) {

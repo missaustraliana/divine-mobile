@@ -3795,7 +3795,25 @@ class AppLocalizationsPl extends AppLocalizations {
   String get shareMenuUpdate => 'Zaktualizuj';
 
   @override
+  String get shareMenuChangeCover => 'Zmień okładkę';
+
+  @override
+  String get shareMenuCoverUploadingBackground =>
+      'Miniatura jest przesyłana w tle';
+
+  @override
   String get shareMenuVideoUpdated => 'Film zaktualizowany pomyślnie';
+
+  @override
+  String shareMenuVideoUpdatedWithInviteFailures(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count zaproszeń współpracowników nie zostało wysłanych.',
+      one: '1 zaproszenie współpracownika nie zostało wysłane.',
+    );
+    return 'Film zaktualizowany, ale $_temp0';
+  }
 
   @override
   String shareMenuFailedToUpdateVideo(String error) {

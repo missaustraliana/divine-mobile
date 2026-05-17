@@ -8,7 +8,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:models/models.dart' show AudioEvent, InspiredByInfo;
+import 'package:models/models.dart' show AudioEvent, InspiredByInfo, VideoEvent;
 import 'package:openvine/constants/video_editor_constants.dart';
 import 'package:openvine/extensions/complete_parameters_extensions.dart';
 import 'package:openvine/models/content_label.dart';
@@ -69,6 +69,16 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
   bool get isAutosavedDraft => state.isAutosavedDraft;
 
   int _renderGeneration = 0;
+
+  /// When true, [triggerAutosave] is a no-op.
+  ///
+  /// Set to `true` by [initFromPublishedVideo] and intentionally never reset.
+  /// The edit flow runs inside an isolated [ProviderScope], so this notifier
+  /// instance is never reused for the capture flow. Draft writes are not
+  /// meaningful in the edit flow — the user is updating a published event, not
+  /// accumulating a new draft — so suppressing autosave for the lifetime of the
+  /// notifier is the correct behaviour.
+  bool _suppressAutosave = false;
 
   // === LIFECYCLE ===
 
@@ -567,7 +577,46 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
   ///
   /// Can be called from other providers (e.g., ClipManager) to trigger
   /// autosave after changes. Uses debouncing to batch rapid changes.
+  /// Seed state from an already-published [VideoEvent] for editing.
+  ///
+  /// Autosave is suppressed (and remains suppressed for the lifetime of this
+  /// notifier) so that no draft is written while editing an already-published
+  /// event. Must be called after the notifier is created (e.g. from a child
+  /// widget's [State.initState]).
+  void initFromPublishedVideo(VideoEvent video) {
+    _suppressAutosave = true;
+
+    // Strip any appended NIP-27 inspired-by line before displaying
+    // the description in the edit form.
+    var content = video.content;
+    final npubPattern = RegExp(r'\n\nInspired by nostr:npub1[a-z0-9]+$');
+    content = content.replaceFirst(npubPattern, '');
+
+    final allowAudioReuse = video.nostrEventTags.any(
+      (tag) =>
+          tag.isNotEmpty &&
+          tag[0] == 'allow_audio_reuse' &&
+          tag.length > 1 &&
+          tag[1] == 'true',
+    );
+
+    state = VideoEditorProviderState(
+      allowAudioReuse: allowAudioReuse,
+      title: video.title ?? '',
+      description: content,
+      tags: video.hashtags.toSet(),
+      contentWarnings: video.contentWarningLabels
+          .map(ContentLabel.fromValue)
+          .whereType<ContentLabel>()
+          .toSet(),
+      collaboratorPubkeys: video.collaboratorPubkeys.toSet(),
+      inspiredByVideo: video.inspiredByVideo,
+      inspiredByNpub: video.inspiredByNpub,
+    );
+  }
+
   void triggerAutosave() {
+    if (_suppressAutosave) return;
     _autosaveTimer?.cancel();
     _autosaveTimer = Timer(_autosaveDebounce, () {
       if (!ref.mounted) return;

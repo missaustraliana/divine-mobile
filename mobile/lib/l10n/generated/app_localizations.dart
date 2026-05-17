@@ -6488,11 +6488,29 @@ abstract class AppLocalizations {
   /// **'Update'**
   String get shareMenuUpdate;
 
+  /// Label for the button that opens the cover-image editor on the video metadata edit screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Change Cover'**
+  String get shareMenuChangeCover;
+
+  /// Toast/snackbar message shown while the new cover thumbnail is being uploaded after saving video metadata.
+  ///
+  /// In en, this message translates to:
+  /// **'Thumbnail is being uploaded in the background'**
+  String get shareMenuCoverUploadingBackground;
+
   /// No description provided for @shareMenuVideoUpdated.
   ///
   /// In en, this message translates to:
   /// **'Video updated successfully'**
   String get shareMenuVideoUpdated;
+
+  /// Snackbar shown after republishing a video when one or more DM invites to newly added collaborators failed to send. {count} is the number of failed invites (always >= 1).
+  ///
+  /// In en, this message translates to:
+  /// **'Video updated, but {count, plural, =1{1 collaborator invite did not send.} other{{count} collaborator invites did not send.}}'**
+  String shareMenuVideoUpdatedWithInviteFailures(int count);
 
   /// No description provided for @shareMenuFailedToUpdateVideo.
   ///
