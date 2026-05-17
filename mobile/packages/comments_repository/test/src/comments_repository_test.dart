@@ -1005,6 +1005,103 @@ void main() {
         final filters = captured.first as List<Filter>;
         expect(filters.first.until, isNull);
       });
+
+      group('first-page authoritative zero clears stale positive cache', () {
+        // The dual-key cache from this PR makes a stale positive count
+        // outlive an addressable-event edit. If loadComments returns 0,
+        // both write sites must overwrite the cache so the post-edit
+        // fetch via the new event id sees the authoritative zero.
+        const oldEventId =
+            '1111111111111111111111111111111111111111111111111111111111111111';
+        const newEventId =
+            '2222222222222222222222222222222222222222222222222222222222222222';
+        const addressableId =
+            '34236:$testRootAuthorPubkey'
+            ':video-dtag';
+
+        test(
+          'REST authoritative zero overwrites a positive cache under the '
+          'addressable id',
+          () async {
+            repository =
+                CommentsRepository(
+                  nostrClient: mockNostrClient,
+                  funnelcakeApiClient: mockFunnelcakeApiClient,
+                )..updateCachedCommentCount(
+                  oldEventId,
+                  7,
+                  rootAddressableId: addressableId,
+                );
+
+            when(() => mockFunnelcakeApiClient.isAvailable).thenReturn(true);
+            when(
+              () => mockFunnelcakeApiClient.getVideoComments(
+                videoId: any(named: 'videoId'),
+                sort: any(named: 'sort'),
+                limit: any(named: 'limit'),
+                offset: any(named: 'offset'),
+              ),
+            ).thenAnswer(
+              (_) async => const VideoCommentsResponse(
+                comments: [],
+                total: 0,
+              ),
+            );
+
+            final loaded = await repository.loadComments(
+              rootEventId: newEventId,
+              rootEventKind: _testRootEventKind,
+              rootAddressableId: addressableId,
+            );
+            expect(loaded.totalCount, equals(0));
+
+            final post = await repository.getCommentsCount(
+              newEventId,
+              rootAddressableId: addressableId,
+            );
+            expect(
+              post,
+              equals(0),
+              reason: 'REST zero must wipe the stale 7 keyed by address',
+            );
+            verifyNever(() => mockNostrClient.countEvents(any()));
+          },
+        );
+
+        test(
+          'relay first-page empty result overwrites a positive cache under '
+          'the addressable id',
+          () async {
+            repository.updateCachedCommentCount(
+              oldEventId,
+              7,
+              rootAddressableId: addressableId,
+            );
+
+            when(
+              () => mockNostrClient.queryEvents(any()),
+            ).thenAnswer((_) async => <Event>[]);
+
+            final loaded = await repository.loadComments(
+              rootEventId: newEventId,
+              rootEventKind: _testRootEventKind,
+              rootAddressableId: addressableId,
+            );
+            expect(loaded.totalCount, equals(0));
+
+            final post = await repository.getCommentsCount(
+              newEventId,
+              rootAddressableId: addressableId,
+            );
+            expect(
+              post,
+              equals(0),
+              reason: 'relay zero must wipe the stale 7 keyed by address',
+            );
+            verifyNever(() => mockNostrClient.countEvents(any()));
+          },
+        );
+      });
     });
 
     group('postComment', () {
@@ -1478,6 +1575,16 @@ void main() {
     });
 
     group('getCommentsCount', () {
+      // 64-char hex constants hoisted to the group scope so the
+      // post-edit cache tests stay under the 80-char line limit while
+      // sharing a single old/new event id pair.
+      const oldEventId =
+          '1111111111111111111111111111111111111111111111111111111111111111';
+      const newEventId =
+          '2222222222222222222222222222222222222222222222222222222222222222';
+      const deletedCommentId =
+          'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+
       test('returns count from NIP-45', () async {
         when(() => mockNostrClient.countEvents(any())).thenAnswer(
           (_) async => const CountResult(count: 42),
@@ -1649,6 +1756,122 @@ void main() {
         expect(fresh, equals(99));
         verify(() => mockNostrClient.countEvents(any())).called(2);
       });
+
+      test(
+        // After a metadata edit the addressable video keeps the same
+        // address but gets a fresh event id. A purely event-id-keyed
+        // cache misses on the new id and forces a relay re-query whose
+        // NIP-45 COUNT on #A for kind 1111 can transiently return 0
+        // (mirror of #4432 for kind 7). The companion addressable-id
+        // cache lets the post-edit fetch reuse the count without
+        // hitting the relay.
+        'getCommentsCount returns cached value via addressable id when '
+        'event_id changes after edit',
+        () async {
+          const testAddressableId =
+              '34236:$testRootAuthorPubkey'
+              ':video-dtag';
+
+          when(() => mockNostrClient.countEvents(any())).thenAnswer(
+            (_) async => const CountResult(count: 7),
+          );
+
+          // Seed the cache with the pre-edit fetch.
+          final preEdit = await repository.getCommentsCount(
+            oldEventId,
+            rootAddressableId: testAddressableId,
+          );
+
+          // After the edit, a fresh bloc fetches with the new event id
+          // but the same addressable id.
+          final postEdit = await repository.getCommentsCount(
+            newEventId,
+            rootAddressableId: testAddressableId,
+          );
+
+          expect(preEdit, equals(7));
+          expect(
+            postEdit,
+            equals(7),
+            reason: 'companion cache by addressable id must survive the edit',
+          );
+          // The relay was queried only for the first call. The second
+          // call is fully cache-served.
+          verify(() => mockNostrClient.countEvents(any())).called(2);
+        },
+      );
+
+      test(
+        'clearCommentCountCache also clears the addressable-id companion '
+        'cache',
+        () async {
+          const testAddressableId =
+              '34236:$testRootAuthorPubkey'
+              ':video-dtag';
+
+          when(() => mockNostrClient.countEvents(any())).thenAnswer(
+            (_) async => const CountResult(count: 7),
+          );
+
+          await repository.getCommentsCount(
+            oldEventId,
+            rootAddressableId: testAddressableId,
+          );
+          repository.clearCommentCountCache();
+
+          when(() => mockNostrClient.countEvents(any())).thenAnswer(
+            (_) async => const CountResult(count: 11),
+          );
+
+          final fresh = await repository.getCommentsCount(
+            newEventId,
+            rootAddressableId: testAddressableId,
+          );
+          expect(
+            fresh,
+            equals(11),
+            reason: 'clear must drop the addressable companion entry too',
+          );
+        },
+      );
+
+      test(
+        'deleteComment decrement mirrors into the addressable companion '
+        'cache',
+        () async {
+          const testAddressableId =
+              '34236:$testRootAuthorPubkey'
+              ':video-dtag';
+
+          when(() => mockNostrClient.countEvents(any())).thenAnswer(
+            (_) async => const CountResult(count: 7),
+          );
+          when(() => mockNostrClient.publishEvent(any())).thenAnswer(
+            (inv) async =>
+                PublishSuccess(event: inv.positionalArguments.first as Event),
+          );
+
+          await repository.getCommentsCount(
+            oldEventId,
+            rootAddressableId: testAddressableId,
+          );
+
+          await repository.deleteComment(
+            commentId: deletedCommentId,
+            rootEventId: oldEventId,
+            rootAddressableId: testAddressableId,
+          );
+
+          // Post-edit fetch with the new event id should see the
+          // decremented count via the addressable companion cache.
+          final postEdit = await repository.getCommentsCount(
+            newEventId,
+            rootAddressableId: testAddressableId,
+          );
+
+          expect(postEdit, equals(6));
+        },
+      );
     });
 
     group('deleteComment', () {
