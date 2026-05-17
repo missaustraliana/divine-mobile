@@ -16,6 +16,7 @@ import 'package:openvine/widgets/video_editor/timeline_editor/controls/video_edi
 import 'package:openvine/widgets/video_editor/timeline_editor/strips/video_editor_timeline_clip_strip.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/strips/video_editor_timeline_overlay_strip.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/video_editor_timeline_body.dart';
+import 'package:openvine/widgets/video_editor/timeline_editor/video_editor_timeline_geometry.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/video_editor_timeline_header.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/video_editor_timeline_playhead.dart';
 
@@ -137,7 +138,6 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
           listener: (context, state) => _syncScrollToPosition(
             state.currentPosition,
             totalDuration,
-            totalWidth,
           ),
         ),
         BlocListener<VideoEditorMainBloc, VideoEditorMainState>(
@@ -689,11 +689,29 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
     );
     if (newPps == _pixelsPerSecond) return;
 
-    final ratio = newPps / _pixelsPerSecond;
+    // Anchor the zoom on the current playback position so inter-clip gaps
+    // (which stay 1 px regardless of pixelsPerSecond) don't drift the
+    // viewport off the playhead. Multiplying the raw scroll offset by the
+    // zoom ratio would over-shoot by `clipsPassed × clipGap × (ratio - 1)`
+    // px once the playhead is past clip 0.
+    final clips = context.read<ClipEditorBloc>().state.clips;
+    final anchorPosition = _scrollController.hasClients
+        ? timelineScrollOffsetToPosition(
+            clips,
+            _scrollController.offset,
+            _pixelsPerSecond,
+            _totalDuration,
+          )
+        : Duration.zero;
+
     setState(() => _pixelsPerSecond = newPps);
 
     if (_scrollController.hasClients) {
-      final newOffset = _scrollController.offset * ratio;
+      final newOffset = timelinePositionToScrollOffset(
+        clips,
+        anchorPosition,
+        newPps,
+      );
       _scrollController.jumpTo(
         newOffset.clamp(0, _scrollController.position.maxScrollExtent),
       );
@@ -705,24 +723,41 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
   /// Derives the time at the playhead from scroll offset.
   void _updatePlayheadTime() {
     if (!_scrollController.hasClients) return;
-    final seconds = _scrollController.offset / _pixelsPerSecond;
-    final ms = (seconds * 1000).round().clamp(0, _totalDuration.inMilliseconds);
-    _playheadPosition.value = Duration(milliseconds: ms);
+    _playheadPosition.value = _scrollOffsetToPosition(_scrollController.offset);
   }
+
+  /// Converts a composite playback [position] to the corresponding scroll
+  /// offset in the timeline content, accounting for the 1-px gap that
+  /// [VideoEditorTimelineClipStrip] inserts between adjacent clips.
+  ///
+  /// Without this correction, the scroll target is up to
+  /// `(clipIndex × clipGap)` pixels short of the trim-handle marker's
+  /// actual visual position — noticeable at high zoom levels.
+  double _positionToScrollOffset(Duration position) =>
+      timelinePositionToScrollOffset(
+        context.read<ClipEditorBloc>().state.clips,
+        position,
+        _pixelsPerSecond,
+      );
+
+  /// Inverse of [_positionToScrollOffset]: maps a [scrollOffset] back to a
+  /// composite playback position, clamped to the current total duration.
+  Duration _scrollOffsetToPosition(double scrollOffset) =>
+      timelineScrollOffsetToPosition(
+        context.read<ClipEditorBloc>().state.clips,
+        scrollOffset,
+        _pixelsPerSecond,
+        _totalDuration,
+      );
 
   void _syncScrollToPosition(
     Duration position,
     Duration totalDuration,
-    double totalWidth,
   ) {
     if (!_scrollController.hasClients) return;
     if (totalDuration == Duration.zero) return;
 
-    // Derive target directly from position × pixelsPerSecond so the
-    // scroll is always consistent with the ruler/clip layout, even if
-    // the player-reported duration differs from the sum of clip
-    // durations (which determines maxScrollExtent).
-    final target = position.inMilliseconds / 1000.0 * _pixelsPerSecond;
+    final target = _positionToScrollOffset(position);
     final maxExtent = _scrollController.position.maxScrollExtent;
     _scrollController.animateTo(
       target.clamp(0, maxExtent),
@@ -737,9 +772,7 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
     if (!force && now - _lastSeekMs < _seekThrottleMs) return;
     _lastSeekMs = now;
 
-    final seconds = _scrollController.offset / _pixelsPerSecond;
-    final ms = (seconds * 1000).round().clamp(0, _totalDuration.inMilliseconds);
-    final position = Duration(milliseconds: ms);
+    final position = _scrollOffsetToPosition(_scrollController.offset);
     context.read<VideoEditorMainBloc>().add(VideoEditorSeekRequested(position));
   }
 }
