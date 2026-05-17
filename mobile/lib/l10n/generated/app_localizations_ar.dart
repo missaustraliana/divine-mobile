@@ -5385,6 +5385,16 @@ class AppLocalizationsAr extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmStatusPending => 'جاري الإرسال';
+
+  @override
+  String get dmStatusFailed => 'فشل الإرسال';
+
+  @override
+  String get dmStatusDeliveredSelfFailed =>
+      'تم التسليم. لن تتم المزامنة مع أجهزتك الأخرى.';
+
+  @override
   String get inboxConversationActionsSheetLabel => 'Conversation actions';
 
   @override
