@@ -37,9 +37,15 @@ class MetadataStatsRow extends StatelessWidget {
             builder: (context, constraints) {
               return SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 16,
+                // Top padding shrinks to 4 px so the gap between the
+                // overview section's bottom (20 px padding) and the
+                // first stat row totals 24 px, matching Figma node
+                // 15675:27356's inter-group spacing.
+                padding: const EdgeInsets.only(
+                  left: 24,
+                  right: 24,
+                  top: 4,
+                  bottom: 16,
                 ),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
@@ -58,19 +64,19 @@ class MetadataStatsRow extends StatelessWidget {
                       const _VerticalDivider(),
                       _StatColumn(
                         count: state.likeCount,
-                        label: 'Likes',
+                        label: context.l10n.metadataLikesLabel,
                         isLoading: isLoading,
                       ),
                       const _VerticalDivider(),
                       _StatColumn(
                         count: state.commentCount,
-                        label: 'Comments',
+                        label: context.l10n.metadataCommentsLabel,
                         isLoading: isLoading,
                       ),
                       const _VerticalDivider(),
                       _StatColumn(
                         count: state.repostCount,
-                        label: 'Reposts',
+                        label: context.l10n.metadataRepostsLabel,
                         isLoading: isLoading,
                       ),
                     ],
@@ -108,15 +114,13 @@ class _StatColumn extends StatelessWidget {
       children: [
         Text(
           displayValue,
-          // Figma spec: 20px/28px Bricolage Grotesque 800
-          // titleLargeFont is 22/28 — adjust fontSize to match Figma.
-          style: VineTheme.titleLargeFont().copyWith(fontSize: 20),
+          style: VineTheme.statNumberFont(),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
         Text(
           label,
-          style: VineTheme.bodySmallFont(color: VineTheme.onSurfaceVariant),
+          style: VineTheme.labelSmallFont(color: VineTheme.onSurfaceVariant),
         ),
       ],
     );

@@ -6,6 +6,7 @@
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:models/models.dart';
+import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/widgets/video_feed_item/metadata/metadata_section.dart';
 
 /// Verification section showing which ProofMode / C2PA signals are present.
@@ -20,26 +21,29 @@ class MetadataVerificationSection extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!video.hasProofMode) return const SizedBox.shrink();
 
+    final l10n = context.l10n;
     return MetadataSection(
-      label: 'Verification',
+      label: l10n.metadataVerificationLabel,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         spacing: 4,
         children: [
           _VerificationCheckItem(
-            label: 'Device attestation',
+            label: l10n.metadataDeviceAttestation,
             passed: video.proofModeDeviceAttestation != null,
           ),
+          // Reuse the badge-explanation copy — same English value, no
+          // dedicated `metadata*` key exists for these two signals.
           _VerificationCheckItem(
-            label: 'PGP signature',
+            label: l10n.badgeExplanationPgpSignature,
             passed: video.proofModePgpFingerprint != null,
           ),
           _VerificationCheckItem(
-            label: 'C2PA Content Credentials',
+            label: l10n.badgeExplanationC2paCredentials,
             passed: video.proofModeC2paManifestId != null,
           ),
           _VerificationCheckItem(
-            label: 'Proof manifest',
+            label: l10n.metadataProofManifest,
             passed: video.proofModeManifest != null,
           ),
         ],
@@ -49,6 +53,10 @@ class MetadataVerificationSection extends StatelessWidget {
 }
 
 /// A single check item showing pass/fail status.
+///
+/// Label sits on the left and the status icon on the right with a
+/// `space-between` row layout, matching Figma node `15675:27860`.
+/// A green check marks a passed signal; a muted X marks a missing one.
 class _VerificationCheckItem extends StatelessWidget {
   const _VerificationCheckItem({required this.label, required this.passed});
 
@@ -58,22 +66,19 @@ class _VerificationCheckItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      spacing: 6,
       children: [
-        DivineIcon(
-          icon: passed ? DivineIconName.checkCircle : DivineIconName.prohibit,
-          size: 14,
-          color: passed ? VineTheme.success : VineTheme.onSurfaceMuted,
-        ),
         Expanded(
           child: Text(
             label,
-            style: VineTheme.bodySmallFont(
-              color: passed
-                  ? VineTheme.onSurfaceVariant
-                  : VineTheme.onSurfaceMuted,
+            style: VineTheme.bodyMediumFont(
+              color: passed ? VineTheme.whiteText : VineTheme.onSurfaceMuted,
             ),
           ),
+        ),
+        const SizedBox(width: 8),
+        DivineIcon(
+          icon: passed ? DivineIconName.check : DivineIconName.x,
+          color: passed ? VineTheme.success : VineTheme.onSurfaceMuted,
         ),
       ],
     );

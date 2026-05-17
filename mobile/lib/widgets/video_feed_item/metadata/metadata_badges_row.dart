@@ -1,21 +1,25 @@
 // ABOUTME: Non-interactive badge labels row for the metadata expanded sheet.
 // ABOUTME: Shows Human-Made (with tier) and Not Divine badges separated by
-// ABOUTME: muted dot separators. Placed between title and stats.
+// ABOUTME: muted dot separators. Rendered inline inside the header section
+// ABOUTME: between the title and the description, so this widget contributes
+// ABOUTME: only the wrap of labels — the surrounding container owns padding.
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:models/models.dart';
 import 'package:openvine/extensions/video_event_extensions.dart';
+import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/utils/proofmode_helpers.dart';
 
-/// Row of non-interactive badge labels below the title/description.
+/// Row of non-interactive badge labels rendered between the title and
+/// description in the metadata expanded sheet.
 ///
 /// Confirmed badges: "Human-Made" (with tier superscript) and "Not Divine".
 /// Future: "No AI", "Don't try this at home" (content warnings).
 ///
 /// Returns [SizedBox.shrink] when no badges apply.
 ///
-/// Matches Figma node `12345:71381`.
+/// Matches Figma node `15728:87954`.
 class MetadataBadgesRow extends StatelessWidget {
   const MetadataBadgesRow({required this.video, super.key});
 
@@ -30,12 +34,11 @@ class MetadataBadgesRow extends StatelessWidget {
     }
 
     if (video.shouldShowNotDivineBadge) {
-      badges.add(const _TextBadge(label: 'Not Divine'));
+      badges.add(_TextBadge(label: context.l10n.metadataBadgeNotDivine));
     }
 
     if (badges.isEmpty) return const SizedBox.shrink();
 
-    // Interleave dot separators between badges.
     final children = <Widget>[];
     for (var i = 0; i < badges.length; i++) {
       children.add(badges[i]);
@@ -44,39 +47,50 @@ class MetadataBadgesRow extends StatelessWidget {
       }
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: children,
-      ),
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: children,
     );
   }
 }
 
 /// "Human-Made" badge with "HM" superscript.
+///
+/// The "HM" superscript is a typographic flourish of the brand mark and
+/// intentionally stays untranslated; only the long-form label flows
+/// through localization.
 class _HumanMadeBadge extends StatelessWidget {
   const _HumanMadeBadge();
 
   @override
   Widget build(BuildContext context) {
-    return Text.rich(
-      TextSpan(
-        children: [
-          TextSpan(text: 'Human-Made', style: VineTheme.titleSmallFont()),
-          WidgetSpan(
-            alignment: PlaceholderAlignment.top,
-            child: Text(
-              'HM',
-              style: VineTheme.titleSmallFont().copyWith(
-                fontSize: VineTheme.titleSmallFont().fontSize! / 1.555,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      spacing: 4,
+      children: [
+        const DivineIcon(icon: DivineIconName.divineMark),
+        Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: context.l10n.metadataBadgeHumanMade,
+                style: VineTheme.titleSmallFont(),
               ),
-            ),
+              WidgetSpan(
+                alignment: PlaceholderAlignment.top,
+                child: Text(
+                  'HM',
+                  style: VineTheme.titleSmallFont().copyWith(
+                    fontSize: VineTheme.titleSmallFont().fontSize! / 1.555,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
