@@ -1,77 +1,129 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:openvine/widgets/video_recorder/shutter_long_press_mixin.dart';
+import 'package:openvine/widgets/video_recorder/shutter_gesture_detector.dart';
 
 void main() {
-  group(ShutterLongPressMixin, () {
-    late _HostState host;
-
-    Future<void> pumpHost(WidgetTester tester) async {
-      await tester.pumpWidget(_Host(onState: (state) => host = state));
+  group(ShutterGestureDetector, () {
+    Future<void> pumpHost(
+      WidgetTester tester, {
+      required VoidCallback onTapToggle,
+      required VoidCallback onLongPressStartRecording,
+      required VoidCallback onLongPressStopRecording,
+      bool isRecording = false,
+      bool isEnabled = true,
+      bool isLongPressSupported = true,
+    }) async {
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: ShutterGestureDetector(
+              isEnabled: isEnabled,
+              isRecording: isRecording,
+              isLongPressSupported: isLongPressSupported,
+              behavior: HitTestBehavior.opaque,
+              onTapToggle: onTapToggle,
+              onLongPressStartRecording: onLongPressStartRecording,
+              onLongPressStopRecording: onLongPressStopRecording,
+              child: const SizedBox(width: 80, height: 80),
+            ),
+          ),
+        ),
+      );
     }
 
-    testWidgets('handleShutterTap resets the flag and invokes toggle', (
+    testWidgets('tap invokes toggle and does not prime stop on release', (
       tester,
     ) async {
-      await pumpHost(tester);
-
       var toggled = 0;
-      host.handleShutterTap(() => toggled++);
+      var started = 0;
+      var stopped = 0;
+      await pumpHost(
+        tester,
+        onTapToggle: () => toggled++,
+        onLongPressStartRecording: () => started++,
+        onLongPressStopRecording: () => stopped++,
+      );
+
+      await tester.tap(find.byType(ShutterGestureDetector));
+      await tester.pumpAndSettle();
 
       expect(toggled, equals(1));
-      // After a tap, a following long-press release must not stop.
-      var stopped = 0;
-      host.handleShutterLongPressUp(() => stopped++);
+      expect(started, equals(0));
       expect(stopped, equals(0));
     });
 
     testWidgets(
-      'handleShutterLongPressStart is a no-op when already recording',
+      'incidental long-press while already recording does not start or stop',
       (tester) async {
-        await pumpHost(tester);
-
         var started = 0;
-        host.handleShutterLongPressStart(
+        var stopped = 0;
+        await pumpHost(
+          tester,
           isRecording: true,
-          start: () => started++,
+          onTapToggle: () {},
+          onLongPressStartRecording: () => started++,
+          onLongPressStopRecording: () => stopped++,
         );
 
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.byType(ShutterGestureDetector)),
+        );
+        await tester.pump(const Duration(seconds: 1));
+        await gesture.up();
+        await tester.pumpAndSettle();
+
         expect(started, equals(0));
-        // Flag must stay false → release is also a no-op.
-        var stopped = 0;
-        host.handleShutterLongPressUp(() => stopped++);
         expect(stopped, equals(0));
       },
     );
 
-    testWidgets(
-      'handleShutterLongPressStart sets the flag and invokes start when idle',
-      (tester) async {
-        await pumpHost(tester);
-
-        var started = 0;
-        host.handleShutterLongPressStart(
-          isRecording: false,
-          start: () => started++,
-        );
-
-        expect(started, equals(1));
-        // Flag is now true → release stops exactly once.
-        var stopped = 0;
-        host.handleShutterLongPressUp(() => stopped++);
-        expect(stopped, equals(1));
-      },
-    );
-
-    testWidgets('handleShutterLongPressUp resets the flag after stopping', (
+    testWidgets('long-press from idle starts recording and release stops it', (
       tester,
     ) async {
-      await pumpHost(tester);
-
-      host.handleShutterLongPressStart(isRecording: false, start: () {});
+      var started = 0;
       var stopped = 0;
-      host.handleShutterLongPressUp(() => stopped++);
-      host.handleShutterLongPressUp(() => stopped++);
+      await pumpHost(
+        tester,
+        onTapToggle: () {},
+        onLongPressStartRecording: () => started++,
+        onLongPressStopRecording: () => stopped++,
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byType(ShutterGestureDetector)),
+      );
+      await tester.pump(const Duration(seconds: 1));
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(started, equals(1));
+      expect(stopped, equals(1));
+    });
+
+    testWidgets('release stops only once after a long-press start', (
+      tester,
+    ) async {
+      var stopped = 0;
+      await pumpHost(
+        tester,
+        onTapToggle: () {},
+        onLongPressStartRecording: () {},
+        onLongPressStopRecording: () => stopped++,
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byType(ShutterGestureDetector)),
+      );
+      await tester.pump(const Duration(seconds: 1));
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      final secondGesture = await tester.startGesture(
+        tester.getCenter(find.byType(ShutterGestureDetector)),
+      );
+      await secondGesture.up();
+      await tester.pumpAndSettle();
 
       expect(
         stopped,
@@ -83,38 +135,51 @@ void main() {
     testWidgets(
       'tap after a long-press take resets the flag for the next cycle',
       (tester) async {
-        await pumpHost(tester);
-
-        // Long-press cycle: start + release sets and clears the flag.
-        host.handleShutterLongPressStart(isRecording: false, start: () {});
-        host.handleShutterLongPressUp(() {});
-
-        // New tap-started take → incidental long-press release must no-op.
-        host.handleShutterTap(() {});
         var stopped = 0;
-        host.handleShutterLongPressUp(() => stopped++);
-        expect(stopped, equals(0));
+        var isRecording = false;
+
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: StatefulBuilder(
+              builder: (context, setState) {
+                return Center(
+                  child: ShutterGestureDetector(
+                    isEnabled: true,
+                    isRecording: isRecording,
+                    behavior: HitTestBehavior.opaque,
+                    onTapToggle: () {
+                      setState(() => isRecording = true);
+                    },
+                    onLongPressStartRecording: () {},
+                    onLongPressStopRecording: () => stopped++,
+                    child: const SizedBox(width: 80, height: 80),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.byType(ShutterGestureDetector)),
+        );
+        await tester.pump(const Duration(seconds: 1));
+        await gesture.up();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byType(ShutterGestureDetector));
+        await tester.pumpAndSettle();
+
+        final incidentalGesture = await tester.startGesture(
+          tester.getCenter(find.byType(ShutterGestureDetector)),
+        );
+        await tester.pump(const Duration(seconds: 1));
+        await incidentalGesture.up();
+        await tester.pumpAndSettle();
+
+        expect(stopped, equals(1));
       },
     );
   });
-}
-
-class _Host extends StatefulWidget {
-  const _Host({required this.onState});
-
-  final void Function(_HostState state) onState;
-
-  @override
-  State<_Host> createState() => _HostState();
-}
-
-class _HostState extends State<_Host> with ShutterLongPressMixin<_Host> {
-  @override
-  void initState() {
-    super.initState();
-    widget.onState(this);
-  }
-
-  @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
 }
