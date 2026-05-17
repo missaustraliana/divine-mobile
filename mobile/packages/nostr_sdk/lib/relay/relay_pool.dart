@@ -17,6 +17,7 @@ import 'client_connected.dart';
 import 'event_filter.dart';
 import 'publish_outcome.dart';
 import 'relay.dart';
+import 'relay_base.dart';
 import 'relay_type.dart';
 
 class RelayPool {
@@ -104,6 +105,28 @@ class RelayPool {
 
   List<MapEntry<String, Relay>> _cacheRelayEntriesSnapshot() =>
       _cacheRelays.entries.toList(growable: false);
+
+  int? _eventKindFromMessage(List<dynamic> message) {
+    if (message.length < 2 || message[0] != 'EVENT' || message[1] is! Map) {
+      return null;
+    }
+    final kind = (message[1] as Map)['kind'];
+    if (kind is int) return kind;
+    if (kind is num) return kind.toInt();
+    return null;
+  }
+
+  String? _eventIdFromMessage(List<dynamic> message) {
+    if (message.length < 2 || message[0] != 'EVENT' || message[1] is! Map) {
+      return null;
+    }
+    final id = (message[1] as Map)['id'];
+    return id is String ? id : null;
+  }
+
+  void _logPublishDiagnostic(String diagnosticTag, String message) {
+    log('$diagnosticTag relay diagnostic: $message');
+  }
 
   Future<bool> add(
     Relay relay, {
@@ -394,8 +417,24 @@ class RelayPool {
         if (publishTracker != null) {
           if (success) {
             publishTracker.onAccepted(relay.url);
+            final diagnosticTag = publishTracker.diagnosticTag;
+            if (diagnosticTag != null) {
+              _logPublishDiagnostic(
+                diagnosticTag,
+                'OK accepted kind=${publishTracker.eventKind} '
+                'eventId=$eventId relay=${relay.url}',
+              );
+            }
           } else {
             publishTracker.onRejected(relay.url, message);
+            final diagnosticTag = publishTracker.diagnosticTag;
+            if (diagnosticTag != null) {
+              _logPublishDiagnostic(
+                diagnosticTag,
+                'OK rejected kind=${publishTracker.eventKind} '
+                'eventId=$eventId relay=${relay.url} reason=$message',
+              );
+            }
           }
         }
 
@@ -894,12 +933,56 @@ class RelayPool {
     List<dynamic> message, {
     List<String>? tempRelays,
     List<String>? targetRelays,
+    DateTime? deadline,
+    String? diagnosticTag,
+    void Function(String relayUrl)? onSent,
   }) async {
     final sentTo = <String>[];
+    final attemptedRelayUrls = <String>{};
+    final eventKind = _eventKindFromMessage(message);
+    final eventId = _eventIdFromMessage(message);
+
+    void logDiagnostic(String message) {
+      if (diagnosticTag == null) return;
+      _logPublishDiagnostic(diagnosticTag, message);
+    }
+
+    Duration sendTimeout() {
+      final remaining = deadline?.difference(DateTime.now());
+      if (remaining == null || remaining > perRelaySendTimeout) {
+        return perRelaySendTimeout;
+      }
+      if (remaining.isNegative || remaining == Duration.zero) {
+        return Duration.zero;
+      }
+      return remaining;
+    }
+
+    bool deadlineExpired() {
+      return deadline != null && !DateTime.now().isBefore(deadline);
+    }
+
+    void removeExpiredTempRelay(Relay relay) {
+      if (!deadlineExpired()) return;
+      unawaited(relay.disconnect());
+      removeTempRelay(relay.url);
+    }
+
+    logDiagnostic(
+      'send start kind=$eventKind eventId=$eventId '
+      'targetRelays=$targetRelays tempRelays=$tempRelays',
+    );
 
     for (final relay in _relaysSnapshot()) {
+      final timeout = sendTimeout();
+      if (timeout == Duration.zero) break;
+
       if (message[0] == "EVENT") {
         if (!relay.relayStatus.writeAccess) {
+          logDiagnostic(
+            'send skipped kind=$eventKind eventId=$eventId relay=${relay.url} '
+            'reason=writeAccessDisabled',
+          );
           continue;
         }
       }
@@ -928,11 +1011,18 @@ class RelayPool {
             // the AUTH handshake requires a real send. Per-relay timeout
             // still applies so a stuck auth-trigger send cannot block the
             // rest of the fan-out.
+            var timedOut = false;
             var result = await relay
-                .send(message, forceSend: true)
+                .send(
+                  message,
+                  forceSend: true,
+                  queueIfFailed: deadline == null,
+                  deadline: deadline,
+                )
                 .timeout(
-                  perRelaySendTimeout,
+                  timeout,
                   onTimeout: () {
+                    timedOut = true;
                     log(
                       '⏱️ Per-relay auth-trigger send timeout for ${relay.url} '
                       '(connected=${relay.relayStatus.connected}, '
@@ -941,14 +1031,36 @@ class RelayPool {
                     return false;
                   },
                 );
+            if (result || timedOut || deadlineExpired()) {
+              attemptedRelayUrls.add(relay.url);
+            }
             if (result) {
               sentTo.add(relay.url);
+              onSent?.call(relay.url);
             }
+            logDiagnostic(
+              'auth-trigger send kind=$eventKind eventId=$eventId '
+              'relay=${relay.url} sent=$result',
+            );
             // Don't queue this message since we're sending it
           } else {
-            log('🔐 Queueing message for authentication: ${message[0]}');
-            relay.pendingAuthedMessages.add(message);
-            sentTo.add(relay.url);
+            // Deadline-bound sends intentionally do not queue for AUTH: a queued
+            // frame could publish after the caller already returned failure.
+            if (deadline == null) {
+              log('🔐 Queueing message for authentication: ${message[0]}');
+              relay.pendingAuthedMessages.add(message);
+              sentTo.add(relay.url);
+              attemptedRelayUrls.add(relay.url);
+              onSent?.call(relay.url);
+              logDiagnostic(
+                'queued for auth kind=$eventKind eventId=$eventId relay=${relay.url}',
+              );
+            } else {
+              logDiagnostic(
+                'auth queue skipped kind=$eventKind eventId=$eventId relay=${relay.url} '
+                'reason=deadlineBoundSend',
+              );
+            }
           }
           log(
             '🔐 Pending authed messages count: ${relay.pendingAuthedMessages.length}',
@@ -961,11 +1073,18 @@ class RelayPool {
           // while one dead relay tries exponential backoff (can hang the
           // publish for many minutes). Same convention as relayDoQuery /
           // relayDoSubscribe above.
+          var timedOut = false;
           var result = await relay
-              .send(message, skipReconnect: true)
+              .send(
+                message,
+                skipReconnect: true,
+                queueIfFailed: deadline == null,
+                deadline: deadline,
+              )
               .timeout(
-                perRelaySendTimeout,
+                timeout,
                 onTimeout: () {
+                  timedOut = true;
                   log(
                     '⏱️ Per-relay send timeout for ${relay.url} '
                     '(connected=${relay.relayStatus.connected}, '
@@ -974,11 +1093,21 @@ class RelayPool {
                   return false;
                 },
               );
+          if (result || timedOut || deadlineExpired()) {
+            attemptedRelayUrls.add(relay.url);
+          }
           if (result) {
             sentTo.add(relay.url);
+            onSent?.call(relay.url);
           }
+          logDiagnostic(
+            'send kind=$eventKind eventId=$eventId relay=${relay.url} sent=$result',
+          );
         }
       } catch (err) {
+        logDiagnostic(
+          'send error kind=$eventKind eventId=$eventId relay=${relay.url} error=$err',
+        );
         log(err.toString());
         relay.relayStatus.onError();
       }
@@ -986,27 +1115,51 @@ class RelayPool {
 
     if (tempRelays != null) {
       for (var tempRelayAddr in tempRelays) {
+        if (attemptedRelayUrls.contains(tempRelayAddr)) {
+          continue;
+        }
+        attemptedRelayUrls.add(tempRelayAddr);
+        final timeout = sendTimeout();
+        if (timeout == Duration.zero) break;
+
         var tempRelay = checkAndGenTempRelay(tempRelayAddr);
         // Same skipReconnect rationale as the main loop above: a fresh
         // tempRelay whose initial connection is still in-flight must not
         // block the publish.
         var result = await tempRelay
-            .send(message, skipReconnect: true)
+            .send(
+              message,
+              skipReconnect: true,
+              queueIfFailed: false,
+              deadline: deadline,
+            )
             .timeout(
-              perRelaySendTimeout,
+              timeout,
               onTimeout: () {
                 log(
                   '⏱️ Per-relay send timeout for tempRelay ${tempRelay.url} '
                   '(connected=${tempRelay.relayStatus.connected})',
                 );
+                removeExpiredTempRelay(tempRelay);
                 return false;
               },
             );
+        if (!result) {
+          removeExpiredTempRelay(tempRelay);
+        }
         if (result) {
           sentTo.add(tempRelay.url);
+          onSent?.call(tempRelay.url);
         }
+        logDiagnostic(
+          'temp send kind=$eventKind eventId=$eventId relay=${tempRelay.url} sent=$result',
+        );
       }
     }
+
+    logDiagnostic(
+      'send complete kind=$eventKind eventId=$eventId sentTo=$sentTo',
+    );
 
     return sentTo;
   }
@@ -1026,9 +1179,11 @@ class RelayPool {
   Future<PublishOutcome> sendEventAwaitOk(
     List<dynamic> message, {
     required String eventId,
+    int? eventKind,
     List<String>? tempRelays,
     List<String>? targetRelays,
     Duration timeout = const Duration(seconds: 15),
+    String? diagnosticTag,
   }) async {
     // Register tracker BEFORE sending so a fast relay can't respond with OK
     // before we start listening.
@@ -1038,6 +1193,8 @@ class RelayPool {
     }
     final tracker = PublishTracker(
       eventId: eventId,
+      eventKind: eventKind ?? _eventKindFromMessage(message),
+      diagnosticTag: diagnosticTag,
       expectedRelays: <String>{},
       timeout: timeout,
     );
@@ -1047,15 +1204,29 @@ class RelayPool {
       message,
       tempRelays: tempRelays,
       targetRelays: targetRelays,
+      deadline: DateTime.now().add(timeout),
+      diagnosticTag: diagnosticTag,
+      onSent: (relayUrl) => tracker.expectedRelays.add(relayUrl),
     );
-    tracker.expectedRelays.addAll(sentTo);
 
     if (sentTo.isEmpty) {
       tracker.cancel();
     }
 
     unawaited(
-      tracker.future.whenComplete(() => _pendingPublishes.remove(eventId)),
+      tracker.future
+          .then((outcome) {
+            final diagnosticTag = tracker.diagnosticTag;
+            if (diagnosticTag != null) {
+              _logPublishDiagnostic(
+                diagnosticTag,
+                'OK outcome kind=${tracker.eventKind} eventId=$eventId '
+                'acceptedBy=${outcome.acceptedBy} rejectedBy=${outcome.rejectedBy} '
+                'noResponseFrom=${outcome.noResponseFrom}',
+              );
+            }
+          })
+          .whenComplete(() => _pendingPublishes.remove(eventId)),
     );
     return tracker.future;
   }
@@ -1068,6 +1239,12 @@ class RelayPool {
 
   Relay checkAndGenTempRelay(String addr) {
     var tempRelay = _tempRelays[addr];
+    if (tempRelay != null && _shouldReplaceTempRelay(tempRelay)) {
+      _tempRelays.remove(addr);
+      unawaited(tempRelay.disconnect());
+      tempRelay.dispose();
+      tempRelay = null;
+    }
     if (tempRelay == null) {
       tempRelay = tempRelayGener(addr);
       tempRelay.onMessage = _onEvent;
@@ -1076,6 +1253,15 @@ class RelayPool {
     }
 
     return tempRelay;
+  }
+
+  bool _shouldReplaceTempRelay(Relay relay) {
+    if (relay.relayStatus.connected == ClientConnected.disconnect) {
+      return true;
+    }
+    return relay.relayStatus.connected == ClientConnected.connected &&
+        relay is RelayBase &&
+        !relay.checkHealth();
   }
 
   List<String> getExtralReadableRelays(

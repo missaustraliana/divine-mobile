@@ -359,6 +359,7 @@ class NostrClient {
     Event event, {
     List<String>? targetRelays,
     Duration timeout = const Duration(seconds: 15),
+    String? diagnosticTag,
   }) async {
     final useOptimisticCache = _canOptimisticallyCache(event.kind);
 
@@ -373,7 +374,9 @@ class NostrClient {
       return outcome;
     }
 
-    if (_relayManager.connectedRelays.isEmpty) {
+    final hasExplicitTargets = targetRelays != null && targetRelays.isNotEmpty;
+
+    if (_relayManager.connectedRelays.isEmpty && !hasExplicitTargets) {
       await retryDisconnectedRelays();
       if (_relayManager.connectedRelays.isEmpty) {
         return rollbackOnFailure(
@@ -388,12 +391,20 @@ class NostrClient {
     }
 
     final outcome =
-        await _nostr.sendEventAwaitOk(
-          event,
-          targetRelays: targetRelays,
-          tempRelays: targetRelays,
-          timeout: timeout,
-        ) ??
+        await (diagnosticTag == null
+            ? _nostr.sendEventAwaitOk(
+                event,
+                targetRelays: targetRelays,
+                tempRelays: targetRelays,
+                timeout: timeout,
+              )
+            : _nostr.sendEventAwaitOk(
+                event,
+                targetRelays: targetRelays,
+                tempRelays: targetRelays,
+                timeout: timeout,
+                diagnosticTag: diagnosticTag,
+              )) ??
         PublishOutcome(
           eventId: event.id,
           acceptedBy: const [],

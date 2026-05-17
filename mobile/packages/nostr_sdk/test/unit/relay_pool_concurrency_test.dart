@@ -1,6 +1,8 @@
 // ABOUTME: Regression tests for RelayPool concurrent modification hazards.
 // ABOUTME: Ensures autoSubscribe tolerates subscription changes during resend.
 
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nostr_sdk/nostr_sdk.dart';
 import 'package:nostr_sdk/relay/client_connected.dart';
@@ -30,6 +32,7 @@ class _MutatingRelay extends Relay {
     bool? forceSend,
     bool queueIfFailed = true,
     bool skipReconnect = false,
+    DateTime? deadline,
   }) async {
     sentMessages.add(message);
 
@@ -65,6 +68,7 @@ class _SucceedingRelay extends Relay {
     bool? forceSend,
     bool queueIfFailed = true,
     bool skipReconnect = false,
+    DateTime? deadline,
   }) async {
     sentMessages.add(message);
     // Simulate EOSE after a short delay so saveQuery runs first
@@ -105,6 +109,7 @@ class _CountRelay extends Relay {
     bool? forceSend,
     bool queueIfFailed = true,
     bool skipReconnect = false,
+    DateTime? deadline,
   }) async {
     sentMessages.add(message);
     if (message.isNotEmpty && message.first == 'COUNT') {
@@ -128,6 +133,8 @@ class _CountRelay extends Relay {
 class _FailingSendRelay extends Relay {
   _FailingSendRelay(String url) : super(url, RelayStatus(url));
 
+  final List<List<dynamic>> sentMessages = [];
+
   @override
   Future<bool> doConnect() async {
     relayStatus.connected = ClientConnected.connected;
@@ -145,7 +152,9 @@ class _FailingSendRelay extends Relay {
     bool? forceSend,
     bool queueIfFailed = true,
     bool skipReconnect = false,
+    DateTime? deadline,
   }) async {
+    sentMessages.add(message);
     return false; // Always fail
   }
 }
@@ -184,6 +193,7 @@ class _StallingReconnectRelay extends Relay {
     bool? forceSend,
     bool queueIfFailed = true,
     bool skipReconnect = false,
+    DateTime? deadline,
   }) async {
     sentMessages.add(message);
     if (skipReconnect) {
@@ -226,12 +236,96 @@ class _AlwaysHangingRelay extends Relay {
     bool? forceSend,
     bool queueIfFailed = true,
     bool skipReconnect = false,
+    DateTime? deadline,
   }) async {
     sentMessages.add(message);
     // Hang far longer than any reasonable per-relay timeout. The pool's
     // `.timeout(...)` wrap must surface this as `false` and move on.
     await Future<void>.delayed(const Duration(minutes: 1));
     return true;
+  }
+}
+
+class _DeferredSendRelay extends Relay {
+  _DeferredSendRelay(String url) : super(url, RelayStatus(url));
+
+  final releaseSend = Completer<void>();
+  final List<List<dynamic>> sentMessages = [];
+
+  @override
+  Future<bool> doConnect() async {
+    relayStatus.connected = ClientConnected.connected;
+    return true;
+  }
+
+  @override
+  Future<void> disconnect() async {
+    relayStatus.connected = ClientConnected.disconnect;
+  }
+
+  @override
+  Future<bool> send(
+    List<dynamic> message, {
+    bool? forceSend,
+    bool queueIfFailed = true,
+    bool skipReconnect = false,
+    DateTime? deadline,
+  }) async {
+    await releaseSend.future;
+
+    if (deadline != null && !DateTime.now().isBefore(deadline)) {
+      if (queueIfFailed) {
+        pendingMessages.add(message);
+      }
+      return false;
+    }
+
+    sentMessages.add(message);
+    return true;
+  }
+}
+
+class _TrackingTempRelay extends _SucceedingRelay {
+  _TrackingTempRelay(super.url, {required this.onCreated});
+
+  final void Function(String url) onCreated;
+
+  @override
+  Future<bool> doConnect() async {
+    onCreated(url);
+    return super.doConnect();
+  }
+}
+
+class _ConnectionAwareTempRelay extends Relay {
+  _ConnectionAwareTempRelay(String url, {required this.onCreated})
+    : super(url, RelayStatus(url));
+
+  final void Function(_ConnectionAwareTempRelay relay) onCreated;
+  final List<List<dynamic>> sentMessages = [];
+
+  @override
+  Future<bool> doConnect() async {
+    relayStatus.connected = ClientConnected.connected;
+    onCreated(this);
+    return true;
+  }
+
+  @override
+  Future<void> disconnect() async {
+    relayStatus.connected = ClientConnected.disconnect;
+  }
+
+  @override
+  Future<bool> send(
+    List<dynamic> message, {
+    bool? forceSend,
+    bool queueIfFailed = true,
+    bool skipReconnect = false,
+    DateTime? deadline,
+  }) async {
+    sentMessages.add(message);
+    return relayStatus.connected == ClientConnected.connected;
   }
 }
 
@@ -430,6 +524,168 @@ void main() {
       // to sentTo because its future timed out.
       expect(hanging.sentMessages, isNotEmpty);
     });
+
+    test('sendEventAwaitOk bounds target sends with the requested timeout and '
+        'does not retry the same URL as a temp relay', () async {
+      final relayUrl = 'wss://relay.divine.video';
+      final hanging = _AlwaysHangingRelay(relayUrl);
+      final tempRelaysCreated = <String>[];
+      final tempNostr = Nostr(
+        signer,
+        [],
+        (url) => _TrackingTempRelay(url, onCreated: tempRelaysCreated.add),
+      );
+      await tempNostr.refreshPublicKey();
+      await tempNostr.relayPool.add(hanging);
+
+      final stopwatch = Stopwatch()..start();
+      final outcome = await tempNostr.relayPool.sendEventAwaitOk(
+        [
+          'EVENT',
+          {'id': 'deadline-event-id', 'kind': 1},
+        ],
+        eventId: 'deadline-event-id',
+        eventKind: 1,
+        targetRelays: [relayUrl],
+        tempRelays: [relayUrl],
+        timeout: const Duration(milliseconds: 50),
+      );
+      stopwatch.stop();
+
+      expect(outcome.failed, isTrue);
+      expect(
+        stopwatch.elapsedMilliseconds,
+        lessThan(1000),
+        reason: 'requested timeout must bound _sendCollect plus OK waiting',
+      );
+      expect(hanging.sentMessages, hasLength(1));
+      expect(
+        tempRelaysCreated,
+        isEmpty,
+        reason: 'same target URL must not be attempted again as a temp relay',
+      );
+    });
+
+    test('sendEventAwaitOk falls back to a same-URL temp relay when the normal '
+        'target send fails immediately', () async {
+      final relayUrl = 'wss://relay.divine.video';
+      final failing = _FailingSendRelay(relayUrl);
+      final tempRelaysCreated = <String>[];
+      final tempNostr = Nostr(
+        signer,
+        [],
+        (url) => _TrackingTempRelay(url, onCreated: tempRelaysCreated.add),
+      );
+      await tempNostr.refreshPublicKey();
+      await tempNostr.relayPool.add(failing);
+
+      final stopwatch = Stopwatch()..start();
+      final outcome = await tempNostr.relayPool.sendEventAwaitOk(
+        [
+          'EVENT',
+          {'id': 'fallback-event-id', 'kind': 1},
+        ],
+        eventId: 'fallback-event-id',
+        eventKind: 1,
+        targetRelays: [relayUrl],
+        tempRelays: [relayUrl],
+        timeout: const Duration(milliseconds: 50),
+      );
+      stopwatch.stop();
+
+      expect(outcome.failed, isTrue);
+      expect(
+        stopwatch.elapsedMilliseconds,
+        lessThan(1000),
+        reason: 'same-URL temp fallback must use the shared publish timeout',
+      );
+      expect(failing.sentMessages, hasLength(1));
+      expect(
+        tempRelaysCreated,
+        contains(relayUrl),
+        reason: 'a failed normal send should not suppress temp relay fallback',
+      );
+    });
+
+    test('sendEventAwaitOk recreates a disconnected cached temp relay before '
+        'deadline-bound fallback send', () async {
+      final relayUrl = 'wss://relay.divine.video';
+      final failing = _FailingSendRelay(relayUrl);
+      final tempRelaysCreated = <_ConnectionAwareTempRelay>[];
+      final tempNostr = Nostr(
+        signer,
+        [],
+        (url) =>
+            _ConnectionAwareTempRelay(url, onCreated: tempRelaysCreated.add),
+      );
+      await tempNostr.refreshPublicKey();
+
+      final staleTempRelay = tempNostr.relayPool.checkAndGenTempRelay(relayUrl);
+      await staleTempRelay.disconnect();
+      await tempNostr.relayPool.add(failing);
+
+      final outcome = await tempNostr.relayPool.sendEventAwaitOk(
+        [
+          'EVENT',
+          {'id': 'recreated-temp-event-id', 'kind': 1},
+        ],
+        eventId: 'recreated-temp-event-id',
+        eventKind: 1,
+        targetRelays: [relayUrl],
+        tempRelays: [relayUrl],
+        timeout: const Duration(milliseconds: 50),
+      );
+
+      expect(outcome.failed, isTrue);
+      expect(
+        tempRelaysCreated,
+        hasLength(2),
+        reason: 'disconnected cached temp relay must be replaced before send',
+      );
+      expect(
+        tempRelaysCreated.first.sentMessages,
+        isEmpty,
+        reason: 'stale disconnected temp relay must not be reused for send',
+      );
+      expect(tempRelaysCreated.last.sentMessages, hasLength(1));
+    });
+
+    test(
+      'sendEventAwaitOk does not write or queue an event after the deadline',
+      () async {
+        final relayUrl = 'wss://relay.divine.video';
+        final deferred = _DeferredSendRelay(relayUrl);
+        await nostr.relayPool.add(deferred);
+
+        final outcome = await nostr.relayPool.sendEventAwaitOk(
+          [
+            'EVENT',
+            {'id': 'deferred-event-id', 'kind': 1},
+          ],
+          eventId: 'deferred-event-id',
+          eventKind: 1,
+          targetRelays: [relayUrl],
+          timeout: const Duration(milliseconds: 10),
+        );
+
+        expect(outcome.failed, isTrue);
+
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        deferred.releaseSend.complete();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(
+          deferred.sentMessages,
+          isEmpty,
+          reason: 'the EVENT must not be written after the publish deadline',
+        );
+        expect(
+          deferred.pendingMessages,
+          isEmpty,
+          reason: 'deadline-bound await-OK sends must not queue stale EVENTs',
+        );
+      },
+    );
 
     test(
       'RelayPool.perRelaySendTimeout is exposed as a stable public contract',

@@ -86,5 +86,34 @@ void main() {
         expect(outcome.noResponseFrom, equals(['wss://only.example']));
       });
     });
+
+    group('publish diagnostics metadata', () {
+      test('keeps diagnostic tag caller-supplied and domain-neutral', () {
+        final tracker = PublishTracker(
+          eventId: 'note-1',
+          eventKind: 1,
+          diagnosticTag: 'rollout-diagnostic',
+          expectedRelays: {'wss://relay.divine.video'},
+          timeout: const Duration(seconds: 30),
+        );
+
+        expect(tracker.diagnosticTag, equals('rollout-diagnostic'));
+        tracker.cancel();
+      });
+
+      test('propagates event kind to publish outcome', () async {
+        final tracker = PublishTracker(
+          eventId: 'accepted-event',
+          eventKind: 1,
+          expectedRelays: {'wss://relay.divine.video'},
+          timeout: const Duration(seconds: 30),
+        );
+
+        tracker.onAccepted('wss://relay.divine.video');
+        final outcome = await tracker.future;
+
+        expect(outcome.eventKind, equals(1));
+      });
+    });
   });
 }
