@@ -4699,6 +4699,10 @@ class AppLocalizationsSv extends AppLocalizations {
   String get keyManagementNeverShare => 'Dela aldrig din nsec med någon!';
 
   @override
+  String get keyManagementKeycastRemoteSigning =>
+      'Det här kontot signerar med Keycast. Ingen privat nyckel är lagrad på den här enheten, så det finns inget nsec att kopiera här.';
+
+  @override
   String get keyManagementPasteKey => 'Klistra in din privata nyckel';
 
   @override

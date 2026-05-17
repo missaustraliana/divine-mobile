@@ -4720,6 +4720,10 @@ class AppLocalizationsNl extends AppLocalizations {
   String get keyManagementNeverShare => 'Deel je nsec nooit met iemand!';
 
   @override
+  String get keyManagementKeycastRemoteSigning =>
+      'Dit account ondertekent met Keycast. Er is geen privésleutel opgeslagen op dit apparaat, dus er is hier geen nsec om te kopiëren.';
+
+  @override
   String get keyManagementPasteKey => 'Plak je privésleutel';
 
   @override

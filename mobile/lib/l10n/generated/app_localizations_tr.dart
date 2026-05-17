@@ -4684,6 +4684,10 @@ class AppLocalizationsTr extends AppLocalizations {
   String get keyManagementNeverShare => 'nsec\'ini asla kimseyle paylaşma!';
 
   @override
+  String get keyManagementKeycastRemoteSigning =>
+      'Bu hesap Keycast ile imzalar. Bu cihazda özel anahtar saklanmıyor, bu yüzden burada kopyalanacak bir nsec yok.';
+
+  @override
   String get keyManagementPasteKey => 'Lütfen özel anahtarını yapıştır';
 
   @override

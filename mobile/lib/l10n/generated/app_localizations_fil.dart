@@ -4765,6 +4765,10 @@ class AppLocalizationsFil extends AppLocalizations {
       'Huwag i-share ang nsec mo sa kahit kanino!';
 
   @override
+  String get keyManagementKeycastRemoteSigning =>
+      'Lumalagda ang account na ito gamit ang Keycast. Walang pribadong key na naka-store sa device na ito, kaya walang nsec na makokopya rito.';
+
+  @override
   String get keyManagementPasteKey => 'Pakipasta ang private key mo';
 
   @override

@@ -4486,6 +4486,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get keyManagementNeverShare => 'nsec は誰にも共有しないで！';
 
   @override
+  String get keyManagementKeycastRemoteSigning =>
+      'このアカウントはKeycastで署名します。このデバイスには秘密鍵が保存されていないため、ここでコピーできるnsecはありません。';
+
+  @override
   String get keyManagementPasteKey => '秘密鍵を貼り付けてね';
 
   @override

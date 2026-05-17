@@ -4751,6 +4751,10 @@ class AppLocalizationsBg extends AppLocalizations {
       'Никога не споделяй своя nsec с никого!';
 
   @override
+  String get keyManagementKeycastRemoteSigning =>
+      'Този акаунт подписва с Keycast. На това устройство не е съхранен частен ключ, затова тук няма nsec за копиране.';
+
+  @override
   String get keyManagementPasteKey => 'Постави частния си ключ';
 
   @override

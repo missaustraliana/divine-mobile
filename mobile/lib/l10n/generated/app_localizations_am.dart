@@ -4597,6 +4597,10 @@ class AppLocalizationsAm extends AppLocalizations {
   String get keyManagementNeverShare => 'የእርስዎን nsec ለማንም አያካፍሉ!';
 
   @override
+  String get keyManagementKeycastRemoteSigning =>
+      'ይህ መለያ በKeycast ይፈርማል። በዚህ መሣሪያ ላይ የግል ቁልፍ አልተቀመጠም፣ ስለዚህ እዚህ ለመቅዳት nsec የለም።';
+
+  @override
   String get keyManagementPasteKey => 'እባክህ የግል ቁልፍህን ለጥፍ';
 
   @override
