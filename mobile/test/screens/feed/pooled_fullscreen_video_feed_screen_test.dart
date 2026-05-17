@@ -220,10 +220,10 @@ class _PopCountingObserver extends NavigatorObserver {
 void main() {
   group('PooledFullscreenVideoFeedScreen', () {
     group('fullscreen video media alignment', () {
-      test('top-aligns contained square and landscape videos', () {
+      test('centers contained 1 × 1 / landscape videos in the viewport', () {
         expect(
           fullscreenVideoMediaAlignment(isPortrait: false),
-          Alignment.topCenter,
+          Alignment.center,
         );
       });
 
@@ -231,37 +231,6 @@ void main() {
         expect(
           fullscreenVideoMediaAlignment(isPortrait: true),
           Alignment.center,
-        );
-      });
-
-      test('places contained videos below the fullscreen app header', () {
-        expect(
-          fullscreenContainedVideoTopInset(safeAreaTop: 54),
-          54 + DiVineAppBarStyle.defaultStyle.height,
-        );
-      });
-
-      test('does not offset portrait videos that cover the viewport', () {
-        expect(
-          fullscreenContainedVideoTopInset(safeAreaTop: 54, isPortrait: true),
-          0,
-        );
-      });
-
-      test('returns 0 when a context header is present — the Scaffold lays out '
-          'the body beneath the AppBar, so the leaf-level Padding would '
-          'double-pad. Applies to both portrait and contained videos.', () {
-        expect(
-          fullscreenContainedVideoTopInset(
-            safeAreaTop: 54,
-            isPortrait: true,
-            hasHeader: true,
-          ),
-          0,
-        );
-        expect(
-          fullscreenContainedVideoTopInset(safeAreaTop: 54, hasHeader: true),
-          0,
         );
       });
     });

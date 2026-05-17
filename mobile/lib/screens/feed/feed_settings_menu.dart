@@ -7,13 +7,14 @@ import 'package:flutter/material.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/widgets/video_feed_item/feed_playback_toggles_pill.dart';
 
-/// More icon button + playback-controls popover for the home feed top bar.
+/// More icon button + playback-controls popover for feed surfaces.
 ///
-/// Renders a 40 px scrim-15 [DivineIconButton] (48 px tap target) intended
-/// to be placed as the trailing sibling of the feed-mode selector inside the
-/// home feed's top-bar [Row]. Tapping opens a popover anchored 16 px below
-/// the button's bottom-right corner with three scrim-toggled controls:
-/// playback mode (auto-advance), audio mute, and closed captions.
+/// Renders a 40 px scrim-15 [DivineIconButton] (48 px tap target). Used on
+/// the home feed's top bar (as the trailing sibling of the feed-mode
+/// selector) and on the fullscreen video screen (as a `customActions`
+/// entry on its [DiVineAppBar]). Tapping opens a popover anchored 16 px
+/// below the button's bottom-right corner with three scrim-toggled
+/// controls: playback mode (auto-advance), audio mute, and closed captions.
 ///
 /// The popover content is the shared [FeedPlaybackTogglesPill] widget, which
 /// reads and writes app-wide state (`FeedAutoAdvanceCubit`,
@@ -95,25 +96,37 @@ class _FeedSettingsOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onClose,
+    // Wrap the *entire* overlay in a [TextFieldTapRegion]. While the
+    // popover is open, every tap inside it — the pill (toggling
+    // mute / captions / ...), the empty backdrop (which fires
+    // [onClose] to dismiss the popover), and the area behind the
+    // popover's X-button trigger in the app bar that the backdrop
+    // catcher overlays — is treated as part of the focused
+    // TextField's tap-region group. That keeps the inline comment
+    // composer's keyboard up while the user adjusts playback, and
+    // lets them close the popover (via X or backdrop tap) without
+    // also losing the keyboard.
+    return TextFieldTapRegion(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onClose,
+            ),
           ),
-        ),
-        CompositedTransformFollower(
-          link: link,
-          targetAnchor: Alignment.bottomRight,
-          followerAnchor: Alignment.topRight,
-          offset: const Offset(0, 16),
-          child: const Material(
-            color: VineTheme.transparent,
-            child: FeedPlaybackTogglesPill(),
+          CompositedTransformFollower(
+            link: link,
+            targetAnchor: Alignment.bottomRight,
+            followerAnchor: Alignment.topRight,
+            offset: const Offset(0, 16),
+            child: const Material(
+              color: VineTheme.transparent,
+              child: FeedPlaybackTogglesPill(),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

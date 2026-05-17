@@ -84,11 +84,13 @@ class VideoOverlayActions extends ConsumerWidget {
     this.showListAttribution = false,
     this.isPreviewMode = false,
     this.showBottomGradient = true,
+    this.showTopGradient = false,
     this.topOffset = 8.0,
     this.overlayOpacity = 1.0,
     this.showAutoButton = false,
     this.onInteracted,
     this.omitAuthorBlock = false,
+    this.omitActionColumn = false,
   }) : previewData = null;
 
   const VideoOverlayActions.preview({
@@ -104,11 +106,13 @@ class VideoOverlayActions extends ConsumerWidget {
     this.showListAttribution = false,
     this.isPreviewMode = true,
     this.showBottomGradient = true,
+    this.showTopGradient = false,
     this.topOffset = 8.0,
     this.overlayOpacity = 1.0,
     this.showAutoButton = false,
     this.onInteracted,
     this.omitAuthorBlock = false,
+    this.omitActionColumn = false,
   }) : video = null;
 
   final Widget? subtitleLayer;
@@ -127,6 +131,12 @@ class VideoOverlayActions extends ConsumerWidget {
   /// the action column on the right are still rendered.
   final bool omitAuthorBlock;
 
+  /// When true, suppresses the right-side action column so the caller can
+  /// render it themselves alongside their own author info block (matches
+  /// the home feed pattern of placing both in a single shared Stack so
+  /// they cannot vertically drift apart).
+  final bool omitActionColumn;
+
   /// Displays the overlay in preview mode during video creation.
   /// When true, users can preview how their video will appear to other users
   /// before publishing.
@@ -141,6 +151,13 @@ class VideoOverlayActions extends ConsumerWidget {
   /// Whether to render the bottom darkening gradient behind the caption
   /// block. Disabled in preview / editor flows that have their own chrome.
   final bool showBottomGradient;
+
+  /// Whether to render a symmetric top darkening gradient behind the
+  /// app bar region. Useful on fullscreen overlays so the white title
+  /// and back/More buttons stay readable over light video frames.
+  /// Defaults to `false` — opt in per surface so the home feed (which
+  /// doesn't have a transparent AppBar over the video) is unaffected.
+  final bool showTopGradient;
 
   /// Opacity for the entire overlay, driven by scroll position.
   ///
@@ -197,6 +214,40 @@ class VideoOverlayActions extends ConsumerWidget {
         ignoring: overlayOpacity < 0.01,
         child: Stack(
           children: [
+            // Top gradient overlay — sits behind the (transparent) app
+            // bar so the white title / back button / More popover stay
+            // readable over light video frames. Lives inside the body's
+            // Stack so it overlays the video, NOT the app bar (Scaffold
+            // paints the app bar above the body) and is wrapped in
+            // [IgnorePointer] so tapping the gradient region falls
+            // through to the video (or, in the top strip, to the
+            // already-z-above app bar's controls).
+            if (showTopGradient)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                child: IgnorePointer(
+                  child: FractionallySizedBox(
+                    widthFactor: 1.0,
+                    child: SizedBox(
+                      height: MediaQuery.of(context).size.height * 0.2,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              VineTheme.backgroundColor.withValues(alpha: 0.35),
+                              VineTheme.backgroundColor.withValues(alpha: 0.0),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             // Bottom gradient overlay (sits below UI elements, only overlays video)
             if (showBottomGradient)
               Positioned(
@@ -553,26 +604,32 @@ class VideoOverlayActions extends ConsumerWidget {
             // the trailing inset on the fullscreen app bar's More popover.
             // Other consumers (video metadata preview, video editor preview)
             // keep the legacy 16 px so their layouts are unaffected.
-            PositionedDirectional(
-              bottom: isFullscreen ? bottomOffset : bottomOffset - 6,
-              end: isFullscreen ? 12 : 16,
-              child: AnimatedOpacity(
-                opacity: isActive ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 200),
-                child: IgnorePointer(
-                  ignoring: false, // Action buttons SHOULD receive taps
-                  child: video == null
-                      ? _PreviewOverlayActionColumn(onInteracted: onInteracted)
-                      : VideoOverlayActionColumn(
-                          video: video,
-                          isFullscreen: isFullscreen,
-                          isPreviewMode: isPreviewMode,
-                          showAutoButton: showAutoButton,
-                          onInteracted: onInteracted,
-                        ),
+            // Suppressed when [omitActionColumn] is true — the caller
+            // renders the column in their own Stack to keep it vertically
+            // aligned with their own author info block.
+            if (!omitActionColumn)
+              PositionedDirectional(
+                bottom: isFullscreen ? bottomOffset : bottomOffset - 6,
+                end: isFullscreen ? 12 : 16,
+                child: AnimatedOpacity(
+                  opacity: isActive ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: IgnorePointer(
+                    ignoring: false, // Action buttons SHOULD receive taps
+                    child: video == null
+                        ? _PreviewOverlayActionColumn(
+                            onInteracted: onInteracted,
+                          )
+                        : VideoOverlayActionColumn(
+                            video: video,
+                            isFullscreen: isFullscreen,
+                            isPreviewMode: isPreviewMode,
+                            showAutoButton: showAutoButton,
+                            onInteracted: onInteracted,
+                          ),
+                  ),
                 ),
               ),
-            ),
           ],
         ),
       ),
