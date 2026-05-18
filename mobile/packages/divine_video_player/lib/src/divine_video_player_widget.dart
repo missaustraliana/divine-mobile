@@ -42,7 +42,9 @@ class DivineVideoPlayer extends StatelessWidget {
     final ctrl = controller!;
 
     final Widget surface;
-    if (ctrl.useTexture && ctrl.textureId != null) {
+    if (ctrl.usesLinuxBackend) {
+      surface = ctrl.buildLinuxView();
+    } else if (ctrl.useTexture && ctrl.textureId != null) {
       // SurfaceProducer does not forward ExoPlayer's GL transform matrix
       // (NATIVE_WINDOW_TRANSFORM_HINT) to Flutter, unlike the legacy
       // SurfaceTextureEntry which encoded rotation implicitly. The native
@@ -67,9 +69,7 @@ class DivineVideoPlayer extends StatelessWidget {
           creationParams: creationParams,
           creationParamsCodec: const StandardMessageCodec(),
         ),
-        _ => const Center(
-          child: Text('Platform not supported'),
-        ),
+        _ => const Center(child: Text('Platform not supported')),
       };
     }
 
@@ -81,10 +81,7 @@ class DivineVideoPlayer extends StatelessWidget {
       fit: .expand,
       children: [
         surface,
-        _PlaceholderOverlay(
-          controller: ctrl,
-          placeholder: placeholder!,
-        ),
+        _PlaceholderOverlay(controller: ctrl, placeholder: placeholder!),
       ],
     );
   }
