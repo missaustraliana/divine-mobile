@@ -1084,5 +1084,112 @@ void main() {
         },
       );
     });
+
+    // Keyboard-dismissal contract: any pointer-down in the messages
+    // area or a real finger-drag on the message list dismisses the
+    // soft keyboard so the user can read history unobstructed. The
+    // Listener-on-pointer-down handles the tap/long-press case;
+    // ScrollViewKeyboardDismissBehavior.onDrag handles the scroll
+    // case (gated internally on ScrollUpdateNotification.dragDetails
+    // != null, so programmatic scrolls do NOT dismiss — which is the
+    // intentional contract for any future auto-scroll-on-new-message
+    // behavior).
+    group('keyboard dismissal', () {
+      Future<void> pumpWithMessage(WidgetTester tester) async {
+        final message = DmMessage(
+          id: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+          conversationId:
+              'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+          senderPubkey: otherPubkey,
+          content: 'Hello there!',
+          createdAt: now.millisecondsSinceEpoch ~/ 1000,
+          giftWrapId:
+              'aaaaaaaabbbbbbbbccccccccddddddddaaaaaaaabbbbbbbbccccccccdddddddd',
+        );
+
+        await tester.pumpWidget(
+          buildSubject(
+            state: ConversationState(
+              status: ConversationStatus.loaded,
+              messages: [message],
+            ),
+          ),
+        );
+        await tester.pump();
+      }
+
+      testWidgets(
+        'dismisses keyboard when the message list is dragged',
+        (tester) async {
+          await pumpWithMessage(tester);
+          await tester.showKeyboard(find.byType(TextField));
+          expect(tester.testTextInput.isVisible, isTrue);
+
+          // `tester.drag` synthesizes a real pointer drag, producing
+          // a ScrollUpdateNotification with non-null dragDetails —
+          // the same code path as a real finger. controller.jumpTo
+          // would NOT trigger dismissal (no drag details).
+          await tester.drag(find.byType(ListView), const Offset(0, 200));
+          await tester.pump();
+
+          expect(tester.testTextInput.isVisible, isFalse);
+        },
+      );
+
+      testWidgets(
+        'dismisses keyboard on pointer-down inside the messages area '
+        '(regression guard for the Listener swap)',
+        (tester) async {
+          await pumpWithMessage(tester);
+          await tester.showKeyboard(find.byType(TextField));
+          expect(tester.testTextInput.isVisible, isTrue);
+
+          await tester.tapAt(tester.getCenter(find.byType(MessageBubble)));
+          await tester.pump();
+
+          expect(tester.testTextInput.isVisible, isFalse);
+        },
+      );
+
+      // Pins the second half of the GestureDetector → Listener swap
+      // contract: dismissal on pointer-down must NOT eat the
+      // descendant long-press recognizer on `MessageBubble`. A bare
+      // `GestureDetector(onTap:)` competes in the gesture arena and
+      // can swallow tap/long-press on descendants; `Listener` does
+      // not. The earlier "renders MessageBubble" test only proves the
+      // bubble renders — this test proves the full chain
+      // Listener (conversation_view) → MessageBubble → onLongPress
+      // → MessageActionsSheet.show is intact after the swap.
+      testWidgets(
+        'long-pressing a $MessageBubble still surfaces '
+        '$MessageActionsSheet',
+        (tester) async {
+          await pumpWithMessage(tester);
+
+          // Mirror `message_bubble_test.dart`: long-press the bubble
+          // by its rendered text. `find.byType(MessageBubble)` aims
+          // at the widget's geometric center, which sits over the
+          // padding/Semantics node above the bubble's inner
+          // GestureDetector and misses the hit-test (Flutter warns
+          // "warnIfMissed" in that case).
+          await tester.longPress(find.text('Hello there!'));
+          await tester.pumpAndSettle();
+
+          // The sheet's localized action labels are the cheapest
+          // proof the modal actually mounted — asserting on the
+          // sheet widget class would also work but couples to its
+          // current implementation (VineBottomSheetActionMenu).
+          expect(find.text(l10n.dmMessageActionCopyText), findsOneWidget);
+          // `pumpWithMessage` constructs a received message
+          // (senderPubkey = otherPubkey), so the sheet must offer
+          // Report (received-only) and not Delete (sent-only).
+          expect(find.text(l10n.dmMessageActionReport), findsOneWidget);
+          expect(
+            find.text(l10n.dmMessageActionDeleteForEveryone),
+            findsNothing,
+          );
+        },
+      );
+    });
   });
 }
