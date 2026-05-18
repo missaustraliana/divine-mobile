@@ -15,6 +15,7 @@ import 'package:openvine/blocs/video_feed/home_feed_cache.dart';
 import 'package:openvine/blocs/video_feed/video_feed_bloc.dart';
 import 'package:openvine/services/feed_performance_tracker.dart';
 import 'package:profile_repository/profile_repository.dart';
+import 'package:rxdart/rxdart.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:videos_repository/videos_repository.dart';
 
@@ -510,6 +511,153 @@ void main() {
               authors: [],
               videoRefs: any(named: 'videoRefs'),
               userPubkey: 'user-pubkey',
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          ).called(1);
+        },
+      );
+
+      blocTest<VideoFeedBloc, VideoFeedBlocState>(
+        'refreshes following feed when follow repo initializes after initial load',
+        // Regression test for: Following and For You show identical content
+        // when the Funnelcake /feed endpoint returns stale/popular-fallback
+        // content because FollowRepository.initialize() has not finished yet.
+        //
+        // Before the fix: the first followingStream replay was always ignored,
+        // so no corrective refresh ever fired.
+        //
+        // After the fix: the first replay is processed when it differs from
+        // the follow list used for the initial fetch, so the post-initialize()
+        // emission triggers _onFollowingListChanged and does a skipCache
+        // refresh with the real follow list.
+        setUp: () {
+          final popularVideos = createTestVideos(5, idPrefix: 'popular');
+          final followingVideos = createTestVideos(5, idPrefix: 'following');
+
+          when(() => mockFollowRepository.followingPubkeys).thenReturn([]);
+
+          // Both calls (initial load + corrective refresh) share the same
+          // signature; distinguish by call order via a counter.
+          var callCount = 0;
+          when(
+            () => mockVideosRepository.getHomeFeedVideos(
+              authors: any(named: 'authors'),
+              videoRefs: any(named: 'videoRefs'),
+              userPubkey: any(named: 'userPubkey'),
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          ).thenAnswer((_) async {
+            callCount++;
+            return callCount == 1
+                ? HomeFeedResult(videos: popularVideos)
+                : HomeFeedResult(videos: followingVideos);
+          });
+        },
+        build: createBloc,
+        act: (bloc) async {
+          bloc.add(const VideoFeedStarted(mode: FeedMode.following));
+          // Wait for the initial load to complete.
+          await Future<void>.delayed(Duration.zero);
+          // Simulate FollowRepository.initialize() completing and emitting
+          // the real follow list. Because this first replay differs from the
+          // list used for the initial fetch, it is NOT ignored.
+          followingController.add(['author1', 'author2']);
+          // Wait for _onFollowingListChanged to finish the corrective refresh.
+          await Future<void>.delayed(Duration.zero);
+        },
+        expect: () => [
+          // 1. Loading state
+          const VideoFeedBlocState(mode: FeedMode.following),
+          // 2. Initial load succeeds with popular/fallback content
+          isA<VideoFeedBlocState>()
+              .having((s) => s.status, 'status', VideoFeedStatus.success)
+              .having((s) => s.videos.length, 'videos count', 5)
+              .having(
+                (s) => s.videos.first.id,
+                'first video id',
+                startsWith('popular'),
+              ),
+          // 3. Silent refresh replaces with real following content
+          isA<VideoFeedBlocState>()
+              .having((s) => s.status, 'status', VideoFeedStatus.success)
+              .having((s) => s.videos.length, 'videos count', 5)
+              .having(
+                (s) => s.videos.first.id,
+                'first video id',
+                startsWith('following'),
+              ),
+        ],
+        verify: (_) {
+          // getHomeFeedVideos must be called twice: once for the initial load
+          // (empty authors) and once for the corrective refresh (real authors).
+          verify(
+            () => mockVideosRepository.getHomeFeedVideos(
+              authors: any(named: 'authors'),
+              videoRefs: any(named: 'videoRefs'),
+              userPubkey: any(named: 'userPubkey'),
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          ).called(2);
+        },
+      );
+
+      blocTest<VideoFeedBloc, VideoFeedBlocState>(
+        'does not refresh twice when cached follows replay before initialize finishes',
+        setUp: () {
+          final replayingFollowing = BehaviorSubject<List<String>>.seeded([
+            'author1',
+            'author2',
+          ]);
+          addTearDown(replayingFollowing.close);
+
+          final followingVideos = createTestVideos(5, idPrefix: 'following');
+
+          when(
+            () => mockFollowRepository.followingStream,
+          ).thenAnswer((_) => replayingFollowing.stream);
+          when(
+            () => mockFollowRepository.followingPubkeys,
+          ).thenReturn(['author1', 'author2']);
+
+          when(
+            () => mockVideosRepository.getHomeFeedVideos(
+              authors: any(named: 'authors'),
+              videoRefs: any(named: 'videoRefs'),
+              userPubkey: any(named: 'userPubkey'),
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          ).thenAnswer((_) async => HomeFeedResult(videos: followingVideos));
+        },
+        build: createBloc,
+        act: (bloc) async {
+          bloc.add(const VideoFeedStarted(mode: FeedMode.following));
+          await Future<void>.delayed(Duration.zero);
+        },
+        expect: () => [
+          const VideoFeedBlocState(mode: FeedMode.following),
+          isA<VideoFeedBlocState>()
+              .having((s) => s.status, 'status', VideoFeedStatus.success)
+              .having((s) => s.videos.length, 'videos count', 5)
+              .having(
+                (s) => s.videos.first.id,
+                'first video id',
+                startsWith('following'),
+              ),
+        ],
+        verify: (_) {
+          verify(
+            () => mockVideosRepository.getHomeFeedVideos(
+              authors: ['author1', 'author2'],
+              videoRefs: any(named: 'videoRefs'),
+              userPubkey: any(named: 'userPubkey'),
               limit: any(named: 'limit'),
               until: any(named: 'until'),
               skipCache: any(named: 'skipCache'),
@@ -2101,9 +2249,7 @@ void main() {
               until: any(named: 'until'),
               skipCache: any(named: 'skipCache'),
             ),
-          ).thenAnswer(
-            (_) async => HomeFeedResult(videos: recommendedVideos),
-          );
+          ).thenAnswer((_) async => HomeFeedResult(videos: recommendedVideos));
         },
         build: createBlocWithCache,
         act: (bloc) => bloc.add(const VideoFeedStarted()),
