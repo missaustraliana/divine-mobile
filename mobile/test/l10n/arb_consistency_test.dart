@@ -428,7 +428,7 @@ const _knownUntranslatedDebt = {
   'inboxConversationActionsSheetLabel',
   'inboxConversationTileLabel',
   'inboxConversationTileLongPressHint',
-  // Added by the metadata-sheet redesign for the tappable hashtag chip's
+  // Added by the metadata-sheet redesign for the tappable hashtag chip
   // screen-reader hint. Existing locales fall back to English until the
   // next full translation pass.
   'metadataHashtagChipTapHint',
