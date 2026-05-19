@@ -17,6 +17,15 @@ class BackgroundActivityManager {
   bool _isInitialized = false;
   final List<BackgroundAwareService> _registeredServices = [];
 
+  // Defensive bound on how long the manager will await a single service's
+  // onAppBackgrounded notification before logging and moving on. The
+  // [BackgroundAwareService.onAppBackgrounded] interface is currently
+  // synchronous `void`, so the timeout does not fire for any in-tree
+  // implementation — it exists to protect the immediate-background phase
+  // from iOS/Android watchdog kills if the interface is ever widened to
+  // `FutureOr<void>` (or an impl starts blocking the microtask chain).
+  static const Duration _suspendGracePeriod = Duration(seconds: 1);
+
   // Timers for delayed actions
   Timer? _backgroundSuspensionTimer;
   Timer? _periodicCleanupTimer;
@@ -98,8 +107,6 @@ class BackgroundActivityManager {
         _isAppInForeground = false;
         _onAppTerminating();
     }
-
-    if (wasInForeground != _isAppInForeground) {}
   }
 
   /// Handle app entering background
@@ -162,15 +169,21 @@ class BackgroundActivityManager {
       category: LogCategory.system,
     );
 
-    // Process services async with timeout to prevent watchdog kills
+    // Fan out per-service notifications onto microtasks so a slow or
+    // misbehaving service cannot block the suspend pass. See the comment on
+    // [_suspendGracePeriod] for why the .timeout() bound exists despite
+    // never firing against the current sync `void` interface.
     for (final service in _registeredServices) {
       Future.microtask(() async {
         try {
-          // Give each service max 1 second to suspend
-          await Future.any([
-            Future(service.onAppBackgrounded),
-            Future.delayed(const Duration(seconds: 1)),
-          ]);
+          await Future(service.onAppBackgrounded).timeout(_suspendGracePeriod);
+        } on TimeoutException {
+          Log.warning(
+            'Service ${service.serviceName} exceeded '
+            '${_suspendGracePeriod.inSeconds}s suspend grace period',
+            name: 'BackgroundActivityManager',
+            category: LogCategory.system,
+          );
         } catch (e) {
           Log.error(
             'Error suspending service ${service.serviceName}: $e',
