@@ -22,11 +22,13 @@ typedef ErrorBuilder =
 
 /// Builder that wraps or replaces the default video player widget.
 ///
-/// Use this to inject metrics tracking, custom sizing, or other wrappers
-/// around the raw video surface.
+/// [child] is the default video item widget for the current feed item.
+/// Return it directly to keep the default player, or wrap/replace it to
+/// inject metrics tracking, custom sizing, or other feed-specific chrome.
 typedef VideoBuilder =
     Widget Function(
       BuildContext context,
+      Widget child,
       int index,
       DivineVideoPlayerController? controller,
     );

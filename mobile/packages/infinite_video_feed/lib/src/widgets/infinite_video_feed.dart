@@ -29,10 +29,10 @@ class InfiniteVideoFeed extends StatefulWidget {
   const InfiniteVideoFeed({
     required this.videos,
     required this.cache,
+    this.videoBuilder,
     this.urlResolver,
     this.loadingBuilder,
     this.errorBuilder,
-    this.videoBuilder,
     this.overlayBuilder,
     this.scrollPhysics,
     this.initialIndex = 0,
@@ -104,6 +104,8 @@ class InfiniteVideoFeed extends StatefulWidget {
   /// When provided, called instead of the default [VideoItemWidget].
   /// Use this to inject metrics tracking, custom sizing, or other
   /// wrappers around the raw video surface.
+  ///
+  /// When `null`, the feed renders [VideoItemWidget] directly.
   final VideoBuilder? videoBuilder;
 
   /// Builder for the overlay layer rendered on top of the video.
@@ -1110,6 +1112,10 @@ class InfiniteVideoFeedState extends State<InfiniteVideoFeed> {
           controller,
           isActive: index == _currentIndex,
         );
+        final videoItem = VideoItemWidget(
+          controller: controller,
+          shouldPortraitExpand: widget.shouldPortraitExpand,
+        );
 
         final hasVideoSize =
             controller != null && controller.state.videoHeight != 0;
@@ -1128,11 +1134,13 @@ class InfiniteVideoFeedState extends State<InfiniteVideoFeed> {
               ),
 
             if (!hasError && hasVideoSize)
-              widget.videoBuilder?.call(context, index, controller) ??
-                  VideoItemWidget(
-                    controller: controller,
-                    shouldPortraitExpand: widget.shouldPortraitExpand,
-                  ),
+              widget.videoBuilder?.call(
+                    context,
+                    videoItem,
+                    index,
+                    controller,
+                  ) ??
+                  videoItem,
             // Overlay layer — consumer-provided controls, progress, etc.
             ?overlay,
 
