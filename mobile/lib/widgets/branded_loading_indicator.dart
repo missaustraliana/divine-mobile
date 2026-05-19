@@ -3,6 +3,7 @@
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:unified_logger/unified_logger.dart';
 
 /// A branded loading indicator that displays the animated Divine logo.
 ///
@@ -81,7 +82,11 @@ class _BrandedLoadingIndicatorState extends State<BrandedLoadingIndicator>
         height: widget.size * _frameCount,
         fit: BoxFit.fitWidth,
         errorBuilder: (context, error, stackTrace) {
-          debugPrint('Failed to load sprite sheet: $error');
+          Log.warning(
+            'Failed to load sprite sheet: $error',
+            name: 'BrandedLoadingIndicator',
+            category: LogCategory.ui,
+          );
           return SizedBox(
             width: widget.size,
             height: widget.size,

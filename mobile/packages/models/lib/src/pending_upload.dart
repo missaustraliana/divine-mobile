@@ -141,7 +141,7 @@ class PendingUpload {
       developer.log(
         'Failed to parse NativeProofData: $e',
         name: 'PendingUpload',
-        level: 1000, // Error level
+        level: 1000,
       );
       return null;
     }

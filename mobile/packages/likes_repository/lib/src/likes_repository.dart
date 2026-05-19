@@ -5,7 +5,6 @@
 // ABOUTME: Supports offline queuing via callback injection.
 
 import 'dart:async';
-import 'dart:developer' as developer;
 import 'dart:math';
 
 import 'package:likes_repository/src/exceptions.dart';
@@ -15,6 +14,7 @@ import 'package:likes_repository/src/models/likes_sync_result.dart';
 import 'package:nostr_client/nostr_client.dart';
 import 'package:nostr_sdk/nostr_sdk.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:unified_logger/unified_logger.dart';
 
 /// Default limit for fetching user reactions from relays.
 const _defaultReactionFetchLimit = 500;
@@ -325,9 +325,10 @@ class LikesRepository {
       return reactionEvent.id;
     } catch (e, stackTrace) {
       if (_queueOfflineAction != null) {
-        developer.log(
+        Log.error(
           'Like publish failed; queuing optimistic action for retry',
           name: 'LikesRepository',
+          category: LogCategory.relay,
           error: e,
           stackTrace: stackTrace,
         );
@@ -451,9 +452,10 @@ class LikesRepository {
       }
     } catch (e, stackTrace) {
       if (_queueOfflineAction != null) {
-        developer.log(
+        Log.error(
           'Unlike publish failed; queuing optimistic action for retry',
           name: 'LikesRepository',
+          category: LogCategory.relay,
           error: e,
           stackTrace: stackTrace,
         );

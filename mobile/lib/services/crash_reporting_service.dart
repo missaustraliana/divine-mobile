@@ -72,8 +72,10 @@ class CrashReportingService {
       // Enable crash collection for release builds only (TestFlight, production)
       // Disabled in debug mode to avoid flooding dashboard with dev errors
       const enableCollection = !kDebugMode;
-      debugPrint(
+      Log.debug(
         '🔥 CRASHLYTICS: kDebugMode=$kDebugMode, enabling collection=$enableCollection',
+        name: 'CrashReportingService',
+        category: LogCategory.system,
       );
       await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(
         enableCollection,
@@ -82,7 +84,11 @@ class CrashReportingService {
       // Verify it's actually enabled
       final isEnabled =
           FirebaseCrashlytics.instance.isCrashlyticsCollectionEnabled;
-      debugPrint('🔥 CRASHLYTICS: Collection enabled check = $isEnabled');
+      Log.debug(
+        '🔥 CRASHLYTICS: Collection enabled check = $isEnabled',
+        name: 'CrashReportingService',
+        category: LogCategory.system,
+      );
 
       // Log a breadcrumb to prove connection works (visible in Crashlytics logs)
       if (isEnabled) {

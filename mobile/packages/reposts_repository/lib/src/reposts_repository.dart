@@ -5,7 +5,6 @@
 // ABOUTME: Supports offline queuing via callback injection.
 
 import 'dart:async';
-import 'dart:developer' as developer;
 import 'dart:math';
 
 import 'package:nostr_client/nostr_client.dart';
@@ -15,6 +14,7 @@ import 'package:reposts_repository/src/models/repost_record.dart';
 import 'package:reposts_repository/src/models/reposts_sync_result.dart';
 import 'package:reposts_repository/src/reposts_local_storage.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:unified_logger/unified_logger.dart';
 
 /// Default limit for fetching user reposts from relays.
 const _defaultRepostFetchLimit = 500;
@@ -324,9 +324,10 @@ class RepostsRepository {
       return sentEvent.id;
     } catch (e, stackTrace) {
       if (_queueOfflineAction != null) {
-        developer.log(
+        Log.error(
           'Repost publish failed; queuing optimistic action for retry',
           name: 'RepostsRepository',
+          category: LogCategory.relay,
           error: e,
           stackTrace: stackTrace,
         );
@@ -455,9 +456,10 @@ class RepostsRepository {
       }
     } catch (e, stackTrace) {
       if (_queueOfflineAction != null) {
-        developer.log(
+        Log.error(
           'Unrepost publish failed; queuing optimistic action for retry',
           name: 'RepostsRepository',
+          category: LogCategory.relay,
           error: e,
           stackTrace: stackTrace,
         );
