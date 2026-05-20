@@ -166,11 +166,18 @@ class _TagsPickerViewState extends State<_TagsPickerView> {
 
   void _addTag(String raw) {
     context.read<TagsPickerBloc>().add(TagsPickerTagsAdded([raw]));
-    // Clear the field so the next suggestion tap / submit starts fresh.
-    if (_searchController.text.isNotEmpty) {
-      _previousText = '';
-      _searchController.clear();
-    }
+    _resetSearchInput();
+  }
+
+  void _resetSearchInput() {
+    _previousText = '';
+    // Synchronously clear the bloc's query/suggestions so stale results are
+    // never visible after a tag is committed. The controller clear below will
+    // also trigger _onSearchChanged which dispatches a debounced
+    // TagsPickerQueryChanged('') — that's fine, it will be a no-op once the
+    // query is already ''.
+    context.read<TagsPickerBloc>().add(const TagsPickerSearchReset());
+    _searchController.value = const TextEditingValue();
   }
 
   void _removeTag(String tag) {
