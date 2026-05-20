@@ -207,15 +207,28 @@ class AudioTimingCubit extends Cubit<AudioTimingState> {
     );
     final clipEnd = Duration(milliseconds: (clipEndSecs * 1000).toInt());
 
-    // Determine URI and whether it's an asset
-    final String uri;
-    final bool isAsset;
+    // Determine the URI and which AudioSourceConfig variant fits.
+    //
+    // Audio extracted from local clips (see
+    // ClipEditorBloc._onAudioExtractionRequested) is stored in
+    // AudioEvent.url as a bare absolute path like
+    // `/var/mobile/.../extracted_audio_<ts>.wav`. Without explicit
+    // classification, that path is treated as a network URL and the
+    // remote loader calls HttpClient.getUrl on it, throwing
+    // "No host specified in URI" (issue #4395).
+    final AudioSourceConfig config;
     if (_sound.isBundled && _sound.assetPath != null) {
-      uri = _sound.assetPath!;
-      isAsset = true;
+      config = AudioSourceConfig.asset(
+        _sound.assetPath!,
+        start: clipStart,
+        end: clipEnd,
+      );
     } else if (_sound.url != null) {
-      uri = _sound.url!;
-      isAsset = false;
+      config = _configForUrl(
+        _sound.url!,
+        start: clipStart,
+        end: clipEnd,
+      );
     } else {
       Log.warning(
         'No audio source available for sound: ${_sound.id}',
@@ -224,10 +237,35 @@ class AudioTimingCubit extends Cubit<AudioTimingState> {
       return;
     }
 
-    final config = isAsset
-        ? AudioSourceConfig.asset(uri, start: clipStart, end: clipEnd)
-        : AudioSourceConfig.network(uri, start: clipStart, end: clipEnd);
     await _clipPlayer.setClip(config);
+  }
+
+  /// Classifies a raw URL string from [AudioEvent.url] into the appropriate
+  /// [AudioSourceConfig] variant.
+  ///
+  /// Supports http(s) network URLs and local file paths (bare absolute paths
+  /// like `/var/mobile/...` or `file://` URIs). Platform-specific schemes
+  /// such as Android `content://` and web `blob:` are not handled and will
+  /// fall through to the network variant, where the defense-in-depth check
+  /// in [AudioClipPlayer] will surface a clear [ArgumentError].
+  static AudioSourceConfig _configForUrl(
+    String url, {
+    required Duration start,
+    required Duration end,
+  }) {
+    final parsed = Uri.tryParse(url);
+    final isLocalFile =
+        parsed == null ||
+        parsed.scheme.isEmpty ||
+        parsed.scheme == 'file' ||
+        url.startsWith('/');
+    if (isLocalFile) {
+      final filePath = parsed != null && parsed.scheme == 'file'
+          ? parsed.toFilePath()
+          : url;
+      return AudioSourceConfig.file(filePath, start: start, end: end);
+    }
+    return AudioSourceConfig.network(url, start: start, end: end);
   }
 
   @override
