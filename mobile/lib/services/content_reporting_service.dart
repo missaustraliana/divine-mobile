@@ -155,7 +155,10 @@ class ContentReportingService {
   }) async {
     try {
       if (!_isInitialized) {
-        return ReportResult.failure('Reporting service not initialized');
+        await initialize();
+        if (!_isInitialized) {
+          return ReportResult.failure('Reporting service not initialized');
+        }
       }
 
       if (!_authService.isAuthenticated) {
@@ -504,18 +507,6 @@ class ContentReportingService {
       'Reported via Divine for community safety and Apple App Store compliance',
     );
     return buffer.toString();
-  }
-
-  /// Create metadata for report (for our internal tracking)
-  // ignore: unused_element
-  dynamic _createReportMetadata(String reportId, ContentFilterReason reason) {
-    // This would return proper NIP-94 metadata for the report
-    // For now, return a placeholder
-    return {
-      'reportId': reportId,
-      'reason': reason.name,
-      'timestamp': DateTime.now().toIso8601String(),
-    };
   }
 
   /// Create Zendesk ticket for moderation tracking

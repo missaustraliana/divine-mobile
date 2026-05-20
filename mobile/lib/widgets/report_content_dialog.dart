@@ -170,6 +170,7 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
   final ScrollController _scrollController = ScrollController();
   bool _isSubmitting = false;
   bool _submitted = false;
+  String? _errorMessage;
   bool _scrollWhenKeyboardOpens = false;
   double _previousViewInsetsBottom = 0;
 
@@ -208,7 +209,10 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
 
   void _onReasonSelected(ContentFilterReason reason) {
     final wasOther = _selectedReason == ContentFilterReason.other;
-    setState(() => _selectedReason = reason);
+    setState(() {
+      _selectedReason = reason;
+      _errorMessage = null;
+    });
 
     if (reason == ContentFilterReason.other && !wasOther) {
       final controller = widget.draggableController;
@@ -291,6 +295,10 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
                       controller: _detailsController,
                       focusNode: _detailsFocusNode,
                       enableInteractiveSelection: true,
+                      onChanged: (_) {
+                        if (_errorMessage == null) return;
+                        setState(() => _errorMessage = null);
+                      },
                       style: VineTheme.bodyLargeFont(),
                       minLines: 3,
                       maxLines: 5,
@@ -300,6 +308,42 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
                       ),
                     ),
                   ],
+                ),
+              ),
+            ),
+          ],
+          if (_errorMessage case final errorMessage?) ...[
+            const SizedBox(height: 16),
+            Semantics(
+              container: true,
+              liveRegion: true,
+              label: errorMessage,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: VineTheme.error.withValues(alpha: 0.1),
+                  border: Border.all(color: VineTheme.error),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      const DivineIcon(
+                        icon: DivineIconName.warningCircle,
+                        color: VineTheme.error,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          errorMessage,
+                          style: VineTheme.bodySmallFont(
+                            color: VineTheme.error,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -319,22 +363,16 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
   void _handleSubmitReport() {
     if (_isSubmitting) return;
     if (_selectedReason == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.l10n.reportSelectReason),
-          backgroundColor: VineTheme.error,
-        ),
-      );
+      setState(() {
+        _errorMessage = context.l10n.reportSelectReason;
+      });
       return;
     }
     if (_selectedReason == ContentFilterReason.other &&
         _detailsController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.l10n.reportOtherRequiresDetails),
-          backgroundColor: VineTheme.error,
-        ),
-      );
+      setState(() {
+        _errorMessage = context.l10n.reportOtherRequiresDetails;
+      });
       return;
     }
     _submitReport();
@@ -343,7 +381,10 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
   Future<void> _submitReport() async {
     if (_selectedReason == null) return;
 
-    setState(() => _isSubmitting = true);
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
     final selectedReasonTitle = context.l10n.reportReasonTitle(
       _selectedReason!,
     );
@@ -402,12 +443,9 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
             }
           }
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(context.l10n.reportFailed(result.error ?? '')),
-              backgroundColor: VineTheme.error,
-            ),
-          );
+          setState(() {
+            _errorMessage = context.l10n.reportFailed(result.error ?? '');
+          });
         }
       }
     } catch (e) {
@@ -418,12 +456,7 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.l10n.reportFailed(e)),
-            backgroundColor: VineTheme.error,
-          ),
-        );
+        setState(() => _errorMessage = context.l10n.reportFailed(e));
       }
     } finally {
       if (mounted) {
@@ -653,80 +686,74 @@ class ReportConfirmationDialog extends StatelessWidget {
       title: Row(
         spacing: 12,
         children: [
-          const Icon(Icons.check_circle, color: VineTheme.vineGreen, size: 28),
-          Text(
-            l10n.reportReceivedTitle,
-            style: const TextStyle(color: VineTheme.whiteText),
+          const DivineIcon(
+            icon: DivineIconName.checkCircle,
+            color: VineTheme.vineGreen,
+            size: 28,
           ),
+          Text(l10n.reportReceivedTitle, style: VineTheme.titleMediumFont()),
         ],
       ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            l10n.reportReceivedThankYou,
-            style: const TextStyle(color: VineTheme.whiteText, fontSize: 16),
-          ),
+          Text(l10n.reportReceivedThankYou, style: VineTheme.bodyLargeFont()),
           const SizedBox(height: 16),
           Text(
             l10n.reportReceivedReviewNotice,
-            style: const TextStyle(
-              color: VineTheme.secondaryText,
-              fontSize: 14,
-            ),
+            style: VineTheme.bodyMediumFont(color: VineTheme.secondaryText),
           ),
           const SizedBox(height: 20),
-          InkWell(
-            onTap: () async {
-              final uri = Uri.parse('https://divine.video/safety');
-              if (await canLaunchUrl(uri)) {
-                await launchUrl(uri, mode: LaunchMode.externalApplication);
-              }
-            },
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: VineTheme.backgroundColor,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: VineTheme.vineGreen),
-              ),
-              child: Row(
-                spacing: 8,
-                children: [
-                  const Icon(
-                    Icons.info_outline,
-                    color: VineTheme.vineGreen,
-                    size: 20,
-                  ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          l10n.reportLearnMore,
-                          style: const TextStyle(
-                            color: VineTheme.whiteText,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        Text(
-                          l10n.reportSafetyUrl,
-                          style: const TextStyle(
-                            color: VineTheme.vineGreen,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
+          Semantics(
+            button: true,
+            label: l10n.reportLearnMore,
+            child: InkWell(
+              onTap: () async {
+                final uri = Uri.parse('https://divine.video/safety');
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: VineTheme.backgroundColor,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: VineTheme.vineGreen),
+                ),
+                child: Row(
+                  spacing: 8,
+                  children: [
+                    const DivineIcon(
+                      icon: DivineIconName.info,
+                      color: VineTheme.vineGreen,
+                      size: 20,
                     ),
-                  ),
-                  const Icon(
-                    Icons.open_in_new,
-                    color: VineTheme.vineGreen,
-                    size: 18,
-                  ),
-                ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            l10n.reportLearnMore,
+                            style: VineTheme.titleSmallFont(),
+                          ),
+                          Text(
+                            l10n.reportSafetyUrl,
+                            style: VineTheme.labelSmallFont(
+                              color: VineTheme.vineGreen,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const DivineIcon(
+                      icon: DivineIconName.arrowUpRight,
+                      color: VineTheme.vineGreen,
+                      size: 18,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -737,7 +764,7 @@ class ReportConfirmationDialog extends StatelessWidget {
           onPressed: Navigator.of(context).pop,
           child: Text(
             l10n.reportClose,
-            style: const TextStyle(color: VineTheme.vineGreen),
+            style: VineTheme.labelLargeFont(color: VineTheme.vineGreen),
           ),
         ),
       ],
