@@ -1,5 +1,5 @@
 // ABOUTME: Badge widget to show unread notification count on icons
-// ABOUTME: Displays count or red dot for high numbers with animation support
+// ABOUTME: Displays count or dot for high numbers with animation support
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
@@ -25,6 +25,7 @@ class NotificationBadge extends StatelessWidget {
       return child;
     }
 
+    final foreground = textColor ?? VineTheme.whiteText;
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -32,43 +33,39 @@ class NotificationBadge extends StatelessWidget {
         PositionedDirectional(
           end: -8,
           top: -8,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            padding: EdgeInsets.symmetric(
-              horizontal: count > 99 ? 4 : 6,
-              vertical: 2,
-            ),
-            decoration: BoxDecoration(
-              color: badgeColor ?? VineTheme.error,
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                  color: VineTheme.backgroundColor.withValues(alpha: 0.2),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-            child: Center(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 150),
-                child: count > 99
-                    ? Icon(
-                        Icons.circle,
-                        key: const ValueKey('dot'),
-                        size: 8,
-                        color: textColor ?? VineTheme.whiteText,
-                      )
-                    : Text(
-                        count.toString(),
-                        key: ValueKey(count),
-                        style: TextStyle(
-                          color: textColor ?? VineTheme.whiteText,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
+          child: ExcludeSemantics(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: EdgeInsets.symmetric(
+                horizontal: count > 99 ? 4 : 6,
+                vertical: 2,
+              ),
+              decoration: BoxDecoration(
+                color: badgeColor ?? VineTheme.error,
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: VineTheme.backgroundColor.withValues(alpha: 0.2),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+              child: Center(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 150),
+                  child: count > 99
+                      ? _OverflowDot(
+                          key: const ValueKey('dot'),
+                          color: foreground,
+                        )
+                      : Text(
+                          count.toString(),
+                          key: ValueKey(count),
+                          style: VineTheme.labelSmallFont(color: foreground),
                         ),
-                      ),
+                ),
               ),
             ),
           ),
@@ -146,6 +143,7 @@ class _AnimatedNotificationBadgeState extends State<AnimatedNotificationBadge>
       return widget.child;
     }
 
+    final foreground = widget.textColor ?? VineTheme.whiteText;
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -153,53 +151,71 @@ class _AnimatedNotificationBadgeState extends State<AnimatedNotificationBadge>
         PositionedDirectional(
           end: -8,
           top: -8,
-          child: AnimatedBuilder(
-            animation: _scaleAnimation,
-            builder: (context, child) =>
-                Transform.scale(scale: _scaleAnimation.value, child: child),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: EdgeInsets.symmetric(
-                horizontal: widget.count > 99 ? 4 : 6,
-                vertical: 2,
-              ),
-              decoration: BoxDecoration(
-                color: widget.badgeColor ?? VineTheme.error,
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: [
-                  BoxShadow(
-                    color: VineTheme.backgroundColor.withValues(alpha: 0.2),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
+          child: ExcludeSemantics(
+            child: RepaintBoundary(
+              child: AnimatedBuilder(
+                animation: _scaleAnimation,
+                builder: (context, child) =>
+                    Transform.scale(scale: _scaleAnimation.value, child: child),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: widget.count > 99 ? 4 : 6,
+                    vertical: 2,
                   ),
-                ],
-              ),
-              constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-              child: Center(
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 150),
-                  child: widget.count > 99
-                      ? Icon(
-                          Icons.circle,
-                          key: const ValueKey('dot'),
-                          size: 8,
-                          color: widget.textColor ?? VineTheme.whiteText,
-                        )
-                      : Text(
-                          widget.count.toString(),
-                          key: ValueKey(widget.count),
-                          style: TextStyle(
-                            color: widget.textColor ?? VineTheme.whiteText,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                  decoration: BoxDecoration(
+                    color: widget.badgeColor ?? VineTheme.error,
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: VineTheme.backgroundColor.withValues(alpha: 0.2),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  constraints: const BoxConstraints(
+                    minWidth: 20,
+                    minHeight: 20,
+                  ),
+                  child: Center(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 150),
+                      child: widget.count > 99
+                          ? _OverflowDot(
+                              key: const ValueKey('dot'),
+                              color: foreground,
+                            )
+                          : Text(
+                              widget.count.toString(),
+                              key: ValueKey(widget.count),
+                              style: VineTheme.labelSmallFont(
+                                color: foreground,
+                              ),
+                            ),
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _OverflowDot extends StatelessWidget {
+  const _OverflowDot({required this.color, super.key});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
 }
