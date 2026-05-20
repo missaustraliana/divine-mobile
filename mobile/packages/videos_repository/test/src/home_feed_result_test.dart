@@ -31,12 +31,18 @@ void main() {
         },
         listOnlyVideoIds: const {'v1'},
         consumedItemCount: 5,
+        nextCursor: 1234,
+        paginationCursor: 'o:2',
+        hasMore: true,
       );
 
       expect(result.videos, hasLength(1));
       expect(result.videoListSources, hasLength(1));
       expect(result.listOnlyVideoIds, contains('v1'));
       expect(result.consumedItemCount, 5);
+      expect(result.nextCursor, 1234);
+      expect(result.paginationCursor, 'o:2');
+      expect(result.hasMore, isTrue);
     });
 
     test('empty constructor defaults', () {
@@ -118,6 +124,33 @@ void main() {
       expect(result1, isNot(equals(result2)));
     });
 
+    test('inequality when nextCursor differs', () {
+      final video = createVideo(id: 'v1');
+
+      final result1 = HomeFeedResult(videos: [video], nextCursor: 1);
+      final result2 = HomeFeedResult(videos: [video], nextCursor: 2);
+
+      expect(result1, isNot(equals(result2)));
+    });
+
+    test('inequality when hasMore differs', () {
+      final video = createVideo(id: 'v1');
+
+      final result1 = HomeFeedResult(videos: [video], hasMore: true);
+      final result2 = HomeFeedResult(videos: [video], hasMore: false);
+
+      expect(result1, isNot(equals(result2)));
+    });
+
+    test('inequality when paginationCursor differs', () {
+      final video = createVideo(id: 'v1');
+
+      final result1 = HomeFeedResult(videos: [video], paginationCursor: 'o:1');
+      final result2 = HomeFeedResult(videos: [video], paginationCursor: 'o:2');
+
+      expect(result1, isNot(equals(result2)));
+    });
+
     test('rawResponseBody defaults to null', () {
       const result = HomeFeedResult(videos: []);
 
@@ -162,14 +195,20 @@ void main() {
         videoListSources: sources,
         listOnlyVideoIds: listOnly,
         consumedItemCount: 7,
+        nextCursor: 1234,
+        paginationCursor: 'o:2',
+        hasMore: true,
         rawResponseBody: '{"videos":[]}',
       );
 
-      expect(result.props, hasLength(4));
+      expect(result.props, hasLength(7));
       expect(result.props[0], equals([video]));
       expect(result.props[1], equals(sources));
       expect(result.props[2], equals(listOnly));
       expect(result.props[3], 7);
+      expect(result.props[4], 1234);
+      expect(result.props[5], 'o:2');
+      expect(result.props[6], isTrue);
     });
   });
 }
