@@ -122,8 +122,10 @@ class WelcomeBloc extends Bloc<WelcomeEvent, WelcomeState> {
       category: LogCategory.auth,
     );
 
-    // Only update if any profiles were actually found.
-    if (withProfiles > 0) {
+    // Only update if any profiles were actually found. Guard because this
+    // method runs fire-and-forget from _onWelcomeStarted, so the bloc may
+    // already be closed by the time the parallel hydration finishes.
+    if (withProfiles > 0 && !isClosed) {
       add(WelcomeProfilesHydrated(results));
     }
   }
@@ -138,10 +140,12 @@ class WelcomeBloc extends Bloc<WelcomeEvent, WelcomeState> {
         name: 'WelcomeBloc',
         category: LogCategory.auth,
       );
-      // Drift IO — matrix-NO (Network/IO row). Raw addError so the
-      // failure surfaces in DivineBlocObserver without reaching
-      // Crashlytics. See .claude/rules/error_handling.md.
-      addError(e, stackTrace);
+      // Matrix-NO (Drift IO). Guarded because _hydrateAccount is reached
+      // via a fire-and-forget _hydrateProfiles call; the bloc may close
+      // before the await resolves, and post-close addError throws.
+      if (!isClosed) {
+        addError(e, stackTrace);
+      }
     }
     return PreviousAccount(
       pubkeyHex: known.pubkeyHex,

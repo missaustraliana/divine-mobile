@@ -392,7 +392,12 @@ class ClipsLibraryBloc extends Bloc<ClipsLibraryEvent, ClipsLibraryState> {
       );
       // Matrix-NO: background recoverMissingAssets is filesystem + thumbnail
       // IO (Network/IO category).
-      addError(e, stackTrace);
+      // Guarded for symmetry with the sibling add() above: this method
+      // runs fire-and-forget via unawaited() and post-close addError
+      // throws StateError.
+      if (!isClosed) {
+        addError(e, stackTrace);
+      }
     }
   }
 

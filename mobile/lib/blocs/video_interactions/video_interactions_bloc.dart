@@ -289,10 +289,15 @@ class VideoInteractionsBloc
         name: 'VideoInteractionsBloc',
         category: LogCategory.system,
       );
-      addError(
-        Reportable(e, context: VideoInteractionsReportableSites.publishLike),
-        stackTrace,
-      );
+      // Guarded for symmetry with the sibling add() below: _publishLike
+      // runs fire-and-forget via unawaited() and post-close addError
+      // throws StateError.
+      if (!isClosed) {
+        addError(
+          Reportable(e, context: VideoInteractionsReportableSites.publishLike),
+          stackTrace,
+        );
+      }
       outcome = _LikeSettleFailed(wasLiked: wasLiked);
     }
 
@@ -408,10 +413,18 @@ class VideoInteractionsBloc
         name: 'VideoInteractionsBloc',
         category: LogCategory.system,
       );
-      addError(
-        Reportable(e, context: VideoInteractionsReportableSites.publishRepost),
-        stackTrace,
-      );
+      // Guarded for symmetry with the sibling add() below: _publishRepost
+      // runs fire-and-forget via unawaited() and post-close addError
+      // throws StateError.
+      if (!isClosed) {
+        addError(
+          Reportable(
+            e,
+            context: VideoInteractionsReportableSites.publishRepost,
+          ),
+          stackTrace,
+        );
+      }
       outcome = _RepostSettleFailed(wasReposted: wasReposted);
     }
 
