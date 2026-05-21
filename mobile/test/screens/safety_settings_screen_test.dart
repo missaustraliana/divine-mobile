@@ -297,6 +297,37 @@ void main() {
     );
 
     testWidgets(
+      'checking the 18+ box calls unlockAdultCategories on the service',
+      (tester) async {
+        // Arrange - stub the methods the screen will call
+        when(
+          () => mockAgeVerificationService.setAdultContentVerified(true),
+        ).thenAnswer((_) async {});
+        when(
+          mockContentFilterService.unlockAdultCategories,
+        ).thenAnswer((_) async {});
+
+        await tester.pumpWidget(createTestWidget());
+        await tester.pumpAndSettle();
+
+        // Act - tap the age-verification checkbox
+        final checkbox = find.byType(CheckboxListTile);
+        expect(checkbox, findsOneWidget);
+        await tester.tap(checkbox);
+        await tester.pumpAndSettle();
+
+        // Assert - wiring: age flag set and unlock delegated to service
+        verify(
+          () => mockAgeVerificationService.setAdultContentVerified(true),
+        ).called(1);
+        verify(mockContentFilterService.unlockAdultCategories).called(1);
+        verifyNever(
+          () => mockContentFilterService.lockAdultCategories(),
+        );
+      },
+    );
+
+    testWidgets(
       'enables People I follow moderation with current following list',
       (tester) async {
         await tester.pumpWidget(createTestWidget());

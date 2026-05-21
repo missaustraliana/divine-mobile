@@ -61,9 +61,10 @@ class _SafetySettingsScreenState extends ConsumerState<SafetySettingsScreen> {
     final service = ref.read(ageVerificationServiceProvider);
     await service.setAdultContentVerified(value);
 
-    // If unchecked, lock adult categories to hide
-    if (!value) {
-      final contentFilterService = ref.read(contentFilterServiceProvider);
+    final contentFilterService = ref.read(contentFilterServiceProvider);
+    if (value) {
+      await contentFilterService.unlockAdultCategories();
+    } else {
       await contentFilterService.lockAdultCategories();
       final videoEventService = ref.read(videoEventServiceProvider);
       videoEventService.filterAdultContentFromExistingVideos();
