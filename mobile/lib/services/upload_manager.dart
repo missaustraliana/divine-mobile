@@ -794,6 +794,13 @@ class UploadManager {
     File videoFile,
     ValueChanged<double>? onProgress,
   ) async {
+    // Local-only counter for how many auto-attempts have been made in this
+    // call. Must NOT be persisted to Hive: PendingUpload.retryCount is the
+    // manual-retry budget (canRetry gates on retryCount < 3). Writing
+    // auto-attempt counts there would exhaust the budget and prevent the user
+    // from calling retryUpload() after a failed session.
+    var autoAttempt = 0;
+
     try {
       await AsyncUtils.retryWithBackoff(
         operation: () async {
@@ -803,20 +810,22 @@ class UploadManager {
           // Uploads already have proper retry logic with exponential backoff
           // Users should be able to retry uploads even if previous attempts failed
 
-          // Update status based on current retry count
-          final currentRetry = currentUpload.retryCount ?? 0;
+          // autoAttempt is local to this _performUploadWithRetry invocation and
+          // is never written to Hive, so the manual-retry budget is preserved.
+          autoAttempt++;
           Log.warning(
-            'Upload attempt ${currentRetry + 1}/${_retryConfig.maxRetries + 1} for ${currentUpload.id}',
+            'Upload attempt $autoAttempt/${_retryConfig.maxRetries + 1} for ${currentUpload.id}',
             name: 'UploadManager',
             category: LogCategory.video,
           );
 
           await _updateUpload(
             currentUpload.copyWith(
-              status: currentRetry == 0
+              status: autoAttempt == 1
                   ? UploadStatus.uploading
                   : UploadStatus.retrying,
-              retryCount: currentRetry,
+              // retryCount is intentionally left unchanged here — it is the
+              // manual-retry budget managed exclusively by retryUpload().
             ),
           );
 
@@ -1549,8 +1558,13 @@ class UploadManager {
       category: LogCategory.video,
     );
 
-    // Reset status and error
-    final resetUpload = upload.copyWith(status: UploadStatus.pending);
+    // retryCount tracks user-triggered retries, so consume one budget slot
+    // before starting a new upload session.
+    final nextRetryCount = (upload.retryCount ?? 0) + 1;
+    final resetUpload = upload.copyWith(
+      status: UploadStatus.pending,
+      retryCount: nextRetryCount,
+    );
 
     await _updateUpload(resetUpload);
 
@@ -2040,7 +2054,7 @@ class UploadManager {
         : now.difference(upload.createdAt);
 
     final shouldResetRetries = timeSinceLastAttempt.inHours >= 1;
-    final newRetryCount = shouldResetRetries ? 0 : (upload.retryCount ?? 0);
+    final newRetryCount = shouldResetRetries ? 1 : (upload.retryCount ?? 0) + 1;
 
     // Update upload with reset retry count if applicable
     final updatedUpload = upload.copyWith(

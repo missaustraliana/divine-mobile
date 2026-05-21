@@ -11,6 +11,9 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:openvine/models/pending_upload.dart';
 import 'package:openvine/services/upload_manager.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+
+import '../mocks/mock_path_provider_platform.dart';
 
 class _MockBlossomUploadService extends Mock implements BlossomUploadService {}
 
@@ -652,5 +655,318 @@ void main() {
         contains('Upload failed'),
       );
     });
+  });
+
+  group('retry counter', () {
+    late UploadManager retryUploadManager;
+    late _MockBlossomUploadService retryMockBlossom;
+    late Directory retryTestDir;
+    late PathProviderPlatform originalPathProvider;
+
+    setUpAll(() {
+      registerFallbackValue(File(''));
+    });
+
+    setUp(() async {
+      retryTestDir = await Directory.systemTemp.createTemp(
+        'upload_retry_counter_test_',
+      );
+      originalPathProvider = PathProviderPlatform.instance;
+      final mockPathProvider = MockPathProviderPlatform()
+        ..setTemporaryPath(retryTestDir.path)
+        ..setApplicationDocumentsPath('${retryTestDir.path}/documents')
+        ..setApplicationSupportPath('${retryTestDir.path}/support');
+      PathProviderPlatform.instance = mockPathProvider;
+
+      await Directory('${retryTestDir.path}/support').create(recursive: true);
+
+      retryMockBlossom = _MockBlossomUploadService();
+
+      // Zero delays so the test completes instantly.
+      retryUploadManager = UploadManager(
+        blossomService: retryMockBlossom,
+        retryConfig: const UploadRetryConfig(
+          initialDelay: Duration.zero,
+          maxDelay: Duration.zero,
+          networkTimeout: Duration(seconds: 30),
+        ),
+      );
+      mockConnectivity('wifi');
+      await retryUploadManager.initialize();
+    });
+
+    tearDown(() async {
+      retryUploadManager.dispose();
+      PathProviderPlatform.instance = originalPathProvider;
+      try {
+        await Hive.close();
+      } catch (_) {}
+      try {
+        await retryTestDir.delete(recursive: true);
+      } catch (_) {}
+    });
+
+    /// Stubs [mock] so that [uploadVideo] fails [failCount] times before
+    /// succeeding. [uploadImage] (thumbnail) always returns a graceful
+    /// failure so it doesn't interfere with the upload flow.
+    void stubUploadSequence(
+      _MockBlossomUploadService mock, {
+      required int failCount,
+    }) {
+      when(() => mock.isBlossomEnabled()).thenAnswer((_) async => false);
+      when(
+        () => mock.uploadImage(
+          imageFile: any(named: 'imageFile'),
+          nostrPubkey: any(named: 'nostrPubkey'),
+          maxAttempts: any(named: 'maxAttempts'),
+          onProgress: any(named: 'onProgress'),
+        ),
+      ).thenAnswer((_) async => const BlossomUploadResult(success: false));
+
+      var calls = 0;
+      when(
+        () => mock.uploadVideo(
+          videoFile: any(named: 'videoFile'),
+          nostrPubkey: any(named: 'nostrPubkey'),
+          title: any(named: 'title'),
+          description: any(named: 'description'),
+          hashtags: any(named: 'hashtags'),
+          proofManifestJson: any(named: 'proofManifestJson'),
+          resumableSession: any(named: 'resumableSession'),
+          onResumableSessionUpdated: any(named: 'onResumableSessionUpdated'),
+          onProgress: any(named: 'onProgress'),
+        ),
+      ).thenAnswer((_) async {
+        calls++;
+        if (calls <= failCount) {
+          throw const BlossomUploadFailureException(
+            'Network error: connection refused',
+          );
+        }
+        return const BlossomUploadResult(
+          success: true,
+          videoId: 'vid-ok',
+          url: 'https://media.divine.video/vid-ok',
+          fallbackUrl: 'https://media.divine.video/vid-ok',
+        );
+      });
+    }
+
+    test(
+      'status advances uploading → retrying across consecutive auto-attempts',
+      () async {
+        final videoFile = File('${retryTestDir.path}/video.mp4')
+          ..writeAsBytesSync([0, 1, 2, 3]);
+
+        final observedStatuses = <UploadStatus>[];
+
+        // Fail once then succeed so we observe exactly two status snapshots.
+        stubUploadSequence(retryMockBlossom, failCount: 1);
+
+        // Replace the uploadVideo stub with one that also captures status.
+        var calls = 0;
+        when(
+          () => retryMockBlossom.uploadVideo(
+            videoFile: any(named: 'videoFile'),
+            nostrPubkey: any(named: 'nostrPubkey'),
+            title: any(named: 'title'),
+            description: any(named: 'description'),
+            hashtags: any(named: 'hashtags'),
+            proofManifestJson: any(named: 'proofManifestJson'),
+            resumableSession: any(named: 'resumableSession'),
+            onResumableSessionUpdated: any(named: 'onResumableSessionUpdated'),
+            onProgress: any(named: 'onProgress'),
+          ),
+        ).thenAnswer((_) async {
+          calls++;
+          final all = retryUploadManager.pendingUploads;
+          if (all.isNotEmpty) observedStatuses.add(all.first.status);
+          if (calls == 1) {
+            throw const BlossomUploadFailureException(
+              'Network error: connection refused',
+            );
+          }
+          return const BlossomUploadResult(
+            success: true,
+            videoId: 'vid-status',
+            url: 'https://media.divine.video/vid-status',
+            fallbackUrl: 'https://media.divine.video/vid-status',
+          );
+        });
+
+        await retryUploadManager.startUpload(
+          videoFile: videoFile,
+          nostrPubkey: 'test-pubkey',
+        );
+
+        expect(calls, equals(2));
+        expect(observedStatuses.first, equals(UploadStatus.uploading));
+        expect(observedStatuses[1], equals(UploadStatus.retrying));
+      },
+    );
+
+    test(
+      'retryCount is NOT mutated by auto-attempts — manual retry remains available after exhausted session',
+      () async {
+        // Regression test for the reviewer-identified bug: if auto-attempts
+        // were to write retryCount + 1 to Hive on every attempt,
+        // PendingUpload.canRetry (retryCount < 3) would become false after
+        // the maxRetries (5) auto-attempts, permanently locking the user out
+        // of retryUpload(). The correct fix keeps the increment local.
+        final videoFile = File('${retryTestDir.path}/video2.mp4')
+          ..writeAsBytesSync([0, 1, 2, 3]);
+
+        // All 6 auto-attempts (1 initial + 5 retries) fail.
+        stubUploadSequence(retryMockBlossom, failCount: 999);
+
+        // Absorb the rethrown failure; we only care about the persisted state.
+        await expectLater(
+          retryUploadManager.startUpload(
+            videoFile: videoFile,
+            nostrPubkey: 'test-pubkey',
+          ),
+          throwsA(anything),
+        );
+
+        final failedUpload = retryUploadManager.pendingUploads.firstOrNull;
+        expect(failedUpload, isNotNull);
+        expect(failedUpload!.status, equals(UploadStatus.failed));
+
+        // Auto-attempts must NOT have modified the manual-retry budget.
+        expect(
+          failedUpload.retryCount,
+          equals(0),
+          reason:
+              'auto-attempts must not mutate retryCount — it is the manual-retry budget',
+        );
+        expect(
+          failedUpload.canRetry,
+          isTrue,
+          reason:
+              'user must still be able to manually retry after auto-retry exhaustion',
+        );
+
+        // Verify retryUpload() actually re-activates the upload and does not
+        // hard-return due to canRetry being false.
+        when(
+          () => retryMockBlossom.uploadVideo(
+            videoFile: any(named: 'videoFile'),
+            nostrPubkey: any(named: 'nostrPubkey'),
+            title: any(named: 'title'),
+            description: any(named: 'description'),
+            hashtags: any(named: 'hashtags'),
+            proofManifestJson: any(named: 'proofManifestJson'),
+            resumableSession: any(named: 'resumableSession'),
+            onResumableSessionUpdated: any(named: 'onResumableSessionUpdated'),
+            onProgress: any(named: 'onProgress'),
+          ),
+        ).thenAnswer(
+          (_) async => const BlossomUploadResult(
+            success: true,
+            videoId: 'vid-manual',
+            url: 'https://media.divine.video/vid-manual',
+            fallbackUrl: 'https://media.divine.video/vid-manual',
+          ),
+        );
+
+        await retryUploadManager.retryUpload(failedUpload.id);
+
+        final recovered = retryUploadManager.getUpload(failedUpload.id);
+        expect(recovered, isNotNull);
+        expect(recovered!.status, equals(UploadStatus.readyToPublish));
+        expect(
+          recovered.retryCount,
+          equals(1),
+          reason: 'manual retry must consume one retry budget slot',
+        );
+      },
+    );
+
+    test(
+      'manual retries consume budget and the fourth retry is blocked',
+      () async {
+        final videoFile = File('${retryTestDir.path}/video3.mp4')
+          ..writeAsBytesSync([0, 1, 2, 3]);
+
+        when(
+          () => retryMockBlossom.isBlossomEnabled(),
+        ).thenAnswer((_) async => false);
+        when(
+          () => retryMockBlossom.uploadImage(
+            imageFile: any(named: 'imageFile'),
+            nostrPubkey: any(named: 'nostrPubkey'),
+            maxAttempts: any(named: 'maxAttempts'),
+            onProgress: any(named: 'onProgress'),
+          ),
+        ).thenAnswer((_) async => const BlossomUploadResult(success: false));
+        when(
+          () => retryMockBlossom.uploadVideo(
+            videoFile: any(named: 'videoFile'),
+            nostrPubkey: any(named: 'nostrPubkey'),
+            title: any(named: 'title'),
+            description: any(named: 'description'),
+            hashtags: any(named: 'hashtags'),
+            proofManifestJson: any(named: 'proofManifestJson'),
+            resumableSession: any(named: 'resumableSession'),
+            onResumableSessionUpdated: any(named: 'onResumableSessionUpdated'),
+            onProgress: any(named: 'onProgress'),
+          ),
+        ).thenThrow(
+          const BlossomUploadFailureException(
+            'Network error: connection refused',
+          ),
+        );
+
+        await expectLater(
+          retryUploadManager.startUpload(
+            videoFile: videoFile,
+            nostrPubkey: 'test-pubkey',
+          ),
+          throwsA(anything),
+        );
+
+        final upload = retryUploadManager.pendingUploads.firstOrNull;
+        expect(upload, isNotNull);
+        expect(upload!.retryCount, equals(0));
+
+        for (var manualRetry = 1; manualRetry <= 3; manualRetry++) {
+          await retryUploadManager.retryUpload(upload.id);
+
+          final latest = retryUploadManager.getUpload(upload.id);
+          expect(latest, isNotNull);
+          expect(latest!.status, equals(UploadStatus.failed));
+          expect(latest.retryCount, equals(manualRetry));
+          expect(
+            latest.canRetry,
+            equals(manualRetry < 3),
+            reason: 'manual retry budget should stop after three tries',
+          );
+        }
+
+        clearInteractions(retryMockBlossom);
+
+        await retryUploadManager.retryUpload(upload.id);
+
+        verifyNever(
+          () => retryMockBlossom.uploadVideo(
+            videoFile: any(named: 'videoFile'),
+            nostrPubkey: any(named: 'nostrPubkey'),
+            title: any(named: 'title'),
+            description: any(named: 'description'),
+            hashtags: any(named: 'hashtags'),
+            proofManifestJson: any(named: 'proofManifestJson'),
+            resumableSession: any(named: 'resumableSession'),
+            onResumableSessionUpdated: any(named: 'onResumableSessionUpdated'),
+            onProgress: any(named: 'onProgress'),
+          ),
+        );
+
+        final blocked = retryUploadManager.getUpload(upload.id);
+        expect(blocked, isNotNull);
+        expect(blocked!.status, equals(UploadStatus.failed));
+        expect(blocked.retryCount, equals(3));
+        expect(blocked.canRetry, isFalse);
+      },
+    );
   });
 }
