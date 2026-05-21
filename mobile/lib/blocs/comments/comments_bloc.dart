@@ -13,6 +13,8 @@ import 'package:follow_repository/follow_repository.dart';
 import 'package:likes_repository/likes_repository.dart';
 import 'package:meta/meta.dart' show visibleForTesting;
 import 'package:nostr_sdk/event_kind.dart';
+import 'package:openvine/blocs/comments/reportable_sites.dart';
+import 'package:openvine/observability/reportable_error.dart';
 import 'package:openvine/services/auth_service.dart';
 import 'package:openvine/services/content_moderation_service.dart';
 import 'package:openvine/services/content_reporting_service.dart';
@@ -124,6 +126,14 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
   final bool _includeVideoReplies;
   bool _isInitialBackfillComplete = true;
 
+  void _addUnexpectedError(
+    Object error,
+    StackTrace stackTrace,
+    String context,
+  ) {
+    addError(Reportable(error, context: context), stackTrace);
+  }
+
   Future<void> _onLoadRequested(
     CommentsLoadRequested event,
     Emitter<CommentsState> emit,
@@ -165,7 +175,34 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
       if (!isClosed) {
         add(const CommentVoteCountsFetchRequested());
       }
-    } catch (e) {
+    } on CommentsRepositoryException catch (e, stackTrace) {
+      // CommentsRepository throws typed *FailedException types
+      // (LoadCommentsFailedException etc.) plus relay timeouts. Per
+      // .claude/rules/error_handling.md they are matrix-NO
+      // (API/domain + Network/IO). Raw addError surfaces in the unified
+      // log; not Reportable so it stays out of Crashlytics.
+      addError(e, stackTrace);
+      Log.error(
+        'Error loading comments: $e',
+        name: 'CommentsBloc',
+        category: LogCategory.ui,
+      );
+      if (state.commentsById.isNotEmpty) {
+        emit(state.copyWith(status: CommentsStatus.success));
+        return;
+      }
+      emit(
+        state.copyWith(
+          status: CommentsStatus.failure,
+          error: CommentsError.loadFailed,
+        ),
+      );
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        CommentsBlocReportableSites.onLoadRequested,
+      );
       Log.error(
         'Error loading comments: $e',
         name: 'CommentsBloc',
@@ -255,13 +292,34 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
         name: 'CommentsBloc',
         category: LogCategory.ui,
       );
-    } catch (e) {
+    } on CommentsRepositoryException catch (e, stackTrace) {
+      // Same source as _onLoadRequested — matrix-NO (API/domain +
+      // Network/IO). Emit loadFailed alongside isLoadingMore: false so
+      // the UI surfaces a snackbar (via BlocListener in comments_screen)
+      // instead of leaving a stopped-but-blank spinner.
+      addError(e, stackTrace);
       Log.error(
         'Error loading more comments: $e',
         name: 'CommentsBloc',
         category: LogCategory.ui,
       );
-      emit(state.copyWith(isLoadingMore: false));
+      emit(
+        state.copyWith(isLoadingMore: false, error: CommentsError.loadFailed),
+      );
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        CommentsBlocReportableSites.onLoadMoreRequested,
+      );
+      Log.error(
+        'Error loading more comments: $e',
+        name: 'CommentsBloc',
+        category: LogCategory.ui,
+      );
+      emit(
+        state.copyWith(isLoadingMore: false, error: CommentsError.loadFailed),
+      );
     }
   }
 
@@ -343,10 +401,7 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
       replyToEventId: event.parentCommentId,
       replyToAuthorPubkey: event.parentAuthorPubkey,
     );
-    final withPlaceholder = {
-      ...state.commentsById,
-      placeholderId: placeholder,
-    };
+    final withPlaceholder = {...state.commentsById, placeholderId: placeholder};
     if (isReply) {
       emit(state.clearActiveReply(commentsById: withPlaceholder));
     } else {
@@ -399,7 +454,38 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
           replyCountsByCommentId: _computeReplyCounts(reconciled),
         ),
       );
-    } catch (e) {
+    } on CommentsRepositoryException catch (e, stackTrace) {
+      // PostCommentFailedException (API/domain) + relay broadcast IO
+      // (Network/IO) — matrix-NO. The optimistic placeholder is rolled
+      // back and CommentsError.{postReplyFailed,postCommentFailed} drives
+      // a snackbar via comments_screen's BlocListener.
+      addError(e, stackTrace);
+      Log.error(
+        'Error posting comment: $e',
+        name: 'CommentsBloc',
+        category: LogCategory.ui,
+      );
+
+      final rolled = Map<String, Comment>.from(state.commentsById)
+        ..remove(placeholderId);
+      emit(
+        state.copyWith(
+          commentsById: rolled,
+          mainInputText: isReply ? state.mainInputText : previousMain,
+          replyInputText: isReply ? previousReply : state.replyInputText,
+          activeMentions: previousMentions,
+          activeMentionBindings: previousMentionBindings,
+          error: isReply
+              ? CommentsError.postReplyFailed
+              : CommentsError.postCommentFailed,
+        ),
+      );
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        CommentsBlocReportableSites.onSubmitted,
+      );
       Log.error(
         'Error posting comment: $e',
         name: 'CommentsBloc',
@@ -436,10 +522,8 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
         ? state.activeMentionBindings
         : state.activeMentions.entries
               .map(
-                (entry) => MentionBinding(
-                  display: entry.key,
-                  pubkey: entry.value,
-                ),
+                (entry) =>
+                    MentionBinding(display: entry.key, pubkey: entry.value),
               )
               .toList();
 
@@ -453,7 +537,15 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
         canonicalText: result.canonicalText,
         resolvedPubkeys: result.resolvedPubkeys,
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      // MentionResolutionService already degrades typed/profile IO
+      // failures internally. Anything escaping here is unexpected, but
+      // posting should still continue with the raw text.
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        CommentsBlocReportableSites.resolveCommentMentions,
+      );
       Log.warning(
         'Mention resolution failed: $e',
         name: 'CommentsBloc',
@@ -493,7 +585,24 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
           replyCountsByCommentId: _computeReplyCounts(updatedCommentsById),
         ),
       );
-    } catch (e) {
+    } on CommentsRepositoryException catch (e, stackTrace) {
+      // DeleteCommentFailedException (API/domain) + relay broadcast IO
+      // (Network/IO) — matrix-NO. Drives the deleteCommentFailed
+      // snackbar; the comment stays visible until the next refresh.
+      addError(e, stackTrace);
+      Log.error(
+        'Error deleting comment: $e',
+        name: 'CommentsBloc',
+        category: LogCategory.ui,
+      );
+
+      emit(state.copyWith(error: CommentsError.deleteCommentFailed));
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        CommentsBlocReportableSites.onDeleteRequested,
+      );
       Log.error(
         'Error deleting comment: $e',
         name: 'CommentsBloc',
@@ -533,7 +642,22 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
           downvotedCommentIds: voteStatuses.downvotedIds,
         ),
       );
-    } catch (e) {
+    } on LikesRepositoryException catch (e, stackTrace) {
+      // LikesRepository fetch IO — matrix-NO (Network/IO). UI silently
+      // misses vote counts but the rest of the screen is unaffected;
+      // addError surfaces the cause in the unified log.
+      addError(e, stackTrace);
+      Log.error(
+        'Error fetching comment vote counts: $e',
+        name: 'CommentsBloc',
+        category: LogCategory.ui,
+      );
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        CommentsBlocReportableSites.onVoteCountsFetchRequested,
+      );
       Log.error(
         'Error fetching comment vote counts: $e',
         name: 'CommentsBloc',
@@ -628,8 +752,9 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
         }
       }
     } on AlreadyLikedException {
-      // Repo already had the upvote — sync state to reality without error.
-      // Pre-tap baseline was wrong; trust the repo.
+      // State-sync sentinel (silent, no addError): repo already had the
+      // upvote, the pre-tap baseline was wrong. Reconcile and continue —
+      // no caller-visible failure.
       emit(
         state.copyWith(
           upvotedCommentIds: Set<String>.from(state.upvotedCommentIds)
@@ -639,7 +764,8 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
         ),
       );
     } on NotLikedException {
-      // Repo had no upvote to remove — sync state and continue.
+      // State-sync sentinel (silent, no addError): repo had no upvote
+      // to remove. Reconcile and continue — no caller-visible failure.
       emit(
         state.copyWith(
           upvotedCommentIds: Set<String>.from(state.upvotedCommentIds)
@@ -647,6 +773,8 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
         ),
       );
     } on AlreadyDownvotedException {
+      // State-sync sentinel (silent, no addError): repo already had the
+      // downvote. Reconcile and continue — no caller-visible failure.
       emit(
         state.copyWith(
           downvotedCommentIds: Set<String>.from(state.downvotedCommentIds)
@@ -656,13 +784,48 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
         ),
       );
     } on NotDownvotedException {
+      // State-sync sentinel (silent, no addError): repo had no downvote
+      // to remove. Reconcile and continue — no caller-visible failure.
       emit(
         state.copyWith(
           downvotedCommentIds: Set<String>.from(state.downvotedCommentIds)
             ..remove(commentId),
         ),
       );
-    } catch (e) {
+    } on LikesRepositoryException catch (e, stackTrace) {
+      // Like/downvote publish IO (LikesRepository → relay) — matrix-NO
+      // (Network/IO). Optimistic vote is reverted below and
+      // CommentsError.voteFailed drives a snackbar.
+      addError(e, stackTrace);
+      Log.error(
+        'Error toggling comment ${isUpvote ? 'upvote' : 'downvote'}: $e',
+        name: 'CommentsBloc',
+        category: LogCategory.ui,
+      );
+
+      // Revert optimistic update to the pre-tap baseline.
+      emit(
+        state.copyWith(
+          upvotedCommentIds: Set<String>.from(state.upvotedCommentIds)
+            ..addAll(wasUpvoted ? {commentId} : {})
+            ..removeAll(wasUpvoted ? {} : {commentId}),
+          downvotedCommentIds: Set<String>.from(state.downvotedCommentIds)
+            ..addAll(wasDownvoted ? {commentId} : {})
+            ..removeAll(wasDownvoted ? {} : {commentId}),
+          commentUpvoteCounts: Map<String, int>.from(state.commentUpvoteCounts)
+            ..[commentId] = prevUpCount,
+          commentDownvoteCounts: Map<String, int>.from(
+            state.commentDownvoteCounts,
+          )..[commentId] = prevDownCount,
+          error: CommentsError.voteFailed,
+        ),
+      );
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        CommentsBlocReportableSites.onVoteToggled,
+      );
       Log.error(
         'Error toggling comment ${isUpvote ? 'upvote' : 'downvote'}: $e',
         name: 'CommentsBloc',
@@ -708,7 +871,15 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
         reason: event.reason,
         details: event.details,
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      // ContentReportingService returns a typed failure result for
+      // normal/reportable-domain issues. A throw escaping here is
+      // unexpected.
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        CommentsBlocReportableSites.onReportRequested,
+      );
       Log.error(
         'Error reporting comment: $e',
         name: 'CommentsBloc',
@@ -724,7 +895,7 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
   ) async {
     try {
       // Block user via ContentBlocklistRepository (persists + publishes kind 30000)
-      _contentBlocklistRepository.blockUser(event.authorPubkey);
+      await _contentBlocklistRepository.blockUser(event.authorPubkey);
 
       // Unfollow the blocked user if currently following
       final followRepo = _followRepository;
@@ -744,7 +915,23 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
           replyCountsByCommentId: _computeReplyCounts(updatedCommentsById),
         ),
       );
-    } catch (e) {
+    } on Exception catch (e, stackTrace) {
+      // ContentBlocklistRepository persist + kind-30000 broadcast IO
+      // failures are expected-domain/IO here, so keep them out of
+      // Crashlytics and surface them via the snackbar state.
+      addError(e, stackTrace);
+      Log.error(
+        'Error blocking user: $e',
+        name: 'CommentsBloc',
+        category: LogCategory.ui,
+      );
+      emit(state.copyWith(error: CommentsError.blockFailed));
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        CommentsBlocReportableSites.onBlockUserRequested,
+      );
       Log.error(
         'Error blocking user: $e',
         name: 'CommentsBloc',
@@ -833,7 +1020,23 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
           replyCountsByCommentId: _computeReplyCounts(updatedCommentsById),
         ),
       );
-    } catch (e) {
+    } on CommentsRepositoryException catch (e, stackTrace) {
+      // Delete-then-repost flow IO (CommentsRepository.deleteComment +
+      // postComment) — matrix-NO. Drives the postCommentFailed snackbar.
+      addError(e, stackTrace);
+      Log.error(
+        'Error editing comment: $e',
+        name: 'CommentsBloc',
+        category: LogCategory.ui,
+      );
+
+      emit(state.copyWith(error: CommentsError.postCommentFailed));
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        CommentsBlocReportableSites.onEditSubmitted,
+      );
       Log.error(
         'Error editing comment: $e',
         name: 'CommentsBloc',
@@ -943,8 +1146,15 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
             mentionSuggestions: mergedSuggestions.take(5).toList(),
           ),
         );
-      } catch (e) {
-        // Tier 2 failure is non-fatal; local results remain visible
+      } catch (e, stackTrace) {
+        // `searchUsersFromApi` already returns [] on typed REST failures.
+        // Anything escaping here is unexpected, but Tier 1 local results
+        // should remain visible.
+        _addUnexpectedError(
+          e,
+          stackTrace,
+          CommentsBlocReportableSites.onMentionSearchRequested,
+        );
         Log.warning(
           'Mention search failed: $e',
           name: 'CommentsBloc',
@@ -1088,7 +1298,22 @@ class CommentsBloc extends Bloc<CommentsEvent, CommentsState> {
           );
         },
       );
-    } catch (e) {
+    } on CommentsRepositoryException catch (e, stackTrace) {
+      // watchComments setup IO (WatchCommentsFailedException + relay
+      // connect) — matrix-NO. Real-time updates won't arrive; the
+      // initial-load comments still render.
+      addError(e, stackTrace);
+      Log.warning(
+        'Failed to start watching comments: $e',
+        name: 'CommentsBloc',
+        category: LogCategory.ui,
+      );
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        CommentsBlocReportableSites.startWatchingComments,
+      );
       Log.warning(
         'Failed to start watching comments: $e',
         name: 'CommentsBloc',

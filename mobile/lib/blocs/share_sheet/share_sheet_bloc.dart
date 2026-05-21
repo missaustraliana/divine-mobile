@@ -12,6 +12,8 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:follow_repository/follow_repository.dart';
 import 'package:models/models.dart' hide LogCategory;
 import 'package:nostr_sdk/nip19/nip19_tlv.dart';
+import 'package:openvine/blocs/share_sheet/reportable_sites.dart';
+import 'package:openvine/observability/reportable_error.dart';
 import 'package:openvine/services/bookmark_service.dart';
 import 'package:openvine/services/classic_vine_clip_import_service.dart';
 import 'package:openvine/services/video_sharing_service.dart';
@@ -78,6 +80,14 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
   final BaseCacheManager? _cacheManager;
   final ClassicVineClipImportService? _classicVineClipImportService;
 
+  void _addUnexpectedError(
+    Object error,
+    StackTrace stackTrace,
+    String context,
+  ) {
+    addError(Reportable(error, context: context), stackTrace);
+  }
+
   // --------------------------------------------------------------------------
   // Contact loading
   // --------------------------------------------------------------------------
@@ -138,7 +148,12 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
           clearActionResult: true,
         ),
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        ShareSheetBlocReportableSites.onContactsLoadRequested,
+      );
       Log.error(
         'Error loading contacts: $e',
         name: 'ShareSheetBloc',
@@ -225,7 +240,12 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        ShareSheetBlocReportableSites.onQuickSendRequested,
+      );
       Log.error(
         'Failed to quick-send video: $e',
         name: 'ShareSheetBloc',
@@ -278,7 +298,12 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        ShareSheetBlocReportableSites.onSendRequested,
+      );
       Log.error(
         'Failed to send video: $e',
         name: 'ShareSheetBloc',
@@ -306,18 +331,14 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
         category: LogCategory.ui,
       );
       emit(
-        state.copyWith(
-          actionResult: ShareSheetSaveResult(succeeded: false),
-        ),
+        state.copyWith(actionResult: ShareSheetSaveResult(succeeded: false)),
       );
       return;
     }
 
     var wasBookmarked = false;
     try {
-      wasBookmarked = bookmarkService.isVideoBookmarkedGlobally(
-        _video.id,
-      );
+      wasBookmarked = bookmarkService.isVideoBookmarkedGlobally(_video.id);
       final succeeded = await bookmarkService.toggleVideoInGlobalBookmarks(
         _video.id,
       );
@@ -330,7 +351,12 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
           ),
         ),
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        ShareSheetBlocReportableSites.onSaveRequested,
+      );
       Log.error(
         'Failed to toggle bookmark: $e',
         name: 'ShareSheetBloc',
@@ -364,9 +390,7 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
       );
       emit(
         state.copyWith(
-          actionResult: ShareSheetClassicVineClipImportResult(
-            succeeded: false,
-          ),
+          actionResult: ShareSheetClassicVineClipImportResult(succeeded: false),
         ),
       );
       return;
@@ -381,7 +405,12 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
           ),
         ),
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        ShareSheetBlocReportableSites.onAddClassicVineToClipsRequested,
+      );
       Log.error(
         'Failed to import classic Vine clip: $e',
         name: 'ShareSheetBloc',
@@ -389,9 +418,7 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
       );
       emit(
         state.copyWith(
-          actionResult: ShareSheetClassicVineClipImportResult(
-            succeeded: false,
-          ),
+          actionResult: ShareSheetClassicVineClipImportResult(succeeded: false),
         ),
       );
     }
@@ -415,7 +442,12 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
           ),
         ),
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        ShareSheetBlocReportableSites.onCopyLinkRequested,
+      );
       Log.error(
         'Failed to generate share link: $e',
         name: 'ShareSheetBloc',
@@ -447,6 +479,9 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
           await file.copy(tmpFile.path);
           thumbnailPath = tmpFile.path;
         } catch (e) {
+          // Intentional silent fallback (no addError): sharing proceeds
+          // without a thumbnail attachment. No caller-visible failure —
+          // the share sheet still opens with the URL + title.
           Log.warning(
             'Thumbnail download failed, sharing without image: $e',
             name: 'ShareSheetBloc',
@@ -466,7 +501,12 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
           ),
         ),
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        ShareSheetBlocReportableSites.onShareViaRequested,
+      );
       Log.error(
         'Failed to generate share data: $e',
         name: 'ShareSheetBloc',
@@ -490,7 +530,12 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
           ),
         ),
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        ShareSheetBlocReportableSites.onCopyEventJsonRequested,
+      );
       Log.error(
         'Failed to generate event JSON: $e',
         name: 'ShareSheetBloc',
@@ -516,7 +561,12 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
           ),
         ),
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _addUnexpectedError(
+        e,
+        stackTrace,
+        ShareSheetBlocReportableSites.onCopyEventIdRequested,
+      );
       Log.error(
         'Failed to generate event ID: $e',
         name: 'ShareSheetBloc',

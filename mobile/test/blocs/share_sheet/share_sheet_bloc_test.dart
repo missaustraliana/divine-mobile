@@ -11,6 +11,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:models/models.dart';
 import 'package:openvine/blocs/share_sheet/share_sheet_bloc.dart';
 import 'package:openvine/models/divine_video_clip.dart';
+import 'package:openvine/observability/reportable_error.dart';
 import 'package:openvine/services/bookmark_service.dart';
 import 'package:openvine/services/classic_vine_clip_import_service.dart';
 import 'package:openvine/services/video_sharing_service.dart';
@@ -188,6 +189,7 @@ void main() {
         },
         build: createBloc,
         act: (bloc) => bloc.add(const ShareSheetContactsLoadRequested()),
+        errors: () => [isA<Exception>()],
         expect: () => [
           const ShareSheetState(status: ShareSheetStatus.loading),
           const ShareSheetState(status: ShareSheetStatus.ready),
@@ -558,6 +560,7 @@ void main() {
         ),
         build: createBloc,
         act: (bloc) => bloc.add(const ShareSheetSendRequested()),
+        errors: () => [isA<Exception>()],
         expect: () => [
           isA<ShareSheetState>().having(
             (s) => s.isSending,
@@ -725,6 +728,7 @@ void main() {
         },
         build: createBloc,
         act: (bloc) => bloc.add(const ShareSheetSaveRequested()),
+        errors: () => [isA<Exception>()],
         expect: () => [
           isA<ShareSheetState>().having(
             (s) => s.actionResult,
@@ -754,6 +758,7 @@ void main() {
         },
         build: createBloc,
         act: (bloc) => bloc.add(const ShareSheetSaveRequested()),
+        errors: () => [isA<Exception>()],
         expect: () => [
           isA<ShareSheetState>().having(
             (s) => s.actionResult,
@@ -917,6 +922,36 @@ void main() {
           ),
         ],
       );
+
+      blocTest<ShareSheetBloc, ShareSheetState>(
+        'emits import failure AND addError when importer throws (#3715)',
+        setUp: () {
+          when(
+            () => mockImporter.importToLibrary(any()),
+          ).thenThrow(Exception('download failed'));
+        },
+        build: () => createBloc(classicVineClipImportService: mockImporter),
+        act: (bloc) =>
+            bloc.add(const ShareSheetAddClassicVineToClipsRequested()),
+        errors: () => [
+          isA<Reportable<Object>>().having(
+            (error) => error.unwrap(),
+            'unwrap',
+            isA<Exception>(),
+          ),
+        ],
+        expect: () => [
+          isA<ShareSheetState>().having(
+            (state) => state.actionResult,
+            'actionResult',
+            isA<ShareSheetClassicVineClipImportResult>().having(
+              (result) => result.succeeded,
+              'succeeded',
+              isFalse,
+            ),
+          ),
+        ],
+      );
     });
 
     // -----------------------------------------------------------------------
@@ -961,6 +996,7 @@ void main() {
         },
         build: createBloc,
         act: (bloc) => bloc.add(const ShareSheetCopyLinkRequested()),
+        errors: () => [isA<Exception>()],
         expect: () => [
           isA<ShareSheetState>().having(
             (s) => s.actionResult,
@@ -1110,6 +1146,7 @@ void main() {
         },
         build: createBloc,
         act: (bloc) => bloc.add(const ShareSheetShareViaRequested()),
+        errors: () => [isA<Exception>()],
         expect: () => [
           isA<ShareSheetState>().having(
             (s) => s.actionResult,
@@ -1158,6 +1195,13 @@ void main() {
           followRepository: mockFollowRepository,
         ),
         act: (bloc) => bloc.add(const ShareSheetCopyEventJsonRequested()),
+        errors: () => [
+          isA<Reportable<Object>>().having(
+            (error) => error.unwrap(),
+            'unwrap',
+            isA<FormatException>(),
+          ),
+        ],
         expect: () => [
           isA<ShareSheetState>().having(
             (s) => s.actionResult,
@@ -1206,6 +1250,13 @@ void main() {
           followRepository: mockFollowRepository,
         ),
         act: (bloc) => bloc.add(const ShareSheetCopyEventIdRequested()),
+        errors: () => [
+          isA<Reportable<Object>>().having(
+            (error) => error.unwrap(),
+            'unwrap',
+            isA<FormatException>(),
+          ),
+        ],
         expect: () => [
           isA<ShareSheetState>().having(
             (s) => s.actionResult,
