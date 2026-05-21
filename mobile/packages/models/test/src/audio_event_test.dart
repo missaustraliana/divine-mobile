@@ -413,6 +413,105 @@ void main() {
       });
     });
 
+    group('external provider metadata', () {
+      test('round trips external source and license metadata through JSON', () {
+        const audioEvent = AudioEvent(
+          id: 'freesound_502915',
+          pubkey: AudioEvent.externalProviderMarker,
+          createdAt: 1779120000,
+          url: 'https://cdn.freesound.org/previews/502/502915.mp3',
+          mimeType: 'audio/mpeg',
+          duration: 5.943,
+          title: 'Oh No No No Crowd',
+          source: 'ThePauny via Freesound',
+          externalSource: AudioExternalSource(
+            provider: 'freesound',
+            providerSoundId: '502915',
+            providerName: 'Freesound',
+            creatorName: 'ThePauny',
+            creatorUrl: 'https://freesound.org/people/ThePauny/',
+            sourceUrl: 'https://freesound.org/people/ThePauny/sounds/502915/',
+            previewUrl: 'https://cdn.freesound.org/previews/502/502915.mp3',
+            license: AudioLicenseMetadata(
+              type: 'cc0',
+              name: 'Creative Commons 0',
+              url: 'https://creativecommons.org/publicdomain/zero/1.0/',
+              allowsCommercialUse: true,
+              allowsDerivatives: true,
+              requiresAttribution: false,
+            ),
+          ),
+        );
+
+        final decoded = AudioEvent.fromJson(audioEvent.toJson());
+
+        expect(decoded.isExternalProviderSound, isTrue);
+        expect(decoded.externalSource?.provider, equals('freesound'));
+        expect(decoded.externalSource?.providerSoundId, equals('502915'));
+        expect(decoded.externalSource?.creatorName, equals('ThePauny'));
+        expect(decoded.externalSource?.license.type, equals('cc0'));
+        expect(decoded.externalSource?.license.allowsCommercialUse, isTrue);
+        expect(decoded.externalSource?.license.allowsDerivatives, isTrue);
+        expect(decoded.externalSource?.license.requiresAttribution, isFalse);
+        expect(decoded.externalSource, equals(audioEvent.externalSource));
+      });
+
+      test('external source and license metadata use value equality', () {
+        const license = AudioLicenseMetadata(
+          type: 'cc0',
+          name: 'Creative Commons 0',
+          url: 'https://creativecommons.org/publicdomain/zero/1.0/',
+          allowsCommercialUse: true,
+          allowsDerivatives: true,
+          requiresAttribution: false,
+        );
+        const sameLicense = AudioLicenseMetadata(
+          type: 'cc0',
+          name: 'Creative Commons 0',
+          url: 'https://creativecommons.org/publicdomain/zero/1.0/',
+          allowsCommercialUse: true,
+          allowsDerivatives: true,
+          requiresAttribution: false,
+        );
+        const source = AudioExternalSource(
+          provider: 'freesound',
+          providerSoundId: '502915',
+          providerName: 'Freesound',
+          creatorName: 'ThePauny',
+          creatorUrl: 'https://freesound.org/people/ThePauny/',
+          sourceUrl: 'https://freesound.org/people/ThePauny/sounds/502915/',
+          previewUrl: 'https://cdn.freesound.org/previews/502/502915.mp3',
+          license: license,
+        );
+        const sameSource = AudioExternalSource(
+          provider: 'freesound',
+          providerSoundId: '502915',
+          providerName: 'Freesound',
+          creatorName: 'ThePauny',
+          creatorUrl: 'https://freesound.org/people/ThePauny/',
+          sourceUrl: 'https://freesound.org/people/ThePauny/sounds/502915/',
+          previewUrl: 'https://cdn.freesound.org/previews/502/502915.mp3',
+          license: sameLicense,
+        );
+
+        expect(license, equals(sameLicense));
+        expect(license.hashCode, equals(sameLicense.hashCode));
+        expect(source, equals(sameSource));
+        expect(source.hashCode, equals(sameSource.hashCode));
+      });
+
+      test('omits external source metadata when it is absent', () {
+        const audioEvent = AudioEvent(
+          id: testHexId,
+          pubkey: testPubkey,
+          createdAt: 1700000000,
+        );
+
+        expect(audioEvent.toJson(), isNot(contains('externalSource')));
+        expect(audioEvent.isExternalProviderSound, isFalse);
+      });
+    });
+
     group('toTags', () {
       test('generates complete tags list', () {
         // Arrange
@@ -873,10 +972,7 @@ void main() {
         expect(audioEvent.duration, equals(6.2));
         expect(audioEvent.title, equals('Test Sound'));
         expect(audioEvent.source, equals('Original Sound'));
-        expect(
-          audioEvent.sourceVideoReference,
-          equals('34236:pubkey:vine-id'),
-        );
+        expect(audioEvent.sourceVideoReference, equals('34236:pubkey:vine-id'));
         expect(audioEvent.sourceVideoRelay, equals('wss://relay.example'));
         expect(
           audioEvent.startOffset,
@@ -998,10 +1094,7 @@ void main() {
           startOffset: const Duration(milliseconds: 2500),
         );
 
-        expect(
-          updated.startOffset,
-          equals(const Duration(milliseconds: 2500)),
-        );
+        expect(updated.startOffset, equals(const Duration(milliseconds: 2500)));
         expect(original.startOffset, equals(Duration.zero));
       });
 
