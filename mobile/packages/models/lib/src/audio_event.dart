@@ -471,8 +471,10 @@ class AudioEvent {
     'source': ?source,
     'sourceVideoReference': ?sourceVideoReference,
     'sourceVideoRelay': ?sourceVideoRelay,
+    // Always serialize volume so history and draft snapshots preserve
+    // explicit user edits instead of relying on an implicit default.
+    'volume': volume,
     if (startOffset != .zero) 'startOffsetMs': startOffset.inMilliseconds,
-    if (volume != 1.0) 'volume': volume,
     if (startTime != Duration.zero) 'startTimeMs': startTime.inMilliseconds,
     if (endTime != null) 'endTimeMs': endTime!.inMilliseconds,
   };

@@ -2763,7 +2763,6 @@
     "videoEditorDrawLabel": "Desenhar",
     "videoEditorFilterLabel": "Filtro",
     "videoEditorAudioLabel": "Áudio",
-    "videoEditorVolumeLabel": "Volume",
     "videoEditorAddTitle": "Adicionar",
     "videoEditorOpenCameraSemanticLabel": "Abrir câmera",
     "videoEditorOpenLibrarySemanticLabel": "Abrir biblioteca",
@@ -2811,7 +2810,6 @@
     "videoEditorFailedLoadStickers": "Falha ao carregar stickers",
     "videoEditorAdjustVolumeTitle": "Ajustar volume",
     "videoEditorRecordedAudioLabel": "Áudio gravado",
-    "videoEditorCustomAudioLabel": "Áudio personalizado",
     "videoEditorPlaySemanticLabel": "Reproduzir",
     "videoEditorPauseSemanticLabel": "Pausar",
     "videoEditorMuteAudioSemanticLabel": "Silenciar áudio",
@@ -3656,4 +3654,17 @@
             }
         }
     }
+    ,
+    "videoEditorTimelineVolumePreview": "Volume {percent}%",
+    "@videoEditorTimelineVolumePreview": {
+        "placeholders": {
+            "percent": {
+                "type": "int"
+            }
+        }
+    },
+    "videoEditorTimelineSlideToAdjust": "Deslize para ajustar",
+    "videoEditorVolumeSemanticLabel": "Ajustar volume",
+    "videoEditorOriginalAudioLabel": "Áudio original",
+    "videoEditorClipVolumeLabel": "Clipe {index}"
 }

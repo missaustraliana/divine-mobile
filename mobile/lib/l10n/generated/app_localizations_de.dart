@@ -6728,9 +6728,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get videoEditorAudioLabel => 'Audio';
 
   @override
-  String get videoEditorVolumeLabel => 'Lautstärke';
-
-  @override
   String get videoEditorAddTitle => 'Hinzufügen';
 
   @override
@@ -6857,9 +6854,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get videoEditorRecordedAudioLabel => 'Aufgenommener Ton';
 
   @override
-  String get videoEditorCustomAudioLabel => 'Eigener Ton';
-
-  @override
   String get videoEditorPlaySemanticLabel => 'Abspielen';
 
   @override
@@ -6870,6 +6864,25 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get videoEditorUnmuteAudioSemanticLabel => 'Ton wieder einschalten';
+
+  @override
+  String get videoEditorVolumeSemanticLabel => 'Lautstärke anpassen';
+
+  @override
+  String videoEditorTimelineVolumePreview(int percent) {
+    return 'Lautstärke $percent%';
+  }
+
+  @override
+  String get videoEditorTimelineSlideToAdjust => 'Zum Anpassen schieben';
+
+  @override
+  String get videoEditorOriginalAudioLabel => 'Originalton';
+
+  @override
+  String videoEditorClipVolumeLabel(int index) {
+    return 'Clip $index';
+  }
 
   @override
   String get videoEditorDeleteLabel => 'Löschen';

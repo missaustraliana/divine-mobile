@@ -1,5 +1,5 @@
 // ABOUTME: Widget tests for VideoEditorTimelineHeader.
-// ABOUTME: Validates play/pause, mute, undo/redo buttons and time display.
+// ABOUTME: Validates play/pause, undo/redo buttons, volume arc, and time display.
 
 import 'package:bloc_test/bloc_test.dart';
 import 'package:divine_ui/divine_ui.dart';
@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:openvine/blocs/video_editor/clip_editor/clip_editor_bloc.dart';
 import 'package:openvine/blocs/video_editor/main_editor/video_editor_main_bloc.dart';
+import 'package:openvine/blocs/video_editor/timeline_overlay/timeline_overlay_bloc.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/widgets/video_editor/main_editor/video_editor_scope.dart';
@@ -23,18 +24,26 @@ class _MockVideoEditorMainBloc
 class _MockClipEditorBloc extends MockBloc<ClipEditorEvent, ClipEditorState>
     implements ClipEditorBloc {}
 
+class _MockTimelineOverlayBloc
+    extends MockBloc<TimelineOverlayEvent, TimelineOverlayState>
+    implements TimelineOverlayBloc {}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group(VideoEditorTimelineHeader, () {
     late _MockVideoEditorMainBloc mockMainBloc;
     late _MockClipEditorBloc mockClipBloc;
+    late _MockTimelineOverlayBloc mockTimelineOverlayBloc;
     late ValueNotifier<Duration> playheadPosition;
+    late ValueNotifier<double?> volumePreviewNotifier;
 
     setUp(() {
       mockMainBloc = _MockVideoEditorMainBloc();
       mockClipBloc = _MockClipEditorBloc();
+      mockTimelineOverlayBloc = _MockTimelineOverlayBloc();
       playheadPosition = ValueNotifier(Duration.zero);
+      volumePreviewNotifier = ValueNotifier<double?>(null);
 
       when(() => mockMainBloc.state).thenReturn(const VideoEditorMainState());
       when(
@@ -44,15 +53,23 @@ void main() {
       when(
         () => mockClipBloc.stream,
       ).thenAnswer((_) => const Stream<ClipEditorState>.empty());
+      when(
+        () => mockTimelineOverlayBloc.state,
+      ).thenReturn(const TimelineOverlayState());
+      when(
+        () => mockTimelineOverlayBloc.stream,
+      ).thenAnswer((_) => const Stream<TimelineOverlayState>.empty());
     });
 
     tearDown(() {
       playheadPosition.dispose();
+      volumePreviewNotifier.dispose();
     });
 
     Widget buildWidget({
       VideoEditorMainState? mainState,
       ClipEditorState? clipState,
+      TimelineOverlayState? overlayState,
       Duration? position,
     }) {
       if (mainState != null) {
@@ -60,6 +77,9 @@ void main() {
       }
       if (clipState != null) {
         when(() => mockClipBloc.state).thenReturn(clipState);
+      }
+      if (overlayState != null) {
+        when(() => mockTimelineOverlayBloc.state).thenReturn(overlayState);
       }
       if (position != null) {
         playheadPosition.value = position;
@@ -78,16 +98,19 @@ void main() {
             onOpenCamera: () {},
             onOpenClipsEditor: () {},
             onAddStickers: () {},
-            onAdjustVolume: () {},
             onOpenMusicLibrary: () {},
             onAddEditTextLayer: ([layer]) async => null,
             child: MultiBlocProvider(
               providers: [
                 BlocProvider<VideoEditorMainBloc>.value(value: mockMainBloc),
                 BlocProvider<ClipEditorBloc>.value(value: mockClipBloc),
+                BlocProvider<TimelineOverlayBloc>.value(
+                  value: mockTimelineOverlayBloc,
+                ),
               ],
               child: VideoEditorTimelineHeader(
                 playheadPosition: playheadPosition,
+                volumePreviewNotifier: volumePreviewNotifier,
               ),
             ),
           ),
@@ -106,12 +129,6 @@ void main() {
         await tester.pumpWidget(buildWidget());
 
         expect(find.bySemanticsLabel('Play'), findsOneWidget);
-      });
-
-      testWidgets('renders mute button', (tester) async {
-        await tester.pumpWidget(buildWidget());
-
-        expect(find.bySemanticsLabel('Mute audio'), findsOneWidget);
       });
 
       testWidgets('renders undo button', (tester) async {
@@ -156,35 +173,6 @@ void main() {
       });
     });
 
-    group('mute', () {
-      testWidgets('shows mute label when not muted', (tester) async {
-        await tester.pumpWidget(
-          buildWidget(mainState: const VideoEditorMainState()),
-        );
-
-        expect(find.bySemanticsLabel('Mute audio'), findsOneWidget);
-      });
-
-      testWidgets('shows unmute label when muted', (tester) async {
-        await tester.pumpWidget(
-          buildWidget(mainState: const VideoEditorMainState(isMuted: true)),
-        );
-
-        expect(find.bySemanticsLabel('Unmute audio'), findsOneWidget);
-      });
-
-      testWidgets('dispatches mute toggle event on tap', (tester) async {
-        await tester.pumpWidget(buildWidget());
-
-        await tester.tap(find.bySemanticsLabel('Mute audio'));
-        await tester.pump();
-
-        verify(
-          () => mockMainBloc.add(const VideoEditorMuteToggled()),
-        ).called(1);
-      });
-    });
-
     group('undo/redo', () {
       testWidgets('undo button is disabled when canUndo is false', (
         tester,
@@ -193,11 +181,11 @@ void main() {
           buildWidget(mainState: const VideoEditorMainState()),
         );
 
-        final undoButtons = tester.widgetList<DivineIconButton>(
-          find.byType(DivineIconButton),
+        final l10n = lookupAppLocalizations(const Locale('en'));
+        final undoButton = buttonBySemanticLabel(
+          tester,
+          l10n.videoEditorUndoSemanticLabel,
         );
-        // Undo is the 3rd button (play, mute, undo, redo)
-        final undoButton = undoButtons.elementAt(2);
         expect(undoButton.onPressed, isNull);
       });
 
@@ -208,10 +196,11 @@ void main() {
           buildWidget(mainState: const VideoEditorMainState(canUndo: true)),
         );
 
-        final undoButtons = tester.widgetList<DivineIconButton>(
-          find.byType(DivineIconButton),
+        final l10n = lookupAppLocalizations(const Locale('en'));
+        final undoButton = buttonBySemanticLabel(
+          tester,
+          l10n.videoEditorUndoSemanticLabel,
         );
-        final undoButton = undoButtons.elementAt(2);
         expect(undoButton.onPressed, isNotNull);
       });
 
@@ -222,10 +211,11 @@ void main() {
           buildWidget(mainState: const VideoEditorMainState()),
         );
 
-        final redoButtons = tester.widgetList<DivineIconButton>(
-          find.byType(DivineIconButton),
+        final l10n = lookupAppLocalizations(const Locale('en'));
+        final redoButton = buttonBySemanticLabel(
+          tester,
+          l10n.videoEditorRedoSemanticLabel,
         );
-        final redoButton = redoButtons.elementAt(3);
         expect(redoButton.onPressed, isNull);
       });
 
@@ -236,10 +226,11 @@ void main() {
           buildWidget(mainState: const VideoEditorMainState(canRedo: true)),
         );
 
-        final redoButtons = tester.widgetList<DivineIconButton>(
-          find.byType(DivineIconButton),
+        final l10n = lookupAppLocalizations(const Locale('en'));
+        final redoButton = buttonBySemanticLabel(
+          tester,
+          l10n.videoEditorRedoSemanticLabel,
         );
-        final redoButton = redoButtons.elementAt(3);
         expect(redoButton.onPressed, isNotNull);
       });
     });
@@ -286,7 +277,98 @@ void main() {
         expect(find.textContaining('08:00'), findsOneWidget);
       });
     });
+
+    group('volume mode', () {
+      testWidgets('shows slide-to-adjust copy in volume edit mode', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          buildWidget(
+            mainState: const VideoEditorMainState(isVolumeEditMode: true),
+            clipState: ClipEditorState(clips: [_createTestClip(id: 'a')]),
+          ),
+        );
+
+        expect(find.text('Slide to adjust'), findsOneWidget);
+      });
+
+      testWidgets('shows live preview percentage when notifier updates', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          buildWidget(
+            mainState: const VideoEditorMainState(isVolumeEditMode: true),
+            clipState: ClipEditorState(clips: [_createTestClip(id: 'a')]),
+          ),
+        );
+
+        volumePreviewNotifier.value = 0.42;
+        await tester.pump();
+
+        expect(find.text('Volume 42%'), findsOneWidget);
+      });
+
+      testWidgets(
+        'volume button uses highlighted override colors when active',
+        (
+          tester,
+        ) async {
+          await tester.pumpWidget(
+            buildWidget(
+              mainState: const VideoEditorMainState(isVolumeEditMode: true),
+              clipState: ClipEditorState(clips: [_createTestClip(id: 'a')]),
+            ),
+          );
+
+          final l10n = lookupAppLocalizations(const Locale('en'));
+          final volumeButton = buttonBySemanticLabel(
+            tester,
+            l10n.videoEditorVolumeSemanticLabel,
+          );
+
+          expect(volumeButton.backgroundColor, VineTheme.accentYellow);
+          expect(
+            volumeButton.foregroundColor,
+            VineTheme.accentYellowBackground,
+          );
+        },
+      );
+
+      testWidgets(
+        'volume button uses accent icon when any volume is modified',
+        (
+          tester,
+        ) async {
+          await tester.pumpWidget(
+            buildWidget(
+              clipState: ClipEditorState(
+                clips: [
+                  _createTestClip(id: 'a').copyWith(volume: 0.6),
+                ],
+              ),
+            ),
+          );
+
+          final l10n = lookupAppLocalizations(const Locale('en'));
+          final volumeButton = buttonBySemanticLabel(
+            tester,
+            l10n.videoEditorVolumeSemanticLabel,
+          );
+
+          expect(volumeButton.foregroundColor, VineTheme.accentYellow);
+          expect(volumeButton.backgroundColor, isNull);
+        },
+      );
+    });
   });
+}
+
+DivineIconButton buttonBySemanticLabel(WidgetTester tester, String label) {
+  final finder = find.ancestor(
+    of: find.bySemanticsLabel(label),
+    matching: find.byType(DivineIconButton),
+  );
+  return tester.widget<DivineIconButton>(finder.first);
 }
 
 DivineVideoClip _createTestClip({required String id, int seconds = 2}) {

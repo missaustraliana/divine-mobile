@@ -19,6 +19,7 @@ import 'package:openvine/blocs/video_editor/filter_editor/video_editor_filter_bl
 import 'package:openvine/blocs/video_editor/main_editor/video_editor_main_bloc.dart';
 import 'package:openvine/blocs/video_editor/timeline_overlay/timeline_overlay_bloc.dart';
 import 'package:openvine/constants/video_editor_constants.dart';
+import 'package:openvine/extensions/video_editor_extensions.dart';
 import 'package:openvine/extensions/video_editor_history_extensions.dart';
 import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/models/timeline_overlay_item.dart';
@@ -462,12 +463,8 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
     );
     if (!mounted) return;
 
-    final editorState = ref.read(videoEditorProvider);
     if (clips.isEmpty) return;
-    await Future.wait([
-      _videoPlayer!.setLooping(looping: true),
-      _videoPlayer!.setVolume(editorState.originalAudioVolume),
-    ]);
+    await _videoPlayer!.setLooping(looping: true);
     if (!mounted) return;
 
     _isPlayerReadyNotifier.value = true;
@@ -520,8 +517,6 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
     // Index audio events by ID for fast lookup.
     final audioById = {for (final e in audioEvents) e.id: e};
 
-    final customVolume = ref.read(videoEditorProvider).customAudioVolume;
-
     final tracks = <AudioTrack>[];
     for (final item in soundItems) {
       final sound = audioById[item.id];
@@ -532,7 +527,7 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
         if (sound.isBundled && sound.assetPath != null) {
           track = await AudioTrack.asset(
             sound.assetPath!,
-            volume: customVolume,
+            volume: sound.volume,
             videoStartTime: item.startTime,
             videoEndTime: item.endTime,
             trackStart: sound.startOffset,
@@ -540,7 +535,7 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
         } else if (sound.isLocalImport && sound.localFilePath != null) {
           track = AudioTrack.file(
             sound.localFilePath!,
-            volume: customVolume,
+            volume: sound.volume,
             videoStartTime: item.startTime,
             videoEndTime: item.endTime,
             trackStart: sound.startOffset,
@@ -548,7 +543,7 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
         } else {
           track = AudioTrack.network(
             sound.url!,
-            volume: customVolume,
+            volume: sound.volume,
             videoStartTime: item.startTime,
             videoEndTime: item.endTime,
             trackStart: sound.startOffset,
@@ -758,20 +753,6 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
     );
     final targetAspectRatio = clip.targetAspectRatio;
 
-    // Live volume preview: sync player volumes when state changes
-    ref.listen<double>(
-      videoEditorProvider.select((s) => s.originalAudioVolume),
-      (_, volume) {
-        if (_isPlayerInitialized) _videoPlayer?.setVolume(volume);
-      },
-    );
-    ref.listen<double>(
-      videoEditorProvider.select((s) => s.customAudioVolume),
-      (_, volume) {
-        if (_isPlayerInitialized) _videoPlayer?.setAudioTrackVolume(0, volume);
-      },
-    );
-
     // Reinitialize the player when clip paths change.
     // Uses a custom equality check because List uses reference equality by
     // default, which would cause the listener to fire on every provider
@@ -936,11 +917,35 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
           },
         ),
         // Sync native audio tracks when audio sources change
-        // (sound added/removed) or a sound item is dragged/trimmed.
+        // (sound added/removed/volume-changed) or a sound item is
+        // dragged/trimmed.
         BlocListener<TimelineOverlayBloc, TimelineOverlayState>(
           listenWhen: (previous, current) {
             // Audio sources changed (add / remove / replace).
             if (previous.audioTracks != current.audioTracks) return true;
+
+            // Audio track volume changed (user action).
+            //
+            // AudioEvent equality is identity-based (excludes volume), so
+            // Equatable cannot detect a volume-only change via the
+            // audioTracks list. audioTracksRevision is incremented by
+            // TimelineOverlayAudioVolumeChanged to make the state distinct
+            // and force the listener to fire here.
+            if (previous.audioTracksRevision != current.audioTracksRevision) {
+              return true;
+            }
+
+            // Audio track volume restored by undo/redo.
+            //
+            // audioTracksPlayerRevision is incremented in _onUpdateItems
+            // when volumes differ from the current state (undo/redo path).
+            // It is intentionally separate from audioTracksRevision so the
+            // write-to-history listener does NOT fire and create a spurious
+            // history entry.
+            if (previous.audioTracksPlayerRevision !=
+                current.audioTracksPlayerRevision) {
+              return true;
+            }
 
             // Sound item drag/trim ended.
             final dragEnded =
@@ -960,6 +965,17 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
           },
           listener: (context, state) {
             _syncAudioTracks();
+          },
+        ),
+        // Persist audio track volume changes to the ProImageEditor undo
+        // history.  audioTracksRevision is incremented exclusively by
+        // TimelineOverlayAudioVolumeChanged, so this listener fires once
+        // per volume-dial release and creates exactly one undo point.
+        BlocListener<TimelineOverlayBloc, TimelineOverlayState>(
+          listenWhen: (previous, current) =>
+              previous.audioTracksRevision != current.audioTracksRevision,
+          listener: (context, state) {
+            scope.requireEditor.setSoundVolumes(state.audioTracks);
           },
         ),
         // Update native player clip boundaries when trim handle is
@@ -1033,6 +1049,18 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
             }
           },
         ),
+        // Persist clip volume changes to the ProImageEditor undo history.
+        // clipsVolumeRevision is incremented exclusively by
+        // ClipEditorClipVolumeChanged, so this listener creates exactly one
+        // undo point per volume-dial release without duplicating the history
+        // entries written by trim/reorder operations.
+        BlocListener<ClipEditorBloc, ClipEditorState>(
+          listenWhen: (previous, current) =>
+              previous.clipsVolumeRevision != current.clipsVolumeRevision,
+          listener: (context, state) {
+            scope.requireEditor.setClipState(state.clips);
+          },
+        ),
         BlocListener<VideoEditorMainBloc, VideoEditorMainState>(
           listenWhen: (previous, current) =>
               previous.isExternalPauseRequested !=
@@ -1060,18 +1088,6 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
               previous.seekCounter != current.seekCounter,
           listener: (context, state) {
             _onSeekRequested(state.seekPosition);
-          },
-        ),
-        BlocListener<VideoEditorMainBloc, VideoEditorMainState>(
-          listenWhen: (previous, current) =>
-              previous.isMuted != current.isMuted,
-          listener: (context, state) {
-            if (_isPlayerInitialized) {
-              _videoPlayer?.setVolume(state.isMuted ? 0 : 1);
-            }
-            ref
-                .read(videoEditorProvider.notifier)
-                .setOriginalAudioVolume(state.isMuted ? 0 : 1);
           },
         ),
       ],

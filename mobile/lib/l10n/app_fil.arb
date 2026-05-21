@@ -1673,7 +1673,6 @@
     "videoEditorDrawLabel": "Mag-drawing",
     "videoEditorFilterLabel": "Filter",
     "videoEditorAudioLabel": "Audio",
-    "videoEditorVolumeLabel": "Volume",
     "videoEditorAddTitle": "Idagdag",
     "videoEditorOpenLibrarySemanticLabel": "Buksan ang Library",
     "videoEditorOpenAudioSemanticLabel": "Buksan ang audio editor",
@@ -1713,7 +1712,6 @@
     "videoEditorFailedLoadStickers": "Hindi na-load ang mga sticker",
     "videoEditorAdjustVolumeTitle": "I-adjust ang volume",
     "videoEditorRecordedAudioLabel": "Na-record na audio",
-    "videoEditorCustomAudioLabel": "Custom audio",
     "videoEditorPlaySemanticLabel": "I-play",
     "videoEditorPauseSemanticLabel": "I-pause",
     "videoEditorMuteAudioSemanticLabel": "I-mute ang audio",
@@ -2197,4 +2195,17 @@
             }
         }
     }
+    ,
+    "videoEditorTimelineVolumePreview": "Volume {percent}%",
+    "@videoEditorTimelineVolumePreview": {
+        "placeholders": {
+            "percent": {
+                "type": "int"
+            }
+        }
+    },
+    "videoEditorTimelineSlideToAdjust": "I-slide para i-adjust",
+    "videoEditorVolumeSemanticLabel": "Ayusin ang volume",
+    "videoEditorOriginalAudioLabel": "Orihinal na audio",
+    "videoEditorClipVolumeLabel": "Clip {index}"
 }

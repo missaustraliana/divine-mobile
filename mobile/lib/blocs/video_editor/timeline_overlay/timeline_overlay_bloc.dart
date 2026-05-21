@@ -42,6 +42,10 @@ class TimelineOverlayBloc
     on<TimelineOverlayCollapseToggled>(_onCollapseToggled);
     on<TimelineOverlayTotalDurationChanged>(_onTotalDurationChanged);
     on<TimelineOverlayWaveformLoaded>(_onWaveformLoaded);
+    on<TimelineOverlayAudioVolumeChanged>(
+      _onAudioVolumeChanged,
+      transformer: sequential(),
+    );
   }
 
   void _onUpdateItems(
@@ -82,6 +86,9 @@ class TimelineOverlayBloc
               : VideoEditorConstants.maxDuration,
           waveformLeftChannel: leftCache[track.id],
           waveformRightChannel: rightCache[track.id],
+          audioSource: track.isOriginalSound
+              ? AudioSource.original
+              : AudioSource.custom,
         ),
     ];
 
@@ -122,6 +129,19 @@ class TimelineOverlayBloc
         state.selectedItemId != null &&
         newItems.any((i) => i.id == state.selectedItemId);
 
+    // Detect volume-only differences from undo/redo restores.
+    // AudioEvent.== excludes volume, so Equatable would otherwise suppress the
+    // emit when only volumes changed. Incrementing audioTracksPlayerRevision
+    // makes the state distinct without touching audioTracksRevision (which
+    // would trigger the write-to-history listener and corrupt the undo stack).
+    final currentVolumes = {
+      for (final t in state.audioTracks) t.id: t.volume,
+    };
+    final volumeRestoredByUndo = event.audioTracks.any(
+      (t) =>
+          currentVolumes.containsKey(t.id) && currentVolumes[t.id] != t.volume,
+    );
+
     emit(
       state.copyWith(
         items: newItems,
@@ -131,6 +151,9 @@ class TimelineOverlayBloc
         // BlocListener in the canvas doesn't fire mid-gesture.
         clearDraggingItemId: state.draggingItemId == null,
         clearTrimmingItemId: state.trimmingItemId == null,
+        audioTracksPlayerRevision: volumeRestoredByUndo
+            ? state.audioTracksPlayerRevision + 1
+            : state.audioTracksPlayerRevision,
       ),
     );
   }
@@ -456,5 +479,25 @@ class TimelineOverlayBloc
           item,
     ];
     emit(state.copyWith(items: updated));
+  }
+
+  void _onAudioVolumeChanged(
+    TimelineOverlayAudioVolumeChanged event,
+    Emitter<TimelineOverlayState> emit,
+  ) {
+    final index = state.audioTracks.indexWhere(
+      (track) => track.id == event.trackId,
+    );
+    if (index == -1) return;
+    final nextVolume = event.volume.clamp(0.0, 1.0);
+    if (state.audioTracks[index].volume == nextVolume) return;
+    final updated = List<AudioEvent>.of(state.audioTracks);
+    updated[index] = updated[index].copyWith(volume: nextVolume);
+    emit(
+      state.copyWith(
+        audioTracks: updated,
+        audioTracksRevision: state.audioTracksRevision + 1,
+      ),
+    );
   }
 }

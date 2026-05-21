@@ -2743,7 +2743,6 @@
     },
     "videoEditorConfirmColorSemanticLabel": "色を確定",
     "videoEditorCropSemanticLabel": "トリミング",
-    "videoEditorCustomAudioLabel": "カスタムオーディオ",
     "videoEditorDeleteClip": "クリップを削除",
     "videoEditorDeleteLabel": "削除",
     "videoEditorDeleteLayerDropZone": "レイヤー削除のドロップゾーン",
@@ -2882,7 +2881,6 @@
     "videoEditorUndoSemanticLabel": "元に戻す",
     "videoEditorUnmuteAudioSemanticLabel": "音声のミュートを解除",
     "videoEditorVideoTimelineSemanticLabel": "動画タイムライン",
-    "videoEditorVolumeLabel": "音量",
     "videoMetadataAddCollaboratorSemanticLabel": "コラボレーターを追加",
     "videoMetadataBackSemanticLabel": "戻る",
     "videoMetadataClassicDoneButton": "完了",
@@ -3656,4 +3654,17 @@
             }
         }
     }
+    ,
+    "videoEditorTimelineVolumePreview": "音量 {percent}%",
+    "@videoEditorTimelineVolumePreview": {
+        "placeholders": {
+            "percent": {
+                "type": "int"
+            }
+        }
+    },
+    "videoEditorTimelineSlideToAdjust": "スライドして調整",
+    "videoEditorVolumeSemanticLabel": "音量を調整",
+    "videoEditorOriginalAudioLabel": "元の音声",
+    "videoEditorClipVolumeLabel": "クリップ {index}"
 }

@@ -2750,7 +2750,6 @@
     },
     "videoEditorConfirmColorSemanticLabel": "Konfirmasi warna",
     "videoEditorCropSemanticLabel": "Pangkas",
-    "videoEditorCustomAudioLabel": "Audio kustom",
     "videoEditorDeleteClip": "Hapus klip",
     "videoEditorDeleteLabel": "Hapus",
     "videoEditorDeleteLayerDropZone": "Area lepas untuk menghapus lapisan",
@@ -2889,7 +2888,6 @@
     "videoEditorUndoSemanticLabel": "Batalkan",
     "videoEditorUnmuteAudioSemanticLabel": "Aktifkan suara",
     "videoEditorVideoTimelineSemanticLabel": "Timeline video",
-    "videoEditorVolumeLabel": "Volume",
     "videoMetadataAddCollaboratorSemanticLabel": "Tambah kolaborator",
     "videoMetadataBackSemanticLabel": "Kembali",
     "videoMetadataClassicDoneButton": "Selesai",
@@ -3656,4 +3654,17 @@
             }
         }
     }
+    ,
+    "videoEditorTimelineVolumePreview": "Volume {percent}%",
+    "@videoEditorTimelineVolumePreview": {
+        "placeholders": {
+            "percent": {
+                "type": "int"
+            }
+        }
+    },
+    "videoEditorTimelineSlideToAdjust": "Geser untuk menyesuaikan",
+    "videoEditorVolumeSemanticLabel": "Sesuaikan volume",
+    "videoEditorOriginalAudioLabel": "Audio asli",
+    "videoEditorClipVolumeLabel": "Klip {index}"
 }

@@ -6510,9 +6510,6 @@ class AppLocalizationsAm extends AppLocalizations {
   String get videoEditorAudioLabel => 'ኦዲዮ';
 
   @override
-  String get videoEditorVolumeLabel => 'መጠን';
-
-  @override
   String get videoEditorAddTitle => 'አክል';
 
   @override
@@ -6634,9 +6631,6 @@ class AppLocalizationsAm extends AppLocalizations {
   String get videoEditorRecordedAudioLabel => 'የተቀዳ ኦዲዮ';
 
   @override
-  String get videoEditorCustomAudioLabel => 'ብጁ ኦዲዮ';
-
-  @override
   String get videoEditorPlaySemanticLabel => 'ይጫወቱ';
 
   @override
@@ -6647,6 +6641,25 @@ class AppLocalizationsAm extends AppLocalizations {
 
   @override
   String get videoEditorUnmuteAudioSemanticLabel => 'የድምጽ ድምጸ-ከል አንሳ';
+
+  @override
+  String get videoEditorVolumeSemanticLabel => 'ድምጽ አስተካክል';
+
+  @override
+  String videoEditorTimelineVolumePreview(int percent) {
+    return 'ድምጽ $percent%';
+  }
+
+  @override
+  String get videoEditorTimelineSlideToAdjust => 'ለማስተካከል ያንሸራትቱ';
+
+  @override
+  String get videoEditorOriginalAudioLabel => 'ዋናው ኦዲዮ';
+
+  @override
+  String videoEditorClipVolumeLabel(int index) {
+    return 'ቅንጥብ $index';
+  }
 
   @override
   String get videoEditorDeleteLabel => 'ሰርዝ';

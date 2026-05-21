@@ -3778,7 +3778,6 @@
   "videoEditorDrawLabel": "Draw",
   "videoEditorFilterLabel": "Filter",
   "videoEditorAudioLabel": "Audio",
-  "videoEditorVolumeLabel": "Volume",
   "videoEditorAddTitle": "Add",
   "videoEditorOpenLibrarySemanticLabel": "Open Library",
   "videoEditorOpenAudioSemanticLabel": "Open audio editor",
@@ -3825,11 +3824,21 @@
   "videoEditorFailedLoadStickers": "Failed to load stickers",
   "videoEditorAdjustVolumeTitle": "Adjust volume",
   "videoEditorRecordedAudioLabel": "Recorded audio",
-  "videoEditorCustomAudioLabel": "Custom audio",
   "videoEditorPlaySemanticLabel": "Play",
   "videoEditorPauseSemanticLabel": "Pause",
   "videoEditorMuteAudioSemanticLabel": "Mute audio",
   "videoEditorUnmuteAudioSemanticLabel": "Unmute audio",
+  "videoEditorVolumeSemanticLabel": "Adjust volume",
+  "videoEditorTimelineVolumePreview": "Volume {percent}%",
+  "@videoEditorTimelineVolumePreview": {
+    "placeholders": { "percent": { "type": "int" } }
+  },
+  "videoEditorTimelineSlideToAdjust": "Slide to adjust",
+  "videoEditorOriginalAudioLabel": "Original audio",
+  "videoEditorClipVolumeLabel": "Clip {index}",
+  "@videoEditorClipVolumeLabel": {
+    "placeholders": { "index": { "type": "int" } }
+  },
   "videoEditorDeleteLabel": "Delete",
   "videoEditorDeleteSelectedItemSemanticLabel": "Delete selected item",
   "videoEditorEditLabel": "Edit",

@@ -2750,7 +2750,6 @@
     },
     "videoEditorConfirmColorSemanticLabel": "Rengi onayla",
     "videoEditorCropSemanticLabel": "Kırp",
-    "videoEditorCustomAudioLabel": "Özel ses",
     "videoEditorDeleteClip": "Klibi sil",
     "videoEditorDeleteLabel": "Sil",
     "videoEditorDeleteLayerDropZone": "Katman silme bırakma alanı",
@@ -2889,7 +2888,6 @@
     "videoEditorUndoSemanticLabel": "Geri al",
     "videoEditorUnmuteAudioSemanticLabel": "Sesi aç",
     "videoEditorVideoTimelineSemanticLabel": "Video zaman çizelgesi",
-    "videoEditorVolumeLabel": "Ses seviyesi",
     "videoMetadataAddCollaboratorSemanticLabel": "Ortak çalışan ekle",
     "videoMetadataBackSemanticLabel": "Geri",
     "videoMetadataClassicDoneButton": "Bitti",
@@ -3656,4 +3654,17 @@
             }
         }
     }
+    ,
+    "videoEditorTimelineVolumePreview": "Ses seviyesi {percent}%",
+    "@videoEditorTimelineVolumePreview": {
+        "placeholders": {
+            "percent": {
+                "type": "int"
+            }
+        }
+    },
+    "videoEditorTimelineSlideToAdjust": "Ayarlamak için kaydır",
+    "videoEditorVolumeSemanticLabel": "Sesi ayarla",
+    "videoEditorOriginalAudioLabel": "Orijinal ses",
+    "videoEditorClipVolumeLabel": "Klip {index}"
 }

@@ -2743,7 +2743,6 @@
     },
     "videoEditorConfirmColorSemanticLabel": "تأكيد اللون",
     "videoEditorCropSemanticLabel": "قص",
-    "videoEditorCustomAudioLabel": "صوت مخصص",
     "videoEditorDeleteClip": "حذف المقطع",
     "videoEditorDeleteLabel": "حذف",
     "videoEditorDeleteLayerDropZone": "منطقة إسقاط لحذف الطبقة",
@@ -2882,7 +2881,6 @@
     "videoEditorUndoSemanticLabel": "تراجع",
     "videoEditorUnmuteAudioSemanticLabel": "إلغاء كتم الصوت",
     "videoEditorVideoTimelineSemanticLabel": "الجدول الزمني للفيديو",
-    "videoEditorVolumeLabel": "الصوت",
     "videoMetadataAddCollaboratorSemanticLabel": "إضافة متعاون",
     "videoMetadataBackSemanticLabel": "رجوع",
     "videoMetadataClassicDoneButton": "تم",
@@ -3656,4 +3654,17 @@
             }
         }
     }
+    ,
+    "videoEditorTimelineVolumePreview": "مستوى الصوت {percent}%",
+    "@videoEditorTimelineVolumePreview": {
+        "placeholders": {
+            "percent": {
+                "type": "int"
+            }
+        }
+    },
+    "videoEditorTimelineSlideToAdjust": "اسحب للضبط",
+    "videoEditorVolumeSemanticLabel": "ضبط مستوى الصوت",
+    "videoEditorOriginalAudioLabel": "الصوت الأصلي",
+    "videoEditorClipVolumeLabel": "مقطع {index}"
 }

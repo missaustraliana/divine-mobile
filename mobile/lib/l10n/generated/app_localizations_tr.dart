@@ -6624,9 +6624,6 @@ class AppLocalizationsTr extends AppLocalizations {
   String get videoEditorAudioLabel => 'Ses';
 
   @override
-  String get videoEditorVolumeLabel => 'Ses seviyesi';
-
-  @override
   String get videoEditorAddTitle => 'Ekle';
 
   @override
@@ -6748,9 +6745,6 @@ class AppLocalizationsTr extends AppLocalizations {
   String get videoEditorRecordedAudioLabel => 'Kaydedilmiş ses';
 
   @override
-  String get videoEditorCustomAudioLabel => 'Özel ses';
-
-  @override
   String get videoEditorPlaySemanticLabel => 'Oynat';
 
   @override
@@ -6761,6 +6755,25 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get videoEditorUnmuteAudioSemanticLabel => 'Sesi aç';
+
+  @override
+  String get videoEditorVolumeSemanticLabel => 'Sesi ayarla';
+
+  @override
+  String videoEditorTimelineVolumePreview(int percent) {
+    return 'Ses seviyesi $percent%';
+  }
+
+  @override
+  String get videoEditorTimelineSlideToAdjust => 'Ayarlamak için kaydır';
+
+  @override
+  String get videoEditorOriginalAudioLabel => 'Orijinal ses';
+
+  @override
+  String videoEditorClipVolumeLabel(int index) {
+    return 'Klip $index';
+  }
 
   @override
   String get videoEditorDeleteLabel => 'Sil';

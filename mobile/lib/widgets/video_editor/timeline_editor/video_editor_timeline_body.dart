@@ -73,6 +73,9 @@ class VideoEditorTimelineBody extends StatelessWidget {
     final (isReordering) = context.select(
       (VideoEditorMainBloc b) => b.state.isReordering,
     );
+    final isVolumeEditMode = context.select(
+      (VideoEditorMainBloc b) => b.state.isVolumeEditMode,
+    );
 
     final clipTrimExpand = trimmingClipId != null
         ? TimelineConstants.trimHandleWidth + TimelineConstants.trimHitAreaExtra
@@ -124,7 +127,7 @@ class VideoEditorTimelineBody extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: TimelineConstants.rulerToBodyGap),
 
               /// Video-Clips
               RepaintBoundary(
@@ -151,8 +154,11 @@ class VideoEditorTimelineBody extends StatelessWidget {
                   child: ClipRect(
                     clipper: const VerticalOnlyClipper(),
                     child: SingleChildScrollView(
-                      clipBehavior: .none,
-                      padding: .only(
+                      clipBehavior: Clip.none,
+                      physics: isVolumeEditMode
+                          ? const NeverScrollableScrollPhysics()
+                          : null,
+                      padding: EdgeInsets.only(
                         top: 4,
                         bottom:
                             _scrollBottomPadding +

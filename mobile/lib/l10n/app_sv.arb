@@ -2763,7 +2763,6 @@
     "videoEditorDrawLabel": "Rita",
     "videoEditorFilterLabel": "Filter",
     "videoEditorAudioLabel": "Ljud",
-    "videoEditorVolumeLabel": "Volym",
     "videoEditorAddTitle": "Lägg till",
     "videoEditorOpenCameraSemanticLabel": "Öppna kamera",
     "videoEditorOpenLibrarySemanticLabel": "Öppna bibliotek",
@@ -2811,7 +2810,6 @@
     "videoEditorFailedLoadStickers": "Det gick inte att ladda stickers",
     "videoEditorAdjustVolumeTitle": "Justera volym",
     "videoEditorRecordedAudioLabel": "Inspelat ljud",
-    "videoEditorCustomAudioLabel": "Eget ljud",
     "videoEditorPlaySemanticLabel": "Spela",
     "videoEditorPauseSemanticLabel": "Pausa",
     "videoEditorMuteAudioSemanticLabel": "Stäng av ljud",
@@ -3656,4 +3654,17 @@
             }
         }
     }
+    ,
+    "videoEditorTimelineVolumePreview": "Volym {percent}%",
+    "@videoEditorTimelineVolumePreview": {
+        "placeholders": {
+            "percent": {
+                "type": "int"
+            }
+        }
+    },
+    "videoEditorTimelineSlideToAdjust": "Dra för att justera",
+    "videoEditorVolumeSemanticLabel": "Justera volym",
+    "videoEditorOriginalAudioLabel": "Originalljud",
+    "videoEditorClipVolumeLabel": "Klipp {index}"
 }

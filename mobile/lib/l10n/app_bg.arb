@@ -3016,7 +3016,6 @@
     "videoEditorDrawLabel": "Начертайте",
     "videoEditorFilterLabel": "Филтър",
     "videoEditorAudioLabel": "Аудио",
-    "videoEditorVolumeLabel": "Обем",
     "videoEditorAddTitle": "Добави",
     "videoEditorOpenLibrarySemanticLabel": "Отвори библиотеката",
     "videoEditorOpenAudioSemanticLabel": "Отвори аудио редактора",
@@ -3063,7 +3062,6 @@
     "videoEditorFailedLoadStickers": "Не успяхме да заредим стикерите",
     "videoEditorAdjustVolumeTitle": "Регулирайте силата на звука",
     "videoEditorRecordedAudioLabel": "Записано аудио",
-    "videoEditorCustomAudioLabel": "Персонализирано аудио",
     "videoEditorPlaySemanticLabel": "Играйте",
     "videoEditorPauseSemanticLabel": "Пауза",
     "videoEditorMuteAudioSemanticLabel": "Заглушаване на звука",
@@ -3790,4 +3788,17 @@
             }
         }
     }
+    ,
+    "videoEditorTimelineVolumePreview": "Сила на звука {percent}%",
+    "@videoEditorTimelineVolumePreview": {
+        "placeholders": {
+            "percent": {
+                "type": "int"
+            }
+        }
+    },
+    "videoEditorTimelineSlideToAdjust": "Плъзнете за регулиране",
+    "videoEditorVolumeSemanticLabel": "Регулиране на силата на звука",
+    "videoEditorOriginalAudioLabel": "Оригинален звук",
+    "videoEditorClipVolumeLabel": "Клип {index}"
 }

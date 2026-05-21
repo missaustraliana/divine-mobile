@@ -2763,7 +2763,6 @@
     "videoEditorDrawLabel": "Tekenen",
     "videoEditorFilterLabel": "Filter",
     "videoEditorAudioLabel": "Audio",
-    "videoEditorVolumeLabel": "Volume",
     "videoEditorAddTitle": "Toevoegen",
     "videoEditorOpenCameraSemanticLabel": "Camera openen",
     "videoEditorOpenLibrarySemanticLabel": "Bibliotheek openen",
@@ -2811,7 +2810,6 @@
     "videoEditorFailedLoadStickers": "Stickers laden mislukt",
     "videoEditorAdjustVolumeTitle": "Volume aanpassen",
     "videoEditorRecordedAudioLabel": "Opgenomen audio",
-    "videoEditorCustomAudioLabel": "Aangepaste audio",
     "videoEditorPlaySemanticLabel": "Afspelen",
     "videoEditorPauseSemanticLabel": "Pauzeren",
     "videoEditorMuteAudioSemanticLabel": "Audio dempen",
@@ -3656,4 +3654,17 @@
             }
         }
     }
+    ,
+    "videoEditorTimelineVolumePreview": "Volume {percent}%",
+    "@videoEditorTimelineVolumePreview": {
+        "placeholders": {
+            "percent": {
+                "type": "int"
+            }
+        }
+    },
+    "videoEditorTimelineSlideToAdjust": "Schuif om aan te passen",
+    "videoEditorVolumeSemanticLabel": "Volume aanpassen",
+    "videoEditorOriginalAudioLabel": "Origineel geluid",
+    "videoEditorClipVolumeLabel": "Clip {index}"
 }

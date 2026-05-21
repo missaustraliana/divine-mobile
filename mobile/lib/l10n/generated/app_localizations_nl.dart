@@ -6679,9 +6679,6 @@ class AppLocalizationsNl extends AppLocalizations {
   String get videoEditorAudioLabel => 'Audio';
 
   @override
-  String get videoEditorVolumeLabel => 'Volume';
-
-  @override
   String get videoEditorAddTitle => 'Toevoegen';
 
   @override
@@ -6805,9 +6802,6 @@ class AppLocalizationsNl extends AppLocalizations {
   String get videoEditorRecordedAudioLabel => 'Opgenomen audio';
 
   @override
-  String get videoEditorCustomAudioLabel => 'Aangepaste audio';
-
-  @override
   String get videoEditorPlaySemanticLabel => 'Afspelen';
 
   @override
@@ -6818,6 +6812,25 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get videoEditorUnmuteAudioSemanticLabel => 'Audio inschakelen';
+
+  @override
+  String get videoEditorVolumeSemanticLabel => 'Volume aanpassen';
+
+  @override
+  String videoEditorTimelineVolumePreview(int percent) {
+    return 'Volume $percent%';
+  }
+
+  @override
+  String get videoEditorTimelineSlideToAdjust => 'Schuif om aan te passen';
+
+  @override
+  String get videoEditorOriginalAudioLabel => 'Origineel geluid';
+
+  @override
+  String videoEditorClipVolumeLabel(int index) {
+    return 'Clip $index';
+  }
 
   @override
   String get videoEditorDeleteLabel => 'Verwijderen';

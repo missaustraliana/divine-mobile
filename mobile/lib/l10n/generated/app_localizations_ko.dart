@@ -6397,9 +6397,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get videoEditorAudioLabel => '오디오';
 
   @override
-  String get videoEditorVolumeLabel => '볼륨';
-
-  @override
   String get videoEditorAddTitle => '추가';
 
   @override
@@ -6520,9 +6517,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get videoEditorRecordedAudioLabel => '녹음된 오디오';
 
   @override
-  String get videoEditorCustomAudioLabel => '커스텀 오디오';
-
-  @override
   String get videoEditorPlaySemanticLabel => '재생';
 
   @override
@@ -6533,6 +6527,25 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get videoEditorUnmuteAudioSemanticLabel => '오디오 음소거 해제';
+
+  @override
+  String get videoEditorVolumeSemanticLabel => '볼륨 조절';
+
+  @override
+  String videoEditorTimelineVolumePreview(int percent) {
+    return '볼륨 $percent%';
+  }
+
+  @override
+  String get videoEditorTimelineSlideToAdjust => '슬라이드하여 조절';
+
+  @override
+  String get videoEditorOriginalAudioLabel => '원본 오디오';
+
+  @override
+  String videoEditorClipVolumeLabel(int index) {
+    return '클립 $index';
+  }
 
   @override
   String get videoEditorDeleteLabel => '삭제';
