@@ -222,6 +222,7 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
   bool _storageErrorOccurred = false;
   bool _hasExpiredOAuthSession = false;
   Future<bool>? _pendingRefresh;
+  Future<KeycastSession?>? _pendingOAuthRefresh;
   KeycastRpc? _keycastSigner;
 
   // RPC capability state — separate from AuthState so the router doesn't
@@ -518,7 +519,11 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
       // Keycast signer before building the identity so we get a
       // KeycastNostrIdentity instead of a LocalNostrIdentity.
       if (session != null && session.hasRpcAccess) {
-        _keycastSigner = KeycastRpc.fromSession(_oauthConfig, session);
+        _keycastSigner = KeycastRpc.fromSession(
+          _oauthConfig,
+          session,
+          onTokenRefresh: _refreshAccessToken,
+        );
       }
 
       await _setupUserSession(localKey!, AuthenticationSource.divineOAuth);
@@ -556,7 +561,10 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
   /// On success: rebuilds identity to [KeycastNostrIdentity] and sets
   /// [AuthRpcCapability.rpcReady]. On failure: preserves the local identity
   /// and sets capability back to [AuthRpcCapability.unavailable].
-  Future<void> _upgradeDivineRpcInBackground(KeycastSession? session) async {
+  Future<void> _upgradeDivineRpcInBackground(
+    KeycastSession? session, {
+    String? expectedOwnerPubkey,
+  }) async {
     Log.info(
       'initialize: starting background RPC refresh...',
       name: 'AuthService',
@@ -569,21 +577,26 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
         return;
       }
 
-      final refreshed = await _oauthClient.refreshSession().timeout(
-        rpcRefreshTimeout,
-      );
+      final refreshed =
+          await _refreshOAuthSession(
+            expectedOwnerPubkey: expectedOwnerPubkey ?? session?.userPubkey,
+          ).timeout(
+            rpcRefreshTimeout,
+          );
 
-      if (refreshed != null && refreshed.hasRpcAccess) {
+      if (refreshed != null) {
         Log.info(
           'initialize: background RPC refresh succeeded',
           name: 'AuthService',
           category: LogCategory.auth,
         );
-        await refreshed.save(_flutterSecureStorage);
         await _clearDismissedDivineLoginBannerForCurrentUser();
-        _keycastSigner = KeycastRpc.fromSession(_oauthConfig, refreshed);
+        _keycastSigner = KeycastRpc.fromSession(
+          _oauthConfig,
+          refreshed,
+          onTokenRefresh: _refreshAccessToken,
+        );
         _currentIdentity = _buildIdentity();
-        _hasExpiredOAuthSession = false;
         _setRpcCapability(AuthRpcCapability.rpcReady);
         return;
       }
@@ -630,7 +643,10 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
       category: LogCategory.auth,
     );
     if (_oauthClient != null) {
-      final refreshed = await _tryRefreshOAuthSession(caller: 'initialize');
+      final refreshed = await _tryRefreshOAuthSession(
+        caller: 'initialize',
+        expectedOwnerPubkey: session?.userPubkey,
+      );
       if (refreshed) return;
     }
 
@@ -673,28 +689,92 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
 
   /// Shared OAuth session refresh logic used by both [initialize] and
   /// [tryRefreshExpiredSession]. Returns true if refresh succeeded.
-  Future<bool> _tryRefreshOAuthSession({required String caller}) async {
-    try {
-      final refreshed = await _oauthClient!.refreshSession();
-      if (refreshed != null && refreshed.hasRpcAccess) {
-        Log.info(
-          '$caller: refresh succeeded',
-          name: 'AuthService',
-          category: LogCategory.auth,
-        );
-        await refreshed.save(_flutterSecureStorage);
-        await _clearDismissedDivineLoginBannerForCurrentUser();
-        await signInWithDivineOAuth(refreshed);
-        return true;
-      }
-    } catch (e) {
-      Log.error(
-        '$caller: refresh failed: $e',
+  Future<bool> _tryRefreshOAuthSession({
+    required String caller,
+    String? expectedOwnerPubkey,
+  }) async {
+    final refreshed = await _refreshOAuthSession(
+      expectedOwnerPubkey: expectedOwnerPubkey,
+    );
+    if (refreshed != null) {
+      Log.info(
+        '$caller: refresh succeeded',
         name: 'AuthService',
         category: LogCategory.auth,
       );
+      await _clearDismissedDivineLoginBannerForCurrentUser();
+      await signInWithDivineOAuth(refreshed);
+      return true;
     }
     return false;
+  }
+
+  /// Single-flight OAuth session refresh. Every code path that needs a
+  /// fresh [KeycastSession] MUST call this instead of
+  /// `_oauthClient.refreshSession()` directly.
+  ///
+  /// Guarantees:
+  /// - Only one `refreshSession()` call in flight at a time (concurrent
+  ///   callers share the same [Future]).
+  /// - `userPubkey` is bound before the session is persisted, so
+  ///   ownership checks on restore stay valid.
+  /// - `_hasExpiredOAuthSession` is cleared on success.
+  ///
+  /// [expectedOwnerPubkey] binds the refreshed session to a specific
+  /// account. Callers that hold a stored session should pass its
+  /// `userPubkey`; mid-session callers (401 retry, app resume) may omit
+  /// it — the method falls back to [_currentProfile].
+  ///
+  /// Returns the refreshed session on success, or `null` on failure.
+  Future<KeycastSession?> _refreshOAuthSession({
+    String? expectedOwnerPubkey,
+  }) {
+    return _pendingOAuthRefresh ??=
+        _doRefreshOAuthSession(
+          expectedOwnerPubkey: expectedOwnerPubkey,
+        ).whenComplete(() {
+          _pendingOAuthRefresh = null;
+        });
+  }
+
+  Future<KeycastSession?> _doRefreshOAuthSession({
+    String? expectedOwnerPubkey,
+  }) async {
+    if (_oauthClient == null) return null;
+    try {
+      final pubkey = expectedOwnerPubkey ?? _currentProfile?.publicKeyHex;
+      final refreshed = await _oauthClient.refreshSession(
+        userPubkey: pubkey,
+      );
+      if (refreshed == null || !refreshed.hasRpcAccess) return null;
+
+      _hasExpiredOAuthSession = false;
+      Log.info(
+        '_refreshOAuthSession: succeeded '
+        '(userPubkey=${refreshed.userPubkey != null ? "bound" : "unbound"})',
+        name: 'AuthService',
+        category: LogCategory.auth,
+      );
+      return refreshed;
+    } catch (e) {
+      Log.error(
+        '_refreshOAuthSession: failed: $e',
+        name: 'AuthService',
+        category: LogCategory.auth,
+      );
+      return null;
+    }
+  }
+
+  /// [TokenRefreshCallback] passed to [KeycastRpc] so it can recover
+  /// from mid-session 401s without caller involvement.
+  ///
+  /// Delegates to [_refreshOAuthSession] which deduplicates concurrent
+  /// callers — multiple in-flight RPC 401s and app-resume refresh all
+  /// share a single refresh token exchange.
+  Future<String?> _refreshAccessToken() async {
+    final refreshed = await _refreshOAuthSession();
+    return refreshed?.accessToken;
   }
 
   Future<void> _clearDismissedDivineLoginBannerForCurrentUser([
@@ -1854,6 +1934,7 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
           if (canRefresh) {
             final refreshed = await _tryRefreshOAuthSession(
               caller: 'signInForAccount',
+              expectedOwnerPubkey: pubkeyHex,
             );
             if (refreshed) break;
           }
@@ -1888,7 +1969,12 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
             _hasExpiredOAuthSession = true;
             _setRpcCapability(AuthRpcCapability.upgrading);
             await _setupUserSession(localKey, AuthenticationSource.divineOAuth);
-            unawaited(_upgradeDivineRpcInBackground(session));
+            unawaited(
+              _upgradeDivineRpcInBackground(
+                session,
+                expectedOwnerPubkey: pubkeyHex,
+              ),
+            );
           } else {
             Log.warning(
               'signInForAccount: no refresh, no local keys for '
@@ -2977,7 +3063,11 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
     _hasExpiredOAuthSession = false;
 
     try {
-      _keycastSigner = KeycastRpc.fromSession(_oauthConfig, session);
+      _keycastSigner = KeycastRpc.fromSession(
+        _oauthConfig,
+        session,
+        onTokenRefresh: _refreshAccessToken,
+      );
 
       // Prefer the pubkey stored in the session over an RPC call.
       // session.userPubkey is ground truth once populated — it is
@@ -4751,6 +4841,39 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
         category: LogCategory.auth,
       );
       _nostrConnectSession!.ensureConnected();
+    }
+
+    unawaited(_refreshOAuthTokenOnResume());
+  }
+
+  Future<void> _refreshOAuthTokenOnResume() async {
+    try {
+      if (_oauthClient == null || _keycastSigner == null) return;
+
+      final session = await _oauthClient.getSession();
+      if (session != null) return;
+
+      Log.info(
+        '📱 App resumed - OAuth token expired, refreshing',
+        name: 'AuthService',
+        category: LogCategory.auth,
+      );
+      final refreshed = await _refreshOAuthSession();
+      if (refreshed != null) {
+        _keycastSigner = KeycastRpc.fromSession(
+          _oauthConfig,
+          refreshed,
+          onTokenRefresh: _refreshAccessToken,
+        );
+        _currentIdentity = _buildIdentity();
+        _setRpcCapability(AuthRpcCapability.rpcReady);
+      }
+    } catch (e) {
+      Log.error(
+        '📱 App resumed - OAuth refresh failed: $e',
+        name: 'AuthService',
+        category: LogCategory.auth,
+      );
     }
   }
 
