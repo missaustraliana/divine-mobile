@@ -13,6 +13,7 @@ import 'package:go_router/go_router.dart';
 import 'package:infinite_video_feed/infinite_video_feed.dart'
     show InfiniteVideoFeed, VideoErrorType;
 import 'package:models/models.dart';
+import 'package:openvine/blocs/feed_loading_moderation/feed_loading_moderation_cubit.dart';
 import 'package:openvine/blocs/fullscreen_feed/fullscreen_feed_bloc.dart';
 import 'package:openvine/blocs/inline_comment_composer/inline_comment_composer_cubit.dart';
 import 'package:openvine/blocs/video_interactions/video_interactions_bloc.dart';
@@ -34,6 +35,7 @@ import 'package:openvine/screens/feed/feed_settings_menu.dart';
 import 'package:openvine/screens/feed/pooled_age_restricted_retry.dart';
 import 'package:openvine/services/feed_performance_tracker.dart';
 import 'package:openvine/services/openvine_media_cache.dart';
+import 'package:openvine/services/video_moderation_status_service.dart';
 import 'package:openvine/services/view_event_publisher.dart';
 import 'package:openvine/utils/pooled_player_logger.dart';
 import 'package:openvine/utils/scroll_driven_opacity.dart';
@@ -1168,29 +1170,42 @@ class _WebFullscreenItem extends ConsumerWidget {
     final likesRepository = ref.watch(likesRepositoryProvider);
     final commentsRepository = ref.watch(commentsRepositoryProvider);
     final repostsRepository = ref.watch(repostsRepositoryProvider);
+    final moderationService = ref.watch(videoModerationStatusServiceProvider);
     final addressableId = video.addressableId;
 
-    return BlocProvider<VideoInteractionsBloc>(
-      key: videoInteractionsBlocKey(
-        likesRepository: likesRepository,
-        commentsRepository: commentsRepository,
-        repostsRepository: repostsRepository,
-        video: video,
-      ),
-      create: (_) =>
-          VideoInteractionsBloc(
-              eventId: video.id,
-              authorPubkey: video.pubkey,
-              likesRepository: likesRepository,
-              commentsRepository: commentsRepository,
-              repostsRepository: repostsRepository,
-              addressableId: addressableId,
-              initialLikeCount: video.nostrLikeCount != null
-                  ? video.totalLikes
-                  : null,
-            )
-            ..add(const VideoInteractionsSubscriptionRequested())
-            ..add(const VideoInteractionsFetchRequested()),
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider<FeedLoadingModerationCubit>(
+          key: ValueKey(moderationService),
+          create: (_) => FeedLoadingModerationCubit(
+            service: moderationService,
+            explicitSha256: video.sha256,
+            videoUrl: video.videoUrl,
+          )..start(),
+        ),
+        BlocProvider<VideoInteractionsBloc>(
+          key: videoInteractionsBlocKey(
+            likesRepository: likesRepository,
+            commentsRepository: commentsRepository,
+            repostsRepository: repostsRepository,
+            video: video,
+          ),
+          create: (_) =>
+              VideoInteractionsBloc(
+                  eventId: video.id,
+                  authorPubkey: video.pubkey,
+                  likesRepository: likesRepository,
+                  commentsRepository: commentsRepository,
+                  repostsRepository: repostsRepository,
+                  addressableId: addressableId,
+                  initialLikeCount: video.nostrLikeCount != null
+                      ? video.totalLikes
+                      : null,
+                )
+                ..add(const VideoInteractionsSubscriptionRequested())
+                ..add(const VideoInteractionsFetchRequested()),
+        ),
+      ],
       child: Stack(
         children: [
           VideoOverlayActions(
@@ -1253,7 +1268,84 @@ class _WebFullscreenItem extends ConsumerWidget {
               ),
             ),
           ),
+          _WebFullscreenLoadingModerationOverlay(video: video),
         ],
+      ),
+    );
+  }
+}
+
+class _WebFullscreenLoadingModerationOverlay extends ConsumerStatefulWidget {
+  const _WebFullscreenLoadingModerationOverlay({required this.video});
+
+  final VideoEvent video;
+
+  @override
+  ConsumerState<_WebFullscreenLoadingModerationOverlay> createState() =>
+      _WebFullscreenLoadingModerationOverlayState();
+}
+
+class _WebFullscreenLoadingModerationOverlayState
+    extends ConsumerState<_WebFullscreenLoadingModerationOverlay> {
+  bool _dismissedAfterVerify = false;
+
+  Future<void> _verifyAge() async {
+    final videoUrl = widget.video.videoUrl;
+    if (videoUrl == null || videoUrl.isEmpty) return;
+
+    final headers = await ref
+        .read(mediaAuthInterceptorProvider)
+        .handleUnauthorizedMedia(
+          context: context,
+          sha256Hash: VideoModerationStatusService.resolveSha256(
+            explicitSha256: widget.video.sha256,
+            videoUrl: videoUrl,
+          ),
+          url: videoUrl,
+          serverUrl: _extractServerUrl(videoUrl),
+          category: 'video',
+        );
+    if (headers == null || !mounted) return;
+
+    setState(() {
+      _dismissedAfterVerify = true;
+    });
+  }
+
+  String? _extractServerUrl(String videoUrl) {
+    try {
+      final uri = Uri.parse(videoUrl);
+      final portSuffix = uri.hasPort ? ':${uri.port}' : '';
+      return '${uri.scheme}://${uri.host}$portSuffix';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isRestricted = context.select(
+      (FeedLoadingModerationCubit cubit) => cubit.state.isRestricted,
+    );
+    if (!isRestricted || _dismissedAfterVerify) return const SizedBox.shrink();
+
+    final sha256 = VideoModerationStatusService.resolveSha256(
+      explicitSha256: widget.video.sha256,
+      videoUrl: widget.video.videoUrl,
+    );
+    final moderationStatus = sha256 == null
+        ? null
+        : ref
+              .watch(videoModerationStatusProvider(sha256))
+              .whenOrNull(data: (status) => status);
+    final isAgeRestricted = moderationStatus?.ageRestricted ?? false;
+
+    return Positioned.fill(
+      child: PooledVideoErrorOverlay(
+        video: widget.video,
+        onRetry: () {},
+        onVerifyAge: isAgeRestricted ? _verifyAge : null,
+        errorType: VideoErrorType.notFound,
       ),
     );
   }
@@ -1465,6 +1557,7 @@ class _PooledFullscreenItemContentState
                 return PooledVideoErrorOverlay(
                   video: video,
                   onRetry: onRetry,
+                  onVerifyAge: () => _verifyAgeForVideo(context, video),
                   errorType: feedErrorType,
                 );
               },

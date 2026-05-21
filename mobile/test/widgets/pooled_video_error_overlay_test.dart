@@ -23,6 +23,8 @@ void main() {
     late VideoEvent divineVideo;
     late VideoEvent thirdPartyVideo;
     late bool retryPressed;
+    late bool verifyAgePressed;
+    late AppLocalizations l10n;
 
     // Valid 64-char hex sha256 for moderation status resolution.
     const testSha256 =
@@ -38,6 +40,8 @@ void main() {
         videoUrl: 'https://cdn.example.com/video.mp4',
       );
       retryPressed = false;
+      verifyAgePressed = false;
+      l10n = lookupAppLocalizations(const Locale('en'));
     });
 
     Widget buildWidget({VideoErrorType? errorType, VideoEvent? video}) {
@@ -65,6 +69,7 @@ void main() {
       required VideoErrorType? errorType,
       required VideoModerationStatus moderationStatus,
       VideoEvent? video,
+      VoidCallback? onVerifyAge,
     }) {
       return ProviderScope(
         overrides: [
@@ -79,6 +84,7 @@ void main() {
             body: PooledVideoErrorOverlay(
               video: video ?? divineVideo,
               onRetry: () => retryPressed = true,
+              onVerifyAge: onVerifyAge,
               errorType: errorType,
             ),
           ),
@@ -94,7 +100,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(_findDivineIcon(DivineIconName.shieldCheck), findsOneWidget);
-        expect(find.text('Content restricted'), findsOneWidget);
+        expect(find.text(l10n.videoErrorContentRestricted), findsOneWidget);
       });
 
       testWidgets('does not show retry button', (tester) async {
@@ -103,7 +109,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('Retry'), findsNothing);
+        expect(find.text(l10n.videoErrorRetry), findsNothing);
       });
     });
 
@@ -117,7 +123,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(_findDivineIcon(DivineIconName.lockSimple), findsOneWidget);
-        expect(find.text('Age-restricted content'), findsOneWidget);
+        expect(find.text(l10n.videoErrorAgeRestricted), findsOneWidget);
       });
 
       testWidgets('shows Retry button', (tester) async {
@@ -126,7 +132,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('Retry'), findsOneWidget);
+        expect(find.text(l10n.videoErrorRetry), findsOneWidget);
       });
     });
 
@@ -138,8 +144,8 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(_findDivineIcon(DivineIconName.warningCircle), findsOneWidget);
-        expect(find.text('Video not found'), findsOneWidget);
-        expect(find.text('Retry'), findsOneWidget);
+        expect(find.text(l10n.videoErrorNotFound), findsOneWidget);
+        expect(find.text(l10n.videoErrorRetry), findsOneWidget);
       });
 
       testWidgets(
@@ -161,8 +167,8 @@ void main() {
           await tester.pumpAndSettle();
 
           expect(_findDivineIcon(DivineIconName.shieldCheck), findsOneWidget);
-          expect(find.text('Content restricted'), findsOneWidget);
-          expect(find.text('Retry'), findsNothing);
+          expect(find.text(l10n.videoErrorContentRestricted), findsOneWidget);
+          expect(find.text(l10n.videoErrorRetry), findsNothing);
         },
       );
 
@@ -185,7 +191,37 @@ void main() {
           await tester.pumpAndSettle();
 
           expect(_findDivineIcon(DivineIconName.shieldCheck), findsOneWidget);
-          expect(find.text('Content restricted'), findsOneWidget);
+          expect(find.text(l10n.videoErrorContentRestricted), findsOneWidget);
+        },
+      );
+
+      testWidgets(
+        'shows age-gated explanation and verify action when moderation status is ageRestricted',
+        (tester) async {
+          await tester.pumpWidget(
+            buildWidgetWithModeration(
+              errorType: VideoErrorType.notFound,
+              moderationStatus: const VideoModerationStatus(
+                moderated: true,
+                blocked: false,
+                quarantined: false,
+                ageRestricted: true,
+                needsReview: false,
+                aiGenerated: false,
+              ),
+              onVerifyAge: () => verifyAgePressed = true,
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          expect(find.text(l10n.videoErrorAgeRestricted), findsOneWidget);
+          expect(find.text(l10n.videoErrorVerifyAgeBody), findsOneWidget);
+          expect(find.text(l10n.videoErrorVerifyAgeButton), findsOneWidget);
+          expect(find.text(l10n.videoErrorRetry), findsNothing);
+
+          await tester.tap(find.text(l10n.videoErrorVerifyAgeButton));
+
+          expect(verifyAgePressed, isTrue);
         },
       );
 
@@ -210,8 +246,8 @@ void main() {
 
         // Should show plain 404, not moderation-restricted.
         expect(_findDivineIcon(DivineIconName.warningCircle), findsOneWidget);
-        expect(find.text('Video not found'), findsOneWidget);
-        expect(find.text('Retry'), findsOneWidget);
+        expect(find.text(l10n.videoErrorNotFound), findsOneWidget);
+        expect(find.text(l10n.videoErrorRetry), findsOneWidget);
       });
     });
 
@@ -226,8 +262,8 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(_findDivineIcon(DivineIconName.warningCircle), findsOneWidget);
-        expect(find.text('Video playback error'), findsOneWidget);
-        expect(find.text('Retry'), findsOneWidget);
+        expect(find.text(l10n.videoErrorPlayback), findsOneWidget);
+        expect(find.text(l10n.videoErrorRetry), findsOneWidget);
       });
 
       testWidgets('shows generic error for null error type', (tester) async {
@@ -235,8 +271,8 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(_findDivineIcon(DivineIconName.warningCircle), findsOneWidget);
-        expect(find.text('Video playback error'), findsOneWidget);
-        expect(find.text('Retry'), findsOneWidget);
+        expect(find.text(l10n.videoErrorPlayback), findsOneWidget);
+        expect(find.text(l10n.videoErrorRetry), findsOneWidget);
       });
 
       testWidgets(
@@ -258,8 +294,8 @@ void main() {
           await tester.pumpAndSettle();
 
           expect(_findDivineIcon(DivineIconName.shieldCheck), findsOneWidget);
-          expect(find.text('Content restricted'), findsOneWidget);
-          expect(find.text('Retry'), findsNothing);
+          expect(find.text(l10n.videoErrorContentRestricted), findsOneWidget);
+          expect(find.text(l10n.videoErrorRetry), findsNothing);
         },
       );
     });
@@ -274,7 +310,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('Retry'));
+        await tester.tap(find.text(l10n.videoErrorRetry));
         expect(retryPressed, isTrue);
       });
     });
