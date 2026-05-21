@@ -5685,6 +5685,21 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Geri al';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: '$daysLeft gün içinde otomatik olarak silinir',
+      one: 'Yarın otomatik olarak silinir',
+      zero: 'Bugün otomatik olarak silinir',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts => 'Taslaklar yüklenemedi';
 
   @override
@@ -6564,7 +6579,53 @@ class AppLocalizationsTr extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'Hayalet kare devre dışı';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Klip silindi';
+  String get videoRecorderClipDeletedMessage => 'Klip çöp kutusuna taşındı';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'Geri al';
+
+  @override
+  String get libraryTrashTitle => 'Son silinenler';
+
+  @override
+  String get libraryTrashEmptyTitle => 'Çöp kutusu boş';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'Silinen klipler kalıcı olarak kaldırılmadan önce 30 gün burada tutulur.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Geri yükle';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Şimdi sil';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'Çöp kutusunu boşalt';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'Klip şimdi silinsin mi?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'Bu işlem klibi hemen çöp kutusundan kaldırır.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'Çöp kutusu boşaltılsın mı?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count klibi',
+      one: '1 klibi',
+    );
+    return 'Bu işlem $_temp0 hemen çöp kutusundan kalıcı olarak siler.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Son silinenler';
 
   @override
   String get videoRecorderCloseLabel => 'Video kaydediciyi kapat';

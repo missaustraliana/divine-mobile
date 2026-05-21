@@ -5679,6 +5679,21 @@ class AppLocalizationsId extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Urungkan';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'Akan dihapus otomatis dalam $daysLeft hari',
+      one: 'Akan dihapus otomatis besok',
+      zero: 'Akan dihapus otomatis hari ini',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts => 'Tidak bisa memuat draf';
 
   @override
@@ -6561,7 +6576,53 @@ class AppLocalizationsId extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'Frame hantu dinonaktifkan';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Klip dihapus';
+  String get videoRecorderClipDeletedMessage => 'Klip dipindahkan ke sampah';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'Urungkan';
+
+  @override
+  String get libraryTrashTitle => 'Baru-baru ini dihapus';
+
+  @override
+  String get libraryTrashEmptyTitle => 'Sampah kosong';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'Klip yang dihapus tetap di sini selama 30 hari sebelum dihapus secara permanen.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Pulihkan';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Hapus sekarang';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'Kosongkan sampah';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'Hapus klip sekarang?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'Ini langsung menghapus klip dari sampah.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'Kosongkan sampah?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count klip',
+      one: '1 klip',
+    );
+    return 'Ini langsung menghapus permanen $_temp0 dari sampah.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Baru-baru ini dihapus';
 
   @override
   String get videoRecorderCloseLabel => 'Tutup perekam video';

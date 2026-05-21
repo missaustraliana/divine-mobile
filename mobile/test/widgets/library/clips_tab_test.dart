@@ -14,6 +14,7 @@ import 'package:openvine/blocs/clips_library/clips_library_bloc.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/l10n/generated/app_localizations_en.dart';
 import 'package:openvine/models/divine_video_clip.dart';
+import 'package:openvine/widgets/branded_loading_indicator.dart';
 import 'package:openvine/widgets/library/clips_tab.dart';
 import 'package:openvine/widgets/library/empty_library_state.dart';
 import 'package:openvine/widgets/video_clip/video_clip_preview.dart';
@@ -82,7 +83,7 @@ void main() {
 
         await tester.pumpWidget(buildWidget());
 
-        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        expect(find.byType(BrandedLoadingIndicator), findsOneWidget);
       });
 
       testWidgets('friendly error and retry when error state', (tester) async {
@@ -151,7 +152,7 @@ void main() {
       });
 
       testWidgets(
-        'long-press → trash → confirm closes preview and dispatches delete',
+        'long-press → trash closes preview and soft-deletes the clip',
         (tester) async {
           DivineVideoPlayerController.resetIdCounterForTesting();
           final messenger =
@@ -207,8 +208,11 @@ void main() {
           );
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 300));
+          expect(find.text(en.libraryDeleteClipTitle), findsOneWidget);
 
-          await tester.tap(find.text(en.libraryDeleteConfirm));
+          final confirmButton = find.text(en.libraryDeleteConfirm).last;
+          await tester.ensureVisible(confirmButton);
+          await tester.tap(confirmButton, warnIfMissed: false);
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 300));
 

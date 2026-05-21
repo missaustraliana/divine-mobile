@@ -20,6 +20,12 @@ class ClipLibraryService {
   }) : _clipsDao = clipsDao,
        _draftsDao = draftsDao;
 
+  /// How long a soft-deleted clip stays in the trash bin before the
+  /// startup purge sweep permanently removes it. Shared between
+  /// [purgeExpiredTrash] and the trash UI countdown so the user-facing
+  /// "Auto-deletes in N days" copy stays in sync with the actual cutoff.
+  static const Duration trashRetention = Duration(days: 30);
+
   final ClipsDao _clipsDao;
   final DraftsDao _draftsDao;
 
@@ -146,15 +152,58 @@ class ClipLibraryService {
     return DivineVideoClip.fromJson(clipJson, documentsPath);
   }
 
-  /// Delete a clip by ID and remove associated files if not referenced
-  Future<void> deleteClip(String id) async {
+  /// Move a clip to the trash. The clip is hidden from active queries
+  /// but its files remain on disk until [purgeExpiredTrash] sweeps them
+  /// (default 30-day retention) or [hardDelete] is called explicitly.
+  ///
+  /// When [clearDraftId] is true the clip's `draft_id` is also nulled,
+  /// decoupling it from any session it was recorded into so a restored
+  /// clip lands in the library rather than a stale draft. The recorder
+  /// path uses `clearDraftId: true`; the library tab leaves it false
+  /// since those clips already have no draft.
+  ///
+  /// Returns true if the clip was found and trashed.
+  Future<bool> softDelete(String id, {bool clearDraftId = false}) async {
+    final ok = await _clipsDao.softDeleteClip(
+      id: id,
+      deletedAt: DateTime.now(),
+      clearDraftId: clearDraftId,
+    );
+    if (ok) {
+      Log.debug(
+        '🗑️ Soft-deleted clip: $id',
+        name: 'ClipLibraryService',
+        category: LogCategory.video,
+      );
+    }
+    return ok;
+  }
+
+  /// Restore a trashed clip. The clip becomes visible to active queries
+  /// again with its previous `draft_id` (library if `draft_id` is NULL).
+  ///
+  /// Returns true if a trashed clip with [id] was restored.
+  Future<bool> restore(String id) async {
+    final ok = await _clipsDao.restoreClip(id);
+    if (ok) {
+      Log.debug(
+        '♻️ Restored clip: $id',
+        name: 'ClipLibraryService',
+        category: LogCategory.video,
+      );
+    }
+    return ok;
+  }
+
+  /// Permanently delete a clip and its files. Skips the trash; use
+  /// [softDelete] for the standard delete flow.
+  Future<void> hardDelete(String id) async {
     Log.debug(
-      '🗑️ Deleting clip from library: $id',
+      '🗑️ Hard-deleting clip: $id',
       name: 'ClipLibraryService',
       category: LogCategory.video,
     );
 
-    // Fetch clip before deleting so we can clean up files
     final clip = await getClipById(id);
     if (clip == null) {
       Log.info(
@@ -165,15 +214,78 @@ class ClipLibraryService {
       return;
     }
 
-    // Delete from DB, then clean up files
     await _clipsDao.deleteClip(id);
 
-    // Delete files only if not referenced by drafts
     await FileCleanupService.deleteRecordingClipFiles(
       clip,
       draftsDao: _draftsDao,
       clipsDao: _clipsDao,
     );
+  }
+
+  /// Get all trashed library clips, newest-deleted-first.
+  Future<List<DivineVideoClip>> getTrashedClips() async {
+    try {
+      final rows = await _clipsDao.getTrashedLibraryClips(
+        ownerPubkey: ownerPubkey,
+      );
+      final documentsPath = await getDocumentsPath();
+      return rows.map((row) {
+        final clipJson = json.decode(row.data) as Map<String, dynamic>;
+        return DivineVideoClip.fromJson(
+          clipJson,
+          documentsPath,
+        ).copyWith(deletedAt: row.deletedAt);
+      }).toList();
+    } catch (e) {
+      Log.error(
+        '❌ Failed to load trashed clips: $e',
+        name: 'ClipLibraryService',
+        category: LogCategory.video,
+      );
+      return [];
+    }
+  }
+
+  /// Hard-delete every trashed clip older than [retention] (default 30
+  /// days). Idempotent and safe to run repeatedly on app startup.
+  ///
+  /// Returns the number of clips purged.
+  Future<int> purgeExpiredTrash({Duration retention = trashRetention}) async {
+    final cutoff = DateTime.now().subtract(retention);
+    final expired = await _clipsDao.getTrashedClipsOlderThan(cutoff);
+    if (expired.isEmpty) return 0;
+
+    final documentsPath = await getDocumentsPath();
+    var purged = 0;
+    for (final row in expired) {
+      try {
+        final clipJson = json.decode(row.data) as Map<String, dynamic>;
+        final clip = DivineVideoClip.fromJson(clipJson, documentsPath);
+        await _clipsDao.deleteClip(row.id);
+        await FileCleanupService.deleteRecordingClipFiles(
+          clip,
+          draftsDao: _draftsDao,
+          clipsDao: _clipsDao,
+        );
+        purged++;
+      } catch (e, s) {
+        Log.error(
+          '⚠️ Failed to purge trashed clip ${row.id}: $e',
+          name: 'ClipLibraryService',
+          category: LogCategory.video,
+          error: e,
+          stackTrace: s,
+        );
+      }
+    }
+
+    Log.info(
+      '🧹 Purged $purged trashed clip(s) older than ${retention.inDays}d',
+      name: 'ClipLibraryService',
+      category: LogCategory.video,
+    );
+    return purged;
   }
 
   /// Clear all clips from the library and delete associated files
@@ -183,9 +295,11 @@ class ClipLibraryService {
       name: 'ClipLibraryService',
       category: LogCategory.video,
     );
-    final clips = await getAllClips();
+    final activeClips = await getAllClips();
+    final trashedClips = await getTrashedClips();
+    final clips = [...activeClips, ...trashedClips];
 
-    // Clear DB first, then delete files
+    // Clear active + trashed library rows first, then delete files.
     await _clipsDao.clearLibraryClips();
 
     // Delete files only if not referenced by drafts

@@ -5492,6 +5492,21 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => '실행 취소';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: '$daysLeft일 후 자동 삭제됨',
+      one: '내일 자동 삭제됨',
+      zero: '오늘 자동 삭제됨',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts => '임시 저장 영상을 불러올 수 없어요';
 
   @override
@@ -6339,7 +6354,51 @@ class AppLocalizationsKo extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => '고스트 프레임 비활성화됨';
 
   @override
-  String get videoRecorderClipDeletedMessage => '클립이 삭제되었습니다';
+  String get videoRecorderClipDeletedMessage => '클립이 휴지통으로 이동되었습니다';
+
+  @override
+  String get videoRecorderClipUndoLabel => '실행 취소';
+
+  @override
+  String get libraryTrashTitle => '최근 삭제된 항목';
+
+  @override
+  String get libraryTrashEmptyTitle => '휴지통이 비어 있습니다';
+
+  @override
+  String get libraryTrashEmptySubtitle => '삭제된 클립은 영구 삭제되기 전 30일 동안 여기에 보관됩니다.';
+
+  @override
+  String get libraryTrashRestoreLabel => '복원';
+
+  @override
+  String get libraryTrashDeleteNowLabel => '지금 삭제';
+
+  @override
+  String get libraryTrashEmptyAllLabel => '휴지통 비우기';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => '지금 클립을 삭제할까요?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage => '이 작업은 클립을 휴지통에서 바로 삭제합니다.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => '휴지통을 비울까요?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '클립 $count개',
+      one: '클립 1개',
+    );
+    return '이 작업은 휴지통에서 $_temp0를 바로 영구 삭제합니다.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => '최근 삭제된 항목';
 
   @override
   String get videoRecorderCloseLabel => '동영상 녹화기 닫기';

@@ -17,6 +17,7 @@ import 'package:openvine/providers/clip_manager_provider.dart';
 import 'package:openvine/providers/shared_preferences_provider.dart';
 import 'package:openvine/providers/video_publish_provider.dart';
 import 'package:openvine/screens/feed/video_feed_page.dart';
+import 'package:openvine/screens/library_trash_screen.dart';
 import 'package:openvine/screens/video_editor/video_editor_screen.dart';
 import 'package:openvine/services/gallery_save_service.dart';
 import 'package:openvine/widgets/library/library.dart';
@@ -114,9 +115,9 @@ class LibraryScreen extends ConsumerWidget {
         ),
         BlocProvider<DraftsLibraryBloc>(
           key: ValueKey(draftStorageService),
-          create: (_) => DraftsLibraryBloc(
-            draftStorageService: draftStorageService,
-          )..add(const DraftsLibraryLoadRequested()),
+          create: (_) =>
+              DraftsLibraryBloc(draftStorageService: draftStorageService)
+                ..add(const DraftsLibraryLoadRequested()),
         ),
       ],
       child: _LibraryView(
@@ -217,13 +218,38 @@ class _LibraryViewState extends ConsumerState<_LibraryView>
     BuildContext context, {
     required String label,
     bool error = false,
+    String? actionLabel,
+    VoidCallback? onActionPressed,
   }) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: VineTheme.transparent,
-        elevation: 0,
-        behavior: SnackBarBehavior.floating,
-        content: DivineSnackbarContainer(label: label, error: error),
+      DivineSnackbarContainer.snackBar(
+        label,
+        error: error,
+        actionLabel: actionLabel,
+        onActionPressed: onActionPressed,
+        duration: const Duration(seconds: 5),
+      ),
+    );
+  }
+
+  Future<void> _openTrash(
+    BuildContext context,
+    ClipsLibraryBloc clipsBloc,
+  ) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => BlocProvider<ClipsLibraryBloc>.value(
+          value: clipsBloc,
+          child: const LibraryTrashScreen(),
+        ),
+      ),
+    );
+    // Refresh active clips when returning so any restores show up.
+    if (!context.mounted) return;
+    clipsBloc.add(
+      ClipsLibraryLoadRequested(
+        preSelectedIds: clipsBloc.state.preSelectedIds,
+        disabledClipIds: clipsBloc.state.disabledClipIds,
       ),
     );
   }
@@ -318,25 +344,10 @@ class _LibraryViewState extends ConsumerState<_LibraryView>
     clipsBloc.add(const ClipsLibraryExitSelectionMode());
   }
 
-  Future<void> _confirmDeleteSelectedClips(
-    BuildContext context,
-    ClipsLibraryBloc clipsBloc,
-    int selectedCount,
-  ) async {
-    await VineBottomSheetPrompt.show<void>(
-      context: context,
-      sticker: .alert,
-      title: context.l10n.libraryDeleteClipsTitle,
-      subtitle: context.l10n.libraryDeleteClipsMessage(selectedCount),
-      additionalText: context.l10n.libraryDeleteClipsWarning,
-      primaryButtonText: context.l10n.libraryDeleteConfirm,
-      secondaryButtonText: context.l10n.commonCancel,
-      onPrimaryPressed: () {
-        context.pop();
-        clipsBloc.add(const ClipsLibraryDeleteSelected());
-      },
-      onSecondaryPressed: context.pop,
-    );
+  void _softDeleteSelectedClips(ClipsLibraryBloc clipsBloc) {
+    // No confirm dialog: the bloc soft-deletes to the trash bin and the
+    // snackbar listener below surfaces an Undo affordance.
+    clipsBloc.add(const ClipsLibraryDeleteSelected());
   }
 
   @override
@@ -388,11 +399,7 @@ class _LibraryViewState extends ConsumerState<_LibraryView>
                         successCount,
                         failureCount,
                       );
-                _showSnackBar(
-                  context,
-                  label: label,
-                  error: failureCount > 0,
-                );
+                _showSnackBar(context, label: label, error: failureCount > 0);
               case GallerySaveResultPermissionDenied():
                 _showSnackBar(
                   context,
@@ -413,10 +420,21 @@ class _LibraryViewState extends ConsumerState<_LibraryView>
           listener: (context, state) {
             final count = state.lastDeletedCount;
             if (count == null) return;
+            final deletedIds = state.lastDeletedClipIds;
+            final messenger = ScaffoldMessenger.of(context);
 
             _showSnackBar(
               context,
               label: context.l10n.libraryClipsDeletedCount(count),
+              actionLabel: deletedIds.isEmpty
+                  ? null
+                  : context.l10n.libraryClipsDeletedUndoLabel,
+              onActionPressed: deletedIds.isEmpty
+                  ? null
+                  : () {
+                      messenger.hideCurrentSnackBar();
+                      clipsBloc.add(ClipsLibraryRestoreClips(deletedIds));
+                    },
             );
           },
         ),
@@ -477,13 +495,10 @@ class _LibraryViewState extends ConsumerState<_LibraryView>
                           onEnterSelectionMode: () => clipsBloc.add(
                             const ClipsLibraryEnterSelectionMode(),
                           ),
+                          onOpenTrash: () => _openTrash(context, clipsBloc),
                           onDeleteSelectedClips:
                               clipsState.selectedClipIds.isNotEmpty
-                              ? () => _confirmDeleteSelectedClips(
-                                  context,
-                                  clipsBloc,
-                                  clipsState.selectedClipIds.length,
-                                )
+                              ? () => _softDeleteSelectedClips(clipsBloc)
                               : null,
                         ),
                       Expanded(
@@ -557,6 +572,7 @@ class _LibraryToolbar extends StatelessWidget {
     required this.onLeadingPressed,
     required this.onOpenSortMenu,
     required this.onEnterSelectionMode,
+    required this.onOpenTrash,
     this.onDeleteSelectedClips,
   });
 
@@ -566,6 +582,7 @@ class _LibraryToolbar extends StatelessWidget {
   final VoidCallback onLeadingPressed;
   final VoidCallback onOpenSortMenu;
   final VoidCallback onEnterSelectionMode;
+  final VoidCallback onOpenTrash;
   final VoidCallback? onDeleteSelectedClips;
 
   @override
@@ -594,6 +611,14 @@ class _LibraryToolbar extends StatelessWidget {
             ),
           ),
           if (isClipsTabActive) ...[
+            if (!isLibrarySelectionMode)
+              DivineIconButton(
+                size: .small,
+                type: .secondary,
+                icon: .trash,
+                semanticLabel: context.l10n.libraryTrashEntryLabel,
+                onPressed: onOpenTrash,
+              ),
             DivineIconButton(
               size: .small,
               type: .secondary,
@@ -702,10 +727,7 @@ class _LibraryContent extends StatelessWidget {
 }
 
 class _CreateVideoBar extends StatelessWidget {
-  const _CreateVideoBar({
-    required this.visible,
-    required this.onPressed,
-  });
+  const _CreateVideoBar({required this.visible, required this.onPressed});
 
   final bool visible;
   final VoidCallback onPressed;

@@ -5763,6 +5763,21 @@ class AppLocalizationsBg extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Отмени';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'Ще се изтрие автоматично след $daysLeft дни',
+      one: 'Ще се изтрие автоматично утре',
+      zero: 'Ще се изтрие автоматично днес',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts => 'Не успяхме да заредим черновите';
 
   @override
@@ -6655,7 +6670,53 @@ class AppLocalizationsBg extends AppLocalizations {
       'Призрачната рамка е деактивирана';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Клипът е изтрит';
+  String get videoRecorderClipDeletedMessage => 'Клипът е преместен в кошчето';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'Отмени';
+
+  @override
+  String get libraryTrashTitle => 'Наскоро изтрити';
+
+  @override
+  String get libraryTrashEmptyTitle => 'Кошчето е празно';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'Изтритите клипове остават тук 30 дни, преди да бъдат премахнати окончателно.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Възстанови';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Изтрий сега';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'Изпразни кошчето';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'Да изтрия ли клипа сега?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'Това веднага премахва клипа от кошчето.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'Да изпразня ли кошчето?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count клипа',
+      one: '1 клип',
+    );
+    return 'Това ще изтрие окончателно $_temp0 от кошчето веднага.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Наскоро изтрити';
 
   @override
   String get videoRecorderCloseLabel => 'Затворете видеорекордер';

@@ -5772,6 +5772,21 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Rückgängig';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'Wird in $daysLeft Tagen automatisch gelöscht',
+      one: 'Wird morgen automatisch gelöscht',
+      zero: 'Wird heute automatisch gelöscht',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts =>
       'Entwürfe konnten nicht geladen werden';
 
@@ -6669,7 +6684,54 @@ class AppLocalizationsDe extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'Geisterbild deaktiviert';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Clip gelöscht';
+  String get videoRecorderClipDeletedMessage =>
+      'Clip in den Papierkorb verschoben';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'Rückgängig';
+
+  @override
+  String get libraryTrashTitle => 'Kürzlich gelöscht';
+
+  @override
+  String get libraryTrashEmptyTitle => 'Papierkorb ist leer';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'Gelöschte Clips bleiben 30 Tage hier, bevor sie endgültig entfernt werden.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Wiederherstellen';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Jetzt löschen';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'Papierkorb leeren';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'Clip jetzt löschen?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'Dadurch wird der Clip sofort aus dem Papierkorb entfernt.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'Papierkorb leeren?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Clips',
+      one: '1 Clip',
+    );
+    return '$_temp0 werden sofort dauerhaft aus dem Papierkorb gelöscht.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Kürzlich gelöscht';
 
   @override
   String get videoRecorderCloseLabel => 'Videorecorder schließen';

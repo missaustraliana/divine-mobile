@@ -5728,6 +5728,21 @@ class AppLocalizationsNl extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Ongedaan maken';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'Wordt over $daysLeft dagen automatisch verwijderd',
+      one: 'Wordt morgen automatisch verwijderd',
+      zero: 'Wordt vandaag automatisch verwijderd',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts =>
       'Concepten konden niet worden geladen';
 
@@ -6620,7 +6635,54 @@ class AppLocalizationsNl extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'Spookframe uitgeschakeld';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Clip verwijderd';
+  String get videoRecorderClipDeletedMessage =>
+      'Clip naar prullenbak verplaatst';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'Ongedaan maken';
+
+  @override
+  String get libraryTrashTitle => 'Recent verwijderd';
+
+  @override
+  String get libraryTrashEmptyTitle => 'Prullenbak is leeg';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'Verwijderde clips blijven hier 30 dagen voordat ze definitief worden verwijderd.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Herstellen';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Nu verwijderen';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'Prullenbak legen';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'Clip nu verwijderen?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'Hiermee wordt de clip meteen uit de prullenbak verwijderd.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'Prullenbak legen?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips',
+      one: '1 clip',
+    );
+    return 'Hiermee worden $_temp0 meteen definitief uit de prullenbak verwijderd.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Recent verwijderd';
 
   @override
   String get videoRecorderCloseLabel => 'Videorecorder sluiten';

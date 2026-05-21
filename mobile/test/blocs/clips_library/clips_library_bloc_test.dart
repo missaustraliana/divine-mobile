@@ -43,6 +43,7 @@ void main() {
     DivineVideoClip createClip({
       String? id,
       Duration duration = const Duration(seconds: 5),
+      DateTime? deletedAt,
     }) {
       return DivineVideoClip(
         id: id ?? 'clip-${DateTime.now().millisecondsSinceEpoch}',
@@ -53,6 +54,7 @@ void main() {
         recordedAt: DateTime.now(),
         targetAspectRatio: .vertical,
         originalAspectRatio: 9 / 16,
+        deletedAt: deletedAt,
       );
     }
 
@@ -378,8 +380,8 @@ void main() {
         'deletes selected clips and clears selection',
         setUp: () {
           when(
-            () => mockClipLibraryService.deleteClip('clip1'),
-          ).thenAnswer((_) async {});
+            () => mockClipLibraryService.softDelete('clip1'),
+          ).thenAnswer((_) async => true);
           when(
             () => mockClipLibraryService.getAllClips(),
           ).thenAnswer((_) async => [clip2]);
@@ -405,7 +407,7 @@ void main() {
               .having((s) => s.lastDeletedCount, 'lastDeletedCount', 1),
         ],
         verify: (_) {
-          verify(() => mockClipLibraryService.deleteClip('clip1')).called(1);
+          verify(() => mockClipLibraryService.softDelete('clip1')).called(1);
         },
       );
 
@@ -413,7 +415,7 @@ void main() {
         'emits error state when deletion fails',
         setUp: () {
           when(
-            () => mockClipLibraryService.deleteClip(any()),
+            () => mockClipLibraryService.softDelete(any()),
           ).thenThrow(Exception('Delete failed'));
         },
         seed: () => ClipsLibraryState(
@@ -455,8 +457,8 @@ void main() {
         'deletes single clip and reloads',
         setUp: () {
           when(
-            () => mockClipLibraryService.deleteClip('clip1'),
-          ).thenAnswer((_) async {});
+            () => mockClipLibraryService.softDelete('clip1'),
+          ).thenAnswer((_) async => true);
           when(
             () => mockClipLibraryService.getAllClips(),
           ).thenAnswer((_) async => []);
@@ -479,7 +481,7 @@ void main() {
               .having((s) => s.lastDeletedCount, 'lastDeletedCount', 1),
         ],
         verify: (_) {
-          verify(() => mockClipLibraryService.deleteClip('clip1')).called(1);
+          verify(() => mockClipLibraryService.softDelete('clip1')).called(1);
         },
       );
 
@@ -487,11 +489,11 @@ void main() {
         'clears stale deleted count so repeated single-delete results still emit',
         setUp: () {
           when(
-            () => mockClipLibraryService.deleteClip(any()),
-          ).thenAnswer((_) async {});
-          when(() => mockClipLibraryService.getAllClips()).thenAnswer(
-            (_) async => [],
-          );
+            () => mockClipLibraryService.softDelete(any()),
+          ).thenAnswer((_) async => true);
+          when(
+            () => mockClipLibraryService.getAllClips(),
+          ).thenAnswer((_) async => []);
         },
         seed: () => ClipsLibraryState(
           status: ClipsLibraryStatus.loaded,
@@ -514,8 +516,8 @@ void main() {
         'removes clip from selection if it was selected',
         setUp: () {
           when(
-            () => mockClipLibraryService.deleteClip('clip1'),
-          ).thenAnswer((_) async {});
+            () => mockClipLibraryService.softDelete('clip1'),
+          ).thenAnswer((_) async => true);
           when(
             () => mockClipLibraryService.getAllClips(),
           ).thenAnswer((_) async => []);
@@ -542,6 +544,227 @@ void main() {
                 'selectedDuration',
                 Duration.zero,
               ),
+        ],
+      );
+    });
+
+    group('trash events', () {
+      final activeClip = DivineVideoClip(
+        id: 'active',
+        video: EditorVideo.file('/path/to/active.mp4'),
+        thumbnailPath: '/path/to/active.jpg',
+        duration: const Duration(seconds: 5),
+        recordedAt: DateTime(2026),
+        targetAspectRatio: .vertical,
+        originalAspectRatio: 9 / 16,
+      );
+
+      final trashedClip = DivineVideoClip(
+        id: 'trashed',
+        video: EditorVideo.file('/path/to/trashed.mp4'),
+        thumbnailPath: '/path/to/trashed.jpg',
+        duration: const Duration(seconds: 3),
+        recordedAt: DateTime(2026),
+        targetAspectRatio: .vertical,
+        originalAspectRatio: 9 / 16,
+        deletedAt: DateTime(2026, 5),
+      );
+
+      blocTest<ClipsLibraryBloc, ClipsLibraryState>(
+        'loads trashed clips',
+        setUp: () {
+          when(
+            () => mockClipLibraryService.getTrashedClips(),
+          ).thenAnswer((_) async => [trashedClip]);
+        },
+        build: createBloc,
+        act: (bloc) => bloc.add(const ClipsLibraryTrashLoadRequested()),
+        expect: () => [
+          const ClipsLibraryState(status: ClipsLibraryStatus.trashLoading),
+          isA<ClipsLibraryState>()
+              .having((s) => s.status, 'status', ClipsLibraryStatus.trashLoaded)
+              .having((s) => s.trashedClips, 'trashedClips', [trashedClip]),
+        ],
+      );
+
+      blocTest<ClipsLibraryBloc, ClipsLibraryState>(
+        'emits error when trash load fails',
+        setUp: () {
+          when(
+            () => mockClipLibraryService.getTrashedClips(),
+          ).thenThrow(Exception('Trash load failed'));
+        },
+        build: createBloc,
+        act: (bloc) => bloc.add(const ClipsLibraryTrashLoadRequested()),
+        errors: () => [isA<Exception>()],
+        expect: () => [
+          const ClipsLibraryState(status: ClipsLibraryStatus.trashLoading),
+          isA<ClipsLibraryState>().having(
+            (s) => s.status,
+            'status',
+            ClipsLibraryStatus.error,
+          ),
+        ],
+      );
+
+      blocTest<ClipsLibraryBloc, ClipsLibraryState>(
+        'restores clips and reloads active + trash lists from loaded state',
+        setUp: () {
+          when(
+            () => mockClipLibraryService.restore('trashed'),
+          ).thenAnswer((_) async => true);
+          when(
+            () => mockClipLibraryService.getAllClips(),
+          ).thenAnswer((_) async => [activeClip, trashedClip]);
+          when(
+            () => mockClipLibraryService.getTrashedClips(),
+          ).thenAnswer((_) async => []);
+        },
+        seed: () => ClipsLibraryState(
+          status: ClipsLibraryStatus.loaded,
+          trashedClips: [trashedClip],
+          lastDeletedClipIds: const {'trashed'},
+        ),
+        build: createBloc,
+        act: (bloc) => bloc.add(const ClipsLibraryRestoreClips({'trashed'})),
+        expect: () => [
+          isA<ClipsLibraryState>()
+              .having((s) => s.status, 'status', ClipsLibraryStatus.loaded)
+              .having((s) => s.clips, 'clips', [activeClip, trashedClip])
+              .having((s) => s.trashedClips, 'trashedClips', isEmpty)
+              .having(
+                (s) => s.lastDeletedClipIds,
+                'lastDeletedClipIds',
+                isEmpty,
+              ),
+        ],
+        verify: (_) {
+          verify(() => mockClipLibraryService.restore('trashed')).called(1);
+          verify(() => mockClipLibraryService.getAllClips()).called(1);
+          verify(() => mockClipLibraryService.getTrashedClips()).called(1);
+        },
+      );
+
+      blocTest<ClipsLibraryBloc, ClipsLibraryState>(
+        'emits error when restore fails',
+        setUp: () {
+          when(
+            () => mockClipLibraryService.restore(any()),
+          ).thenThrow(Exception('Restore failed'));
+        },
+        seed: () => ClipsLibraryState(
+          status: ClipsLibraryStatus.loaded,
+          trashedClips: [trashedClip],
+        ),
+        build: createBloc,
+        act: (bloc) => bloc.add(const ClipsLibraryRestoreClips({'trashed'})),
+        errors: () => [isA<Exception>()],
+        expect: () => [
+          isA<ClipsLibraryState>().having(
+            (s) => s.status,
+            'status',
+            ClipsLibraryStatus.error,
+          ),
+        ],
+      );
+
+      blocTest<ClipsLibraryBloc, ClipsLibraryState>(
+        'hard-deletes a trashed clip and reloads trash list',
+        setUp: () {
+          when(
+            () => mockClipLibraryService.hardDelete('trashed'),
+          ).thenAnswer((_) async {});
+          when(
+            () => mockClipLibraryService.getTrashedClips(),
+          ).thenAnswer((_) async => []);
+        },
+        seed: () => ClipsLibraryState(
+          status: ClipsLibraryStatus.trashLoaded,
+          trashedClips: [trashedClip],
+        ),
+        build: createBloc,
+        act: (bloc) => bloc.add(ClipsLibraryHardDeleteClip(trashedClip)),
+        expect: () => [
+          isA<ClipsLibraryState>()
+              .having((s) => s.status, 'status', ClipsLibraryStatus.trashLoaded)
+              .having((s) => s.trashedClips, 'trashedClips', isEmpty),
+        ],
+        verify: (_) {
+          verify(() => mockClipLibraryService.hardDelete('trashed')).called(1);
+          verify(() => mockClipLibraryService.getTrashedClips()).called(1);
+        },
+      );
+
+      blocTest<ClipsLibraryBloc, ClipsLibraryState>(
+        'emits error when hard delete fails',
+        setUp: () {
+          when(
+            () => mockClipLibraryService.hardDelete(any()),
+          ).thenThrow(Exception('Hard delete failed'));
+        },
+        seed: () => ClipsLibraryState(
+          status: ClipsLibraryStatus.trashLoaded,
+          trashedClips: [trashedClip],
+        ),
+        build: createBloc,
+        act: (bloc) => bloc.add(ClipsLibraryHardDeleteClip(trashedClip)),
+        errors: () => [isA<Exception>()],
+        expect: () => [
+          isA<ClipsLibraryState>().having(
+            (s) => s.status,
+            'status',
+            ClipsLibraryStatus.error,
+          ),
+        ],
+      );
+
+      blocTest<ClipsLibraryBloc, ClipsLibraryState>(
+        'empties trash and emits empty trashLoaded state',
+        setUp: () {
+          when(
+            () => mockClipLibraryService.getTrashedClips(),
+          ).thenAnswer((_) async => [trashedClip]);
+          when(
+            () => mockClipLibraryService.hardDelete('trashed'),
+          ).thenAnswer((_) async {});
+        },
+        seed: () => ClipsLibraryState(
+          status: ClipsLibraryStatus.trashLoaded,
+          trashedClips: [trashedClip],
+        ),
+        build: createBloc,
+        act: (bloc) => bloc.add(const ClipsLibraryEmptyTrash()),
+        expect: () => [
+          isA<ClipsLibraryState>()
+              .having((s) => s.status, 'status', ClipsLibraryStatus.trashLoaded)
+              .having((s) => s.trashedClips, 'trashedClips', isEmpty),
+        ],
+        verify: (_) {
+          verify(() => mockClipLibraryService.getTrashedClips()).called(1);
+          verify(() => mockClipLibraryService.hardDelete('trashed')).called(1);
+        },
+      );
+
+      blocTest<ClipsLibraryBloc, ClipsLibraryState>(
+        'emits error when empty trash fails',
+        setUp: () {
+          when(
+            () => mockClipLibraryService.getTrashedClips(),
+          ).thenThrow(Exception('Empty trash failed'));
+        },
+        seed: () => ClipsLibraryState(
+          status: ClipsLibraryStatus.trashLoaded,
+          trashedClips: [trashedClip],
+        ),
+        build: createBloc,
+        act: (bloc) => bloc.add(const ClipsLibraryEmptyTrash()),
+        errors: () => [isA<Exception>()],
+        expect: () => [
+          isA<ClipsLibraryState>().having(
+            (s) => s.status,
+            'status',
+            ClipsLibraryStatus.error,
+          ),
         ],
       );
     });

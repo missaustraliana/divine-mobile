@@ -5775,6 +5775,21 @@ class AppLocalizationsFil extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Bawiin';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'Awtomatikong made-delete sa loob ng $daysLeft araw',
+      one: 'Awtomatikong made-delete bukas',
+      zero: 'Awtomatikong made-delete ngayon',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts => 'Hindi na-load ang mga draft';
 
   @override
@@ -6672,7 +6687,54 @@ class AppLocalizationsFil extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'Naka-disable ang ghost frame';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Nabura ang clip';
+  String get videoRecorderClipDeletedMessage =>
+      'Inilipat ang clip sa basurahan';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'I-undo';
+
+  @override
+  String get libraryTrashTitle => 'Kamakailan lang na nabura';
+
+  @override
+  String get libraryTrashEmptyTitle => 'Walang laman ang basurahan';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'Mananatili dito ang mga nabura na clip ng 30 araw bago tuluyang alisin.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Ibalik';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Burahin ngayon';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'I-empty ang basurahan';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'I-delete ang clip ngayon?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'Aalisin nito agad ang clip mula sa trash.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'I-empty ang trash?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clip',
+      one: '1 clip',
+    );
+    return 'Permanente nitong ide-delete agad mula sa trash ang $_temp0.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Kamakailan lang na nabura';
 
   @override
   String get videoRecorderCloseLabel => 'Isara ang video recorder';

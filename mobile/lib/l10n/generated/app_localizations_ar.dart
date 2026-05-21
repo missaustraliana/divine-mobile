@@ -5655,6 +5655,21 @@ class AppLocalizationsAr extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'تراجع';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'سيُحذف تلقائيًا خلال $daysLeft أيام',
+      one: 'سيُحذف تلقائيًا غدًا',
+      zero: 'سيُحذف تلقائيًا اليوم',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts => 'تعذّر تحميل المسودات';
 
   @override
@@ -6527,7 +6542,53 @@ class AppLocalizationsAr extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'الإطار الشبحي معطل';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'تم حذف المقطع';
+  String get videoRecorderClipDeletedMessage => 'تم نقل المقطع إلى المهملات';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'تراجع';
+
+  @override
+  String get libraryTrashTitle => 'المحذوفة مؤخرًا';
+
+  @override
+  String get libraryTrashEmptyTitle => 'المهملات فارغة';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'تبقى المقاطع المحذوفة هنا لمدة 30 يومًا قبل إزالتها نهائيًا.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'استعادة';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'حذف الآن';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'إفراغ المهملات';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'هل تريد حذف المقطع الآن؟';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'سيؤدي هذا إلى إزالة المقطع من سلة المهملات فورًا.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'إفراغ سلة المهملات؟';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count مقاطع',
+      one: 'مقطع واحد',
+    );
+    return 'سيؤدي هذا إلى حذف $_temp0 نهائيًا من سلة المهملات فورًا.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'المحذوفة مؤخرًا';
 
   @override
   String get videoRecorderCloseLabel => 'إغلاق مسجل الفيديو';

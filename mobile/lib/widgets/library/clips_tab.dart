@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:openvine/blocs/clips_library/clips_library_bloc.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/models/divine_video_clip.dart';
+import 'package:openvine/widgets/branded_loading_indicator.dart';
 import 'package:openvine/widgets/library/empty_library_state.dart';
 import 'package:openvine/widgets/video_clip/video_clip_preview.dart';
 import 'package:openvine/widgets/video_clip/video_clip_thumbnail_card.dart';
@@ -50,9 +51,7 @@ class ClipsTab extends StatelessWidget {
         final visibleClips = clips ?? state.clips;
 
         if (state.isLoading) {
-          return const Center(
-            child: CircularProgressIndicator(color: VineTheme.vineGreen),
-          );
+          return const Center(child: BrandedLoadingIndicator(size: 60));
         }
 
         if (state.status == ClipsLibraryStatus.error) {
@@ -139,7 +138,7 @@ class ClipsTab extends StatelessWidget {
         opaque: false,
         pageBuilder: (_, _, _) => VideoClipPreview(
           clip: clip,
-          onDelete: () => _confirmDeleteClip(context, clip),
+          onDelete: () => _softDeleteClip(context, clip),
         ),
         transitionsBuilder: (_, animation, _, child) {
           return FadeTransition(opacity: animation, child: child);
@@ -148,6 +147,10 @@ class ClipsTab extends StatelessWidget {
         reverseTransitionDuration: const Duration(milliseconds: 200),
       ),
     );
+  }
+
+  void _softDeleteClip(BuildContext context, DivineVideoClip clip) {
+    _confirmDeleteClip(context, clip);
   }
 
   Future<void> _confirmDeleteClip(
@@ -166,12 +169,9 @@ class ClipsTab extends StatelessWidget {
       onSecondaryPressed: () => Navigator.of(context).pop(false),
     );
 
-    if (confirmed != true) return;
-    if (!context.mounted) return;
+    if (confirmed != true || !context.mounted) return;
 
     context.read<ClipsLibraryBloc>().add(ClipsLibraryDeleteClip(clip));
-    // Close the underlying VideoClipPreview so the user returns to the
-    // library, which already reflects the deletion via the BLoC reload.
     Navigator.of(context).pop();
   }
 }

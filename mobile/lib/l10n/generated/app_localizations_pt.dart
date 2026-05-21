@@ -5736,6 +5736,21 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Desfazer';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'Será excluído automaticamente em $daysLeft dias',
+      one: 'Será excluído automaticamente amanhã',
+      zero: 'Será excluído automaticamente hoje',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts =>
       'Não foi possível carregar os rascunhos';
 
@@ -6630,7 +6645,53 @@ class AppLocalizationsPt extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'Quadro fantasma desativado';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Clipe excluído';
+  String get videoRecorderClipDeletedMessage => 'Clipe movido para a lixeira';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'Desfazer';
+
+  @override
+  String get libraryTrashTitle => 'Excluídos recentemente';
+
+  @override
+  String get libraryTrashEmptyTitle => 'A lixeira está vazia';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'Os clipes excluídos ficam aqui por 30 dias antes de serem removidos permanentemente.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Restaurar';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Excluir agora';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'Esvaziar lixeira';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'Excluir clipe agora?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'Isso remove o clipe da lixeira imediatamente.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'Esvaziar lixeira?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clipes',
+      one: '1 clipe',
+    );
+    return 'Isso exclui permanentemente da lixeira $_temp0 agora mesmo.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Excluídos recentemente';
 
   @override
   String get videoRecorderCloseLabel => 'Fechar gravador de vídeo';

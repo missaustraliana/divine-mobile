@@ -10046,6 +10046,18 @@ abstract class AppLocalizations {
   /// **'{count, plural, =1{1 clip deleted} other{{count} clips deleted}}'**
   String libraryClipsDeletedCount(int count);
 
+  /// Action button on the 'N clips deleted' snackbar shown after the user deletes clips from their library. Tapping it restores the clips from the trash bin.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get libraryClipsDeletedUndoLabel;
+
+  /// Subtitle on a trashed clip tile counting down to when the 30-day retention purge will permanently delete it. Replaces the recorded-date subtitle in the trash view.
+  ///
+  /// In en, this message translates to:
+  /// **'{daysLeft, plural, =0{Auto-deletes today} =1{Auto-deletes tomorrow} other{Auto-deletes in {daysLeft} days}}'**
+  String libraryTrashAutoDeletes(int daysLeft);
+
   /// No description provided for @libraryCouldNotLoadDrafts.
   ///
   /// In en, this message translates to:
@@ -11567,8 +11579,80 @@ abstract class AppLocalizations {
   /// No description provided for @videoRecorderClipDeletedMessage.
   ///
   /// In en, this message translates to:
-  /// **'Clip deleted'**
+  /// **'Clip moved to trash'**
   String get videoRecorderClipDeletedMessage;
+
+  /// Action button on the 'Clip moved to trash' snackbar shown after the user deletes the last recorded clip. Tapping it restores the clip to its original position in the recording tray.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get videoRecorderClipUndoLabel;
+
+  /// Screen title for the clip trash bin showing recently deleted clips that can still be restored within the retention window.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently deleted'**
+  String get libraryTrashTitle;
+
+  /// Empty-state title shown in the clip trash bin when there are no recently deleted clips.
+  ///
+  /// In en, this message translates to:
+  /// **'Trash is empty'**
+  String get libraryTrashEmptyTitle;
+
+  /// Empty-state subtitle explaining the 30-day clip trash retention.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted clips live here for 30 days before being removed for good.'**
+  String get libraryTrashEmptySubtitle;
+
+  /// Button on a trashed clip that restores it back to the active library.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore'**
+  String get libraryTrashRestoreLabel;
+
+  /// Button on a trashed clip that skips the retention window and permanently deletes it immediately.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete now'**
+  String get libraryTrashDeleteNowLabel;
+
+  /// Button that permanently deletes every clip currently in trash.
+  ///
+  /// In en, this message translates to:
+  /// **'Empty trash'**
+  String get libraryTrashEmptyAllLabel;
+
+  /// Confirmation-sheet title shown before permanently deleting a single clip from trash.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete clip now?'**
+  String get libraryTrashDeleteConfirmTitle;
+
+  /// Confirmation-sheet subtitle shown before permanently deleting a single clip from trash.
+  ///
+  /// In en, this message translates to:
+  /// **'This removes the clip from trash right away.'**
+  String get libraryTrashDeleteConfirmMessage;
+
+  /// Confirmation-sheet title shown before permanently deleting every clip from trash.
+  ///
+  /// In en, this message translates to:
+  /// **'Empty trash?'**
+  String get libraryTrashEmptyConfirmTitle;
+
+  /// Confirmation-sheet subtitle shown before permanently deleting every clip from trash.
+  ///
+  /// In en, this message translates to:
+  /// **'This permanently deletes {count, plural, =1{1 clip} other{{count} clips}} from trash right away.'**
+  String libraryTrashEmptyConfirmMessage(int count);
+
+  /// Menu/button label on the library screen that opens the trash view.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently deleted'**
+  String get libraryTrashEntryLabel;
 
   /// No description provided for @videoRecorderCloseLabel.
   ///

@@ -5703,6 +5703,21 @@ class AppLocalizationsSv extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Ångra';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'Raderas automatiskt om $daysLeft dagar',
+      one: 'Raderas automatiskt i morgon',
+      zero: 'Raderas automatiskt i dag',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts => 'Det gick inte att ladda utkast';
 
   @override
@@ -6590,7 +6605,54 @@ class AppLocalizationsSv extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'Spökram inaktiverad';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Klipp borttaget';
+  String get videoRecorderClipDeletedMessage =>
+      'Klipp flyttat till papperskorgen';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'Ångra';
+
+  @override
+  String get libraryTrashTitle => 'Nyligen borttagna';
+
+  @override
+  String get libraryTrashEmptyTitle => 'Papperskorgen är tom';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'Borttagna klipp finns kvar här i 30 dagar innan de tas bort permanent.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Återställ';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Ta bort nu';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'Töm papperskorgen';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'Radera klippet nu?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'Detta tar bort klippet från papperskorgen direkt.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'Töm papperskorgen?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count klipp',
+      one: '1 klipp',
+    );
+    return 'Detta raderar $_temp0 permanent från papperskorgen direkt.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Nyligen borttagna';
 
   @override
   String get videoRecorderCloseLabel => 'Stäng videoinspelaren';

@@ -5590,6 +5590,21 @@ class AppLocalizationsAm extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'ቀልብስ';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'በ$daysLeft ቀናት ውስጥ በራስ-ሰር ይሰረዛል',
+      one: 'ነገ በራስ-ሰር ይሰረዛል',
+      zero: 'ዛሬ በራስ-ሰር ይሰረዛል',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts => 'ረቂቆችን መጫን አልተቻለም';
 
   @override
@@ -6451,7 +6466,53 @@ class AppLocalizationsAm extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'Ghost ፍሬም ጠፍቷል';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'ክሊፕ ተሰርዟል።';
+  String get videoRecorderClipDeletedMessage => 'ክሊፕ ወደ መጣያ ተንቀሳቅሷል።';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'ቀልብስ';
+
+  @override
+  String get libraryTrashTitle => 'በቅርቡ የተሰረዘ';
+
+  @override
+  String get libraryTrashEmptyTitle => 'መጣያው ባዶ ነው።';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'የተሰረዙ ክሊፖች ለ30 ቀናት እዚህ ይቆያሉ ከዚያም በቋሚነት ይወገዳሉ።';
+
+  @override
+  String get libraryTrashRestoreLabel => 'መልስ';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'አሁን ሰርዝ';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'መጣያን ባዶ አድርግ';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'አሁኑኑ ክሊፑን ሰርዝ?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'ይህ ክሊፑን ከቆሻሻ መጣያው ወዲያውኑ ያስወግደዋል።';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'ቆሻሻ መጣያውን ባዶ አድርግ?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ክሊፖች',
+      one: '1 ክሊፕ',
+    );
+    return '$_temp0 ከቆሻሻ መጣያው ወዲያውኑ በቋሚነት ይሰረዛሉ።';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'በቅርቡ የተሰረዘ';
 
   @override
   String get videoRecorderCloseLabel => 'የቪዲዮ መቅረጫ ዝጋ';

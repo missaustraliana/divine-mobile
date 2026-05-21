@@ -5754,6 +5754,21 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Deshacer';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'Se elimina automáticamente en $daysLeft días',
+      one: 'Se elimina automáticamente mañana',
+      zero: 'Se elimina automáticamente hoy',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts =>
       'No se pudieron cargar los borradores';
 
@@ -6656,7 +6671,53 @@ class AppLocalizationsEs extends AppLocalizations {
       'Fotograma fantasma desactivado';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Clip eliminado';
+  String get videoRecorderClipDeletedMessage => 'Clip movido a la papelera';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'Deshacer';
+
+  @override
+  String get libraryTrashTitle => 'Eliminados recientemente';
+
+  @override
+  String get libraryTrashEmptyTitle => 'La papelera está vacía';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'Los clips eliminados permanecen aquí durante 30 días antes de eliminarse de forma permanente.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Restaurar';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Eliminar ahora';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'Vaciar papelera';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => '¿Eliminar clip ahora?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'Esto elimina el clip de la papelera de inmediato.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => '¿Vaciar papelera?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips',
+      one: '1 clip',
+    );
+    return 'Esto elimina permanentemente de la papelera $_temp0 ahora mismo.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Eliminados recientemente';
 
   @override
   String get videoRecorderCloseLabel => 'Cerrar grabador de video';

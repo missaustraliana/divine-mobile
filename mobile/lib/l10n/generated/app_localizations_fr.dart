@@ -5778,6 +5778,21 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Annuler';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'Suppression automatique dans $daysLeft jours',
+      one: 'Suppression automatique demain',
+      zero: 'Suppression automatique aujourd’hui',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts =>
       'Impossible de charger les brouillons';
 
@@ -6681,7 +6696,54 @@ class AppLocalizationsFr extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'Cadre fantôme désactivé';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Clip supprimé';
+  String get videoRecorderClipDeletedMessage =>
+      'Clip déplacé vers la corbeille';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'Annuler';
+
+  @override
+  String get libraryTrashTitle => 'Récemment supprimés';
+
+  @override
+  String get libraryTrashEmptyTitle => 'La corbeille est vide';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'Les clips supprimés restent ici pendant 30 jours avant d\'être supprimés définitivement.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Restaurer';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Supprimer maintenant';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'Vider la corbeille';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'Supprimer le clip maintenant ?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'Cela retire le clip de la corbeille tout de suite.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'Vider la corbeille ?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips',
+      one: '1 clip',
+    );
+    return 'Cela supprime définitivement de la corbeille $_temp0 tout de suite.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Récemment supprimés';
 
   @override
   String get videoRecorderCloseLabel => 'Fermer l\'enregistreur vidéo';

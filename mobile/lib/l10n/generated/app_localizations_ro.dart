@@ -5853,6 +5853,21 @@ class AppLocalizationsRo extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Anulează';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'Se șterge automat în $daysLeft zile',
+      one: 'Se șterge automat mâine',
+      zero: 'Se șterge automat azi',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts => 'Nu s-au putut încărca ciornele';
 
   @override
@@ -6749,7 +6764,53 @@ class AppLocalizationsRo extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'Cadru fantomă dezactivat';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Clip șters';
+  String get videoRecorderClipDeletedMessage => 'Clipul a fost mutat în coș';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'Anulează';
+
+  @override
+  String get libraryTrashTitle => 'Șterse recent';
+
+  @override
+  String get libraryTrashEmptyTitle => 'Coșul de gunoi este gol';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'Clipurile șterse rămân aici timp de 30 de zile înainte de a fi eliminate definitiv.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Restaurează';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Șterge acum';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'Golește coșul';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'Ștergi clipul acum?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'Asta scoate clipul din coș imediat.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'Golești coșul?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clipuri',
+      one: '1 clip',
+    );
+    return 'Asta șterge definitiv din coș $_temp0 imediat.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Șterse recent';
 
   @override
   String get videoRecorderCloseLabel => 'Închide înregistratorul video';

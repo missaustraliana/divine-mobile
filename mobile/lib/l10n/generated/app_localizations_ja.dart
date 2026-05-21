@@ -5468,6 +5468,21 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => '元に戻す';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: '$daysLeft日後に自動削除',
+      one: '明日自動削除',
+      zero: '今日自動削除',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts => '下書きを読み込めませんでした';
 
   @override
@@ -6316,7 +6331,51 @@ class AppLocalizationsJa extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'ゴーストフレームを無効化';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'クリップを削除しました';
+  String get videoRecorderClipDeletedMessage => 'クリップをゴミ箱に移動しました';
+
+  @override
+  String get videoRecorderClipUndoLabel => '元に戻す';
+
+  @override
+  String get libraryTrashTitle => '最近削除した項目';
+
+  @override
+  String get libraryTrashEmptyTitle => 'ゴミ箱は空です';
+
+  @override
+  String get libraryTrashEmptySubtitle => '削除されたクリップは30日間ここに保管され、その後完全に削除されます。';
+
+  @override
+  String get libraryTrashRestoreLabel => '復元';
+
+  @override
+  String get libraryTrashDeleteNowLabel => '今すぐ削除';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'ゴミ箱を空にする';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => '今すぐクリップを削除しますか？';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage => 'これでクリップはゴミ箱からすぐに削除されます。';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'ゴミ箱を空にしますか？';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count件のクリップ',
+      one: '1件のクリップ',
+    );
+    return 'これでゴミ箱から$_temp0がすぐに完全に削除されます。';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => '最近削除した項目';
 
   @override
   String get videoRecorderCloseLabel => '動画レコーダーを閉じる';

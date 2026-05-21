@@ -5845,6 +5845,21 @@ class AppLocalizationsPl extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Cofnij';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'Zostanie automatycznie usunięty za $daysLeft dni',
+      one: 'Zostanie automatycznie usunięty jutro',
+      zero: 'Zostanie automatycznie usunięty dzisiaj',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts =>
       'Nie udało się wczytać wersji roboczych';
 
@@ -6740,7 +6755,53 @@ class AppLocalizationsPl extends AppLocalizations {
   String get videoRecorderGhostFrameDisabled => 'Klatka odniesienia wyłączona';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Klip usunięty';
+  String get videoRecorderClipDeletedMessage => 'Klip przeniesiony do kosza';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'Cofnij';
+
+  @override
+  String get libraryTrashTitle => 'Ostatnio usunięte';
+
+  @override
+  String get libraryTrashEmptyTitle => 'Kosz jest pusty';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'Usunięte klipy pozostają tutaj przez 30 dni, zanim zostaną trwale usunięte.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Przywróć';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Usuń teraz';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'Opróżnij kosz';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'Usunąć klip teraz?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'To od razu usunie klip z kosza.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'Opróżnić kosz?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count klipów',
+      one: '1 klip',
+    );
+    return 'To od razu trwale usunie z kosza $_temp0.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Ostatnio usunięte';
 
   @override
   String get videoRecorderCloseLabel => 'Zamknij rejestrator wideo';

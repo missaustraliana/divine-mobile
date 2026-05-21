@@ -5751,6 +5751,21 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
+  String get libraryClipsDeletedUndoLabel => 'Annulla';
+
+  @override
+  String libraryTrashAutoDeletes(int daysLeft) {
+    String _temp0 = intl.Intl.pluralLogic(
+      daysLeft,
+      locale: localeName,
+      other: 'Eliminazione automatica tra $daysLeft giorni',
+      one: 'Eliminazione automatica domani',
+      zero: 'Eliminazione automatica oggi',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get libraryCouldNotLoadDrafts => 'Impossibile caricare le bozze';
 
   @override
@@ -6650,7 +6665,53 @@ class AppLocalizationsIt extends AppLocalizations {
       'Fotogramma fantasma disattivato';
 
   @override
-  String get videoRecorderClipDeletedMessage => 'Clip eliminato';
+  String get videoRecorderClipDeletedMessage => 'Clip spostato nel cestino';
+
+  @override
+  String get videoRecorderClipUndoLabel => 'Annulla';
+
+  @override
+  String get libraryTrashTitle => 'Eliminati di recente';
+
+  @override
+  String get libraryTrashEmptyTitle => 'Il cestino è vuoto';
+
+  @override
+  String get libraryTrashEmptySubtitle =>
+      'I clip eliminati restano qui per 30 giorni prima di essere rimossi definitivamente.';
+
+  @override
+  String get libraryTrashRestoreLabel => 'Ripristina';
+
+  @override
+  String get libraryTrashDeleteNowLabel => 'Elimina ora';
+
+  @override
+  String get libraryTrashEmptyAllLabel => 'Svuota il cestino';
+
+  @override
+  String get libraryTrashDeleteConfirmTitle => 'Eliminare subito la clip?';
+
+  @override
+  String get libraryTrashDeleteConfirmMessage =>
+      'Questo rimuove subito la clip dal cestino.';
+
+  @override
+  String get libraryTrashEmptyConfirmTitle => 'Svuotare il cestino?';
+
+  @override
+  String libraryTrashEmptyConfirmMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clip',
+      one: '1 clip',
+    );
+    return 'Questo elimina definitivamente dal cestino $_temp0 subito.';
+  }
+
+  @override
+  String get libraryTrashEntryLabel => 'Eliminati di recente';
 
   @override
   String get videoRecorderCloseLabel => 'Chiudi registratore video';
