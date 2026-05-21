@@ -5,22 +5,34 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:openvine/blocs/search_results_filter/search_results_filter.dart';
+import 'package:openvine/blocs/video_search/video_search_bloc.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/screens/search_results/widgets/search_filter_pill.dart';
+import 'package:videos_repository/videos_repository.dart';
 
 class _MockSearchResultsFilterCubit extends MockCubit<SearchResultsFilter>
     implements SearchResultsFilterCubit {}
 
+class _MockVideoSearchBloc extends MockBloc<VideoSearchEvent, VideoSearchState>
+    implements VideoSearchBloc {}
+
 void main() {
   group(SearchFilterPill, () {
     late _MockSearchResultsFilterCubit mockCubit;
+    late _MockVideoSearchBloc mockVideoSearchBloc;
+    final l10n = lookupAppLocalizations(const Locale('en'));
 
     setUp(() {
       mockCubit = _MockSearchResultsFilterCubit();
+      mockVideoSearchBloc = _MockVideoSearchBloc();
+      when(
+        () => mockVideoSearchBloc.state,
+      ).thenReturn(const VideoSearchState());
     });
 
     tearDown(() {
       mockCubit.close();
+      mockVideoSearchBloc.close();
     });
 
     Widget buildSubject() {
@@ -28,8 +40,11 @@ void main() {
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
-          body: BlocProvider<SearchResultsFilterCubit>.value(
-            value: mockCubit,
+          body: MultiBlocProvider(
+            providers: [
+              BlocProvider<SearchResultsFilterCubit>.value(value: mockCubit),
+              BlocProvider<VideoSearchBloc>.value(value: mockVideoSearchBloc),
+            ],
             child: const SearchFilterPill(),
           ),
         ),
@@ -64,11 +79,48 @@ void main() {
       expect(find.text('Videos'), findsOneWidget);
     });
 
-    testWidgets('does not render caret down icon', (tester) async {
+    testWidgets('does not render caret down icon for non-video filters', (
+      tester,
+    ) async {
       when(() => mockCubit.state).thenReturn(SearchResultsFilter.all);
       await tester.pumpWidget(buildSubject());
 
       expect(find.byType(DivineIcon), findsNothing);
+    });
+
+    testWidgets('renders selected video sort label when filter is videos', (
+      tester,
+    ) async {
+      when(() => mockCubit.state).thenReturn(SearchResultsFilter.videos);
+      when(
+        () => mockVideoSearchBloc.state,
+      ).thenReturn(const VideoSearchState(sort: VideoSearchSort.recent));
+
+      await tester.pumpWidget(buildSubject());
+
+      expect(find.text('Videos'), findsOneWidget);
+      expect(find.text(l10n.searchVideosSortRecent), findsOneWidget);
+    });
+
+    testWidgets('dispatches $VideoSearchSortChanged after selecting sort', (
+      tester,
+    ) async {
+      when(() => mockCubit.state).thenReturn(SearchResultsFilter.videos);
+      when(
+        () => mockVideoSearchBloc.state,
+      ).thenReturn(const VideoSearchState());
+
+      await tester.pumpWidget(buildSubject());
+      await tester.tap(find.text(l10n.searchVideosSortTrending));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.searchVideosSortRecent));
+      await tester.pumpAndSettle();
+
+      verify(
+        () => mockVideoSearchBloc.add(
+          const VideoSearchSortChanged(VideoSearchSort.recent),
+        ),
+      ).called(1);
     });
 
     testWidgets('opens bottom sheet on tap', (tester) async {

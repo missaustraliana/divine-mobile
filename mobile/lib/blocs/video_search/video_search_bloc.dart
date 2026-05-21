@@ -48,10 +48,12 @@ class VideoSearchBloc extends Bloc<VideoSearchEvent, VideoSearchState> {
       transformer: _debounceRestartable(),
     );
     on<VideoSearchCleared>(_onCleared);
+    on<VideoSearchSortChanged>(_onSortChanged, transformer: restartable());
     on<VideoSearchLoadMore>(_onLoadMore, transformer: sequential());
   }
 
   final VideosRepository _videosRepository;
+  int _searchSessionId = 0;
 
   Future<void> _onQueryChanged(
     VideoSearchQueryChanged event,
@@ -60,6 +62,7 @@ class VideoSearchBloc extends Bloc<VideoSearchEvent, VideoSearchState> {
     final query = event.query.trim();
 
     if (query.isEmpty || query.length < minSearchQueryLength) {
+      _invalidateSearchSession();
       emit(const VideoSearchState());
       return;
     }
@@ -70,10 +73,25 @@ class VideoSearchBloc extends Bloc<VideoSearchEvent, VideoSearchState> {
       return;
     }
 
+    await _search(
+      query: query,
+      sort: state.sort,
+      emit: emit,
+      sessionId: _beginSearchSession(),
+    );
+  }
+
+  Future<void> _search({
+    required String query,
+    required VideoSearchSort sort,
+    required Emitter<VideoSearchState> emit,
+    required int sessionId,
+  }) async {
     emit(
       state.copyWith(
         status: VideoSearchStatus.searching,
         query: query,
+        sort: sort,
         resultCount: null,
         apiOffset: 0,
         totalApiCount: null,
@@ -84,13 +102,20 @@ class VideoSearchBloc extends Bloc<VideoSearchEvent, VideoSearchState> {
 
     try {
       await emit.forEach<List<VideoEvent>>(
-        _videosRepository.searchVideos(query: query),
-        onData: (videos) => state.copyWith(
-          status: VideoSearchStatus.searching,
-          videos: videos,
-          resultCount: videos.length,
-        ),
+        _videosRepository.searchVideos(query: query, sort: sort),
+        onData: (videos) {
+          if (!_isActiveSession(sessionId)) {
+            return state;
+          }
+
+          return state.copyWith(
+            status: VideoSearchStatus.searching,
+            videos: videos,
+            resultCount: videos.length,
+          );
+        },
       );
+      if (!_isActiveSession(sessionId)) return;
       // Progressive stream complete — set pagination state.
       // One API page was consumed during the stream; assume more exist
       // only if we actually received results.
@@ -102,11 +127,40 @@ class VideoSearchBloc extends Bloc<VideoSearchEvent, VideoSearchState> {
         ),
       );
     } on Exception catch (e, stackTrace) {
+      if (!_isActiveSession(sessionId)) return;
       // Matrix-NO: searchVideos stream surfaces API / relay / network
       // failures (Network/IO category).
       addError(e, stackTrace);
       emit(state.copyWith(status: VideoSearchStatus.failure));
     }
+  }
+
+  Future<void> _onSortChanged(
+    VideoSearchSortChanged event,
+    Emitter<VideoSearchState> emit,
+  ) async {
+    if (event.sort == state.sort) return;
+    final query = state.query;
+
+    emit(
+      state.copyWith(
+        sort: event.sort,
+        videos: const [],
+        resultCount: null,
+        apiOffset: 0,
+        totalApiCount: null,
+        hasMore: false,
+        isLoadingMore: false,
+      ),
+    );
+
+    if (query.isEmpty) return;
+    await _search(
+      query: query,
+      sort: event.sort,
+      emit: emit,
+      sessionId: _beginSearchSession(),
+    );
   }
 
   Future<void> _onLoadMore(
@@ -115,19 +169,27 @@ class VideoSearchBloc extends Bloc<VideoSearchEvent, VideoSearchState> {
   ) async {
     if (!state.hasMore || state.isLoadingMore || state.query.isEmpty) return;
 
+    final sessionId = _searchSessionId;
+    final query = state.query;
+    final sort = state.sort;
+    final apiOffset = state.apiOffset;
+    final currentVideos = state.videos;
+
     emit(state.copyWith(isLoadingMore: true));
 
     try {
       final result = await _videosRepository.searchVideosViaApi(
-        query: state.query,
-        offset: state.apiOffset,
+        query: query,
+        offset: apiOffset,
+        sort: sort,
       );
+      if (!_isActiveSession(sessionId)) return;
 
-      final merged = _videosRepository.deduplicateAndSortVideos([
-        ...state.videos,
+      final merged = _videosRepository.deduplicateVideosPreservingOrder([
+        ...currentVideos,
         ...result.videos,
       ]);
-      final newOffset = state.apiOffset + _pageSize;
+      final newOffset = apiOffset + _pageSize;
 
       emit(
         state.copyWith(
@@ -135,11 +197,12 @@ class VideoSearchBloc extends Bloc<VideoSearchEvent, VideoSearchState> {
           resultCount: merged.length,
           apiOffset: newOffset,
           totalApiCount: result.totalCount,
-          hasMore: newOffset < result.totalCount,
+          hasMore: result.hasMore,
           isLoadingMore: false,
         ),
       );
     } on Exception catch (e, stackTrace) {
+      if (!_isActiveSession(sessionId)) return;
       // Matrix-NO: searchVideosViaApi surfaces API / network failures
       // (Network/IO category).
       addError(e, stackTrace);
@@ -148,6 +211,15 @@ class VideoSearchBloc extends Bloc<VideoSearchEvent, VideoSearchState> {
   }
 
   void _onCleared(VideoSearchCleared event, Emitter<VideoSearchState> emit) {
+    _invalidateSearchSession();
     emit(const VideoSearchState());
   }
+
+  int _beginSearchSession() => ++_searchSessionId;
+
+  void _invalidateSearchSession() {
+    _searchSessionId++;
+  }
+
+  bool _isActiveSession(int sessionId) => sessionId == _searchSessionId;
 }

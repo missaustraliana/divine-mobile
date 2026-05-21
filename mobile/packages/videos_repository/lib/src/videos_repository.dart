@@ -16,6 +16,7 @@ import 'package:videos_repository/src/popular_videos_page.dart';
 import 'package:videos_repository/src/video_content_filter.dart';
 import 'package:videos_repository/src/video_event_filter.dart';
 import 'package:videos_repository/src/video_local_storage.dart';
+import 'package:videos_repository/src/video_search_sort.dart';
 
 export 'package:models/src/nip71_video_kinds.dart' show NIP71VideoKinds;
 
@@ -749,10 +750,7 @@ class VideosRepository {
         );
         final stats = response.videos;
         if (stats.isEmpty) {
-          final page = PopularVideosPage(
-            videos: visible,
-            hasMore: false,
-          );
+          final page = PopularVideosPage(videos: visible, hasMore: false);
           if (!skipCache && until == null && cursor == null) {
             _inMemoryFeedCache?.set(
               cacheKey,
@@ -1615,19 +1613,21 @@ class VideosRepository {
   /// - [query]: The search query string. Returns empty if blank.
   /// - [limit]: Maximum number of results (default 50).
   ///
-  /// Returns a record of matching [VideoEvent]s (unsorted — call
-  /// [deduplicateAndSortVideos] to rank) and the total API result count.
-  Future<({List<VideoEvent> videos, int totalCount})> searchVideosViaApi({
+  /// Returns a record of matching [VideoEvent]s in API order and the total API
+  /// result count.
+  Future<({List<VideoEvent> videos, int totalCount, bool hasMore})>
+  searchVideosViaApi({
     required String query,
     int limit = 50,
     int offset = 0,
+    VideoSearchSort sort = defaultVideoSearchSort,
   }) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) {
-      return (videos: <VideoEvent>[], totalCount: 0);
+      return (videos: <VideoEvent>[], totalCount: 0, hasMore: false);
     }
     if (_funnelcakeApiClient == null || !_funnelcakeApiClient.isAvailable) {
-      return (videos: <VideoEvent>[], totalCount: 0);
+      return (videos: <VideoEvent>[], totalCount: 0, hasMore: false);
     }
 
     try {
@@ -1635,12 +1635,17 @@ class VideosRepository {
         query: trimmed,
         limit: limit,
         offset: offset,
+        sort: sort.apiValue,
       );
       final videos = _transformVideoStats(
         response.videos,
         sortByCreatedAt: false,
       );
-      return (videos: videos, totalCount: response.totalCount);
+      return (
+        videos: videos,
+        totalCount: response.totalCount,
+        hasMore: response.hasMore,
+      );
     } on FunnelcakeException catch (e, stackTrace) {
       Log.error(
         'searchVideosViaApi failed for "$trimmed"',
@@ -1649,7 +1654,7 @@ class VideosRepository {
         error: e,
         stackTrace: stackTrace,
       );
-      return (videos: <VideoEvent>[], totalCount: 0);
+      return (videos: <VideoEvent>[], totalCount: 0, hasMore: false);
     }
   }
 
@@ -1657,14 +1662,18 @@ class VideosRepository {
   ///
   /// Use this to combine results from [searchVideosLocally] and
   /// [searchVideosOnRelays] into a single ranked list.
-  List<VideoEvent> deduplicateAndSortVideos(List<VideoEvent> videos) {
+  List<VideoEvent> deduplicateAndSortVideos(List<VideoEvent> videos) =>
+      deduplicateVideosPreservingOrder(videos)
+        ..sort(VideoEvent.compareByLoopsThenTime);
+
+  /// Deduplicates videos by ID while preserving the first occurrence order.
+  List<VideoEvent> deduplicateVideosPreservingOrder(List<VideoEvent> videos) {
     final seenIds = <String>{};
-    final unique = videos.where((v) {
+    return videos.where((v) {
       if (seenIds.contains(v.id)) return false;
       seenIds.add(v.id);
       return true;
-    }).toList()..sort(VideoEvent.compareByLoopsThenTime);
-    return unique;
+    }).toList();
   }
 
   /// Searches videos across all sources, yielding progressively.
@@ -1685,6 +1694,7 @@ class VideosRepository {
   Stream<List<VideoEvent>> searchVideos({
     required String query,
     int limit = 50,
+    VideoSearchSort sort = defaultVideoSearchSort,
   }) async* {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return;
@@ -1696,11 +1706,15 @@ class VideosRepository {
 
     // Phase 2: Funnelcake API (fast)
     try {
-      final apiResult = await searchVideosViaApi(query: trimmed, limit: limit);
+      final apiResult = await searchVideosViaApi(
+        query: trimmed,
+        limit: limit,
+        sort: sort,
+      );
       if (apiResult.videos.isNotEmpty) {
-        accumulated = deduplicateAndSortVideos([
-          ...accumulated,
+        accumulated = deduplicateVideosPreservingOrder([
           ...apiResult.videos,
+          ...accumulated,
         ]);
         yield accumulated;
       }
@@ -1722,7 +1736,10 @@ class VideosRepository {
       limit: limit,
     );
     if (relayResults.isNotEmpty) {
-      accumulated = deduplicateAndSortVideos([...accumulated, ...relayResults]);
+      accumulated = deduplicateVideosPreservingOrder([
+        ...accumulated,
+        ...relayResults,
+      ]);
       yield accumulated;
     }
   }

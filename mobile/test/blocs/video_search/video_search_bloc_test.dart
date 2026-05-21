@@ -2,6 +2,8 @@
 // ABOUTME: VideosRepository.searchVideos() stream.
 // ABOUTME: Verifies debounce, clear, progressive emission, and error handling.
 
+import 'dart:async';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -15,8 +17,14 @@ void main() {
   group(VideoSearchBloc, () {
     late _MockVideosRepository mockVideosRepository;
 
+    const debounceDuration = Duration(milliseconds: 400);
+
     final now = DateTime.now();
     final timestamp = now.millisecondsSinceEpoch ~/ 1000;
+
+    setUpAll(() {
+      registerFallbackValue(VideoSearchSort.trending);
+    });
 
     VideoEvent createVideo({
       required String id,
@@ -45,6 +53,7 @@ void main() {
         () => mockVideosRepository.searchVideos(
           query: any(named: 'query'),
           limit: any(named: 'limit'),
+          sort: any(named: 'sort'),
         ),
       ).thenAnswer((_) => const Stream.empty());
       when(
@@ -56,10 +65,13 @@ void main() {
           query: any(named: 'query'),
           limit: any(named: 'limit'),
           offset: any(named: 'offset'),
+          sort: any(named: 'sort'),
         ),
-      ).thenAnswer((_) async => (videos: <VideoEvent>[], totalCount: 0));
+      ).thenAnswer(
+        (_) async => (videos: <VideoEvent>[], totalCount: 0, hasMore: false),
+      );
       when(
-        () => mockVideosRepository.deduplicateAndSortVideos(any()),
+        () => mockVideosRepository.deduplicateVideosPreservingOrder(any()),
       ).thenAnswer((inv) => inv.positionalArguments.first as List<VideoEvent>);
     });
 
@@ -72,12 +84,11 @@ void main() {
       expect(bloc.state.query, isEmpty);
       expect(bloc.state.videos, isEmpty);
       expect(bloc.state.resultCount, isNull);
+      expect(bloc.state.sort, VideoSearchSort.trending);
       bloc.close();
     });
 
     group('VideoSearchQueryChanged', () {
-      const debounceDuration = Duration(milliseconds: 400);
-
       blocTest<VideoSearchBloc, VideoSearchState>(
         'emits initial state when query is empty',
         build: createBloc,
@@ -86,7 +97,10 @@ void main() {
         expect: () => [const VideoSearchState()],
         verify: (_) {
           verifyNever(
-            () => mockVideosRepository.searchVideos(query: any(named: 'query')),
+            () => mockVideosRepository.searchVideos(
+              query: any(named: 'query'),
+              sort: any(named: 'sort'),
+            ),
           );
         },
       );
@@ -99,7 +113,10 @@ void main() {
         expect: () => [const VideoSearchState()],
         verify: (_) {
           verifyNever(
-            () => mockVideosRepository.searchVideos(query: any(named: 'query')),
+            () => mockVideosRepository.searchVideos(
+              query: any(named: 'query'),
+              sort: any(named: 'sort'),
+            ),
           );
         },
       );
@@ -112,7 +129,10 @@ void main() {
         expect: () => [const VideoSearchState()],
         verify: (_) {
           verifyNever(
-            () => mockVideosRepository.searchVideos(query: any(named: 'query')),
+            () => mockVideosRepository.searchVideos(
+              query: any(named: 'query'),
+              sort: any(named: 'sort'),
+            ),
           );
         },
       );
@@ -124,7 +144,10 @@ void main() {
           final video = createVideo(id: 'v1', title: 'Flutter Tutorial');
 
           when(
-            () => mockVideosRepository.searchVideos(query: 'flutter'),
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: any(named: 'sort'),
+            ),
           ).thenAnswer((_) => Stream.value([video]));
         },
         build: createBloc,
@@ -154,7 +177,10 @@ void main() {
           ];
 
           when(
-            () => mockVideosRepository.searchVideos(query: 'flutter'),
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: any(named: 'sort'),
+            ),
           ).thenAnswer(
             (_) => Stream.fromIterable([
               [localVideo],
@@ -188,7 +214,10 @@ void main() {
           final apiVideo = createVideo(id: 'api-1', title: 'API Result');
 
           when(
-            () => mockVideosRepository.searchVideos(query: 'flutter'),
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: any(named: 'sort'),
+            ),
           ).thenAnswer(
             (_) => Stream.fromIterable([
               <VideoEvent>[], // local cache empty
@@ -225,7 +254,10 @@ void main() {
         'when stream yields empty list',
         setUp: () {
           when(
-            () => mockVideosRepository.searchVideos(query: 'flutter'),
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: any(named: 'sort'),
+            ),
           ).thenAnswer((_) => Stream.value([]));
         },
         build: createBloc,
@@ -252,7 +284,10 @@ void main() {
         'emits [searching, failure] when stream throws',
         setUp: () {
           when(
-            () => mockVideosRepository.searchVideos(query: 'flutter'),
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: any(named: 'sort'),
+            ),
           ).thenAnswer((_) => Stream.error(Exception('search failed')));
         },
         build: createBloc,
@@ -279,7 +314,10 @@ void main() {
           final video = createVideo(id: 'v1', title: 'Final Result');
 
           when(
-            () => mockVideosRepository.searchVideos(query: 'final'),
+            () => mockVideosRepository.searchVideos(
+              query: 'final',
+              sort: any(named: 'sort'),
+            ),
           ).thenAnswer((_) => Stream.value([video]));
         },
         build: createBloc,
@@ -295,7 +333,10 @@ void main() {
         verify: (bloc) {
           expect(bloc.state.query, 'final');
           verify(
-            () => mockVideosRepository.searchVideos(query: 'final'),
+            () => mockVideosRepository.searchVideos(
+              query: 'final',
+              sort: any(named: 'sort'),
+            ),
           ).called(1);
         },
       );
@@ -313,7 +354,10 @@ void main() {
         expect: () => <VideoSearchState>[],
         verify: (_) {
           verifyNever(
-            () => mockVideosRepository.searchVideos(query: any(named: 'query')),
+            () => mockVideosRepository.searchVideos(
+              query: any(named: 'query'),
+              sort: any(named: 'sort'),
+            ),
           );
         },
       );
@@ -322,7 +366,10 @@ void main() {
         're-searches when same query is dispatched in failure state',
         setUp: () {
           when(
-            () => mockVideosRepository.searchVideos(query: 'flutter'),
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: any(named: 'sort'),
+            ),
           ).thenAnswer((_) => Stream.value([]));
         },
         build: createBloc,
@@ -351,7 +398,10 @@ void main() {
         ],
         verify: (_) {
           verify(
-            () => mockVideosRepository.searchVideos(query: 'flutter'),
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: any(named: 'sort'),
+            ),
           ).called(1);
         },
       );
@@ -363,7 +413,10 @@ void main() {
         wait: debounceDuration,
         verify: (_) {
           verify(
-            () => mockVideosRepository.searchVideos(query: 'flutter'),
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: any(named: 'sort'),
+            ),
           ).called(1);
         },
       );
@@ -430,6 +483,7 @@ void main() {
           -1,
           false,
           false,
+          VideoSearchSort.trending,
         ]);
       });
 
@@ -476,6 +530,124 @@ void main() {
 
         expect(updated.totalApiCount, isNull);
       });
+
+      test('copyWith updates sort', () {
+        const state = VideoSearchState();
+
+        final updated = state.copyWith(sort: VideoSearchSort.recent);
+
+        expect(updated.sort, VideoSearchSort.recent);
+      });
+    });
+
+    group('VideoSearchSortChanged', () {
+      blocTest<VideoSearchBloc, VideoSearchState>(
+        'updates sort without searching when query is empty',
+        build: createBloc,
+        act: (bloc) =>
+            bloc.add(const VideoSearchSortChanged(VideoSearchSort.recent)),
+        expect: () => [
+          isA<VideoSearchState>()
+              .having((s) => s.sort, 'sort', VideoSearchSort.recent)
+              .having((s) => s.videos, 'videos', isEmpty),
+        ],
+        verify: (_) {
+          verifyNever(
+            () => mockVideosRepository.searchVideos(
+              query: any(named: 'query'),
+              sort: any(named: 'sort'),
+            ),
+          );
+        },
+      );
+
+      blocTest<VideoSearchBloc, VideoSearchState>(
+        'reloads current query with selected sort',
+        setUp: () {
+          final video = createVideo(id: 'recent-1', title: 'Recent Result');
+          when(
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: VideoSearchSort.recent,
+            ),
+          ).thenAnswer((_) => Stream.value([video]));
+        },
+        build: createBloc,
+        seed: () => VideoSearchState(
+          status: VideoSearchStatus.success,
+          query: 'flutter',
+          videos: [createVideo(id: 'old', title: 'Old Result')],
+          hasMore: true,
+        ),
+        act: (bloc) =>
+            bloc.add(const VideoSearchSortChanged(VideoSearchSort.recent)),
+        wait: debounceDuration,
+        expect: () => [
+          isA<VideoSearchState>()
+              .having((s) => s.sort, 'sort', VideoSearchSort.recent)
+              .having((s) => s.videos, 'videos', isEmpty),
+          isA<VideoSearchState>()
+              .having((s) => s.status, 'status', VideoSearchStatus.searching)
+              .having((s) => s.query, 'query', 'flutter')
+              .having((s) => s.sort, 'sort', VideoSearchSort.recent),
+          isA<VideoSearchState>()
+              .having((s) => s.status, 'status', VideoSearchStatus.searching)
+              .having((s) => s.videos, 'videos', hasLength(1)),
+          isA<VideoSearchState>()
+              .having((s) => s.status, 'status', VideoSearchStatus.success)
+              .having((s) => s.sort, 'sort', VideoSearchSort.recent),
+        ],
+        verify: (_) {
+          verify(
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: VideoSearchSort.recent,
+            ),
+          ).called(1);
+        },
+      );
+
+      blocTest<VideoSearchBloc, VideoSearchState>(
+        'ignores stale stream results after sort changes',
+        build: createBloc,
+        setUp: () {
+          final trendingController = StreamController<List<VideoEvent>>();
+          addTearDown(trendingController.close);
+
+          when(
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: any(named: 'sort'),
+            ),
+          ).thenAnswer((_) => trendingController.stream);
+          when(
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: VideoSearchSort.recent,
+            ),
+          ).thenAnswer(
+            (_) => Stream.value([createVideo(id: 'recent-1', title: 'Recent')]),
+          );
+
+          Future<void>.microtask(() async {
+            await Future<void>.delayed(const Duration(milliseconds: 450));
+            trendingController.add([
+              createVideo(id: 'trending-1', title: 'Trending'),
+            ]);
+            await trendingController.close();
+          });
+        },
+        act: (bloc) async {
+          bloc.add(const VideoSearchQueryChanged('flutter'));
+          await Future<void>.delayed(const Duration(milliseconds: 425));
+          bloc.add(const VideoSearchSortChanged(VideoSearchSort.recent));
+        },
+        wait: const Duration(milliseconds: 800),
+        verify: (bloc) {
+          expect(bloc.state.sort, VideoSearchSort.recent);
+          expect(bloc.state.videos.map((video) => video.id), ['recent-1']);
+        },
+      );
     });
 
     group('VideoSearchLoadMore', () {
@@ -486,11 +658,13 @@ void main() {
             () => mockVideosRepository.searchVideosViaApi(
               query: 'flutter',
               offset: 50,
+              sort: VideoSearchSort.recent,
             ),
           ).thenAnswer(
             (_) async => (
               videos: [createVideo(id: 'v2', title: 'Page 2')],
               totalCount: 75,
+              hasMore: false,
             ),
           );
         },
@@ -501,6 +675,7 @@ void main() {
           videos: [createVideo(id: 'v1', title: 'Page 1')],
           apiOffset: 50,
           hasMore: true,
+          sort: VideoSearchSort.recent,
         ),
         act: (bloc) => bloc.add(const VideoSearchLoadMore()),
         expect: () => [
@@ -511,11 +686,78 @@ void main() {
           ),
           isA<VideoSearchState>()
               .having((s) => s.videos, 'videos', hasLength(2))
+              .having((s) => s.sort, 'sort', VideoSearchSort.recent)
               .having((s) => s.apiOffset, 'apiOffset', 100)
               .having((s) => s.totalApiCount, 'totalApiCount', 75)
               .having((s) => s.hasMore, 'hasMore', isFalse)
               .having((s) => s.isLoadingMore, 'isLoadingMore', isFalse),
         ],
+        verify: (_) {
+          verify(
+            () => mockVideosRepository.searchVideosViaApi(
+              query: 'flutter',
+              offset: 50,
+              sort: VideoSearchSort.recent,
+            ),
+          ).called(1);
+        },
+      );
+
+      blocTest<VideoSearchBloc, VideoSearchState>(
+        'drops stale load-more results after sort changes',
+        build: createBloc,
+        setUp: () {
+          final loadMoreCompleter =
+              Completer<
+                ({List<VideoEvent> videos, int totalCount, bool hasMore})
+              >();
+
+          when(
+            () => mockVideosRepository.searchVideosViaApi(
+              query: 'flutter',
+              offset: 50,
+              sort: any(named: 'sort'),
+            ),
+          ).thenAnswer((_) => loadMoreCompleter.future);
+          when(
+            () => mockVideosRepository.searchVideos(
+              query: 'flutter',
+              sort: VideoSearchSort.recent,
+            ),
+          ).thenAnswer(
+            (_) => Stream.value([
+              createVideo(id: 'recent-1', title: 'Recent Result'),
+            ]),
+          );
+
+          Future<void>.microtask(() async {
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+            loadMoreCompleter.complete((
+              videos: [createVideo(id: 'old-page-2', title: 'Old Page 2')],
+              totalCount: 100,
+              hasMore: true,
+            ));
+          });
+        },
+        seed: () => VideoSearchState(
+          status: VideoSearchStatus.success,
+          query: 'flutter',
+          videos: [createVideo(id: 'old-page-1', title: 'Old Page 1')],
+          apiOffset: 50,
+          hasMore: true,
+        ),
+        act: (bloc) async {
+          bloc.add(const VideoSearchLoadMore());
+          await Future<void>.delayed(const Duration(milliseconds: 1));
+          bloc.add(const VideoSearchSortChanged(VideoSearchSort.recent));
+        },
+        wait: const Duration(milliseconds: 500),
+        verify: (bloc) {
+          expect(bloc.state.sort, VideoSearchSort.recent);
+          expect(bloc.state.videos.map((video) => video.id), ['recent-1']);
+          expect(bloc.state.apiOffset, 50);
+          expect(bloc.state.hasMore, isTrue);
+        },
       );
 
       blocTest<VideoSearchBloc, VideoSearchState>(
@@ -560,6 +802,7 @@ void main() {
             () => mockVideosRepository.searchVideosViaApi(
               query: 'flutter',
               offset: 50,
+              sort: any(named: 'sort'),
             ),
           ).thenThrow(Exception('network error'));
         },

@@ -1193,6 +1193,8 @@ class FunnelcakeApiClient {
   ///
   /// [query] is the search term.
   /// [limit] is the maximum number of videos to return (defaults to 50).
+  /// [sort] is the API sort order: `'trending'`, `'loops'`,
+  /// `'engagement'`, `'recent'`, or `'published'`.
   ///
   /// Returns a list of [VideoStats] matching the query.
   ///
@@ -1206,6 +1208,7 @@ class FunnelcakeApiClient {
     required String query,
     int limit = 50,
     int offset = 0,
+    String sort = 'trending',
   }) async {
     if (!isAvailable) {
       throw const FunnelcakeNotConfiguredException();
@@ -1216,23 +1219,25 @@ class FunnelcakeApiClient {
       throw const FunnelcakeException('Search query cannot be empty');
     }
 
-    final queryParams = <String, String>{
+    final queryParams = _videoQueryParameters({
       'q': trimmedQuery,
       'limit': limit.toString(),
-    };
+      'sort': sort,
+      'type': 'video',
+    });
     if (offset > 0) {
-      queryParams['offset'] = offset.toString();
+      queryParams['cursor'] = 'o:$offset';
     }
 
     final uri = Uri.parse(
-      '$_baseUrl/api/search',
+      '$_baseUrl/api/v2/search',
     ).replace(queryParameters: queryParams);
 
     try {
       final response = await _get(uri);
 
       if (response.statusCode == 200) {
-        final (:items, hasMore: _, nextCursor: _) = _unwrapListResponse(
+        final (:items, :hasMore, nextCursor: _) = _unwrapListResponse(
           jsonDecode(response.body),
         );
 
@@ -1243,9 +1248,13 @@ class FunnelcakeApiClient {
 
         final totalCount =
             int.tryParse(response.headers['x-total-count'] ?? '') ??
-            videos.length;
+            offset + videos.length;
 
-        return VideoSearchResponse(videos: videos, totalCount: totalCount);
+        return VideoSearchResponse(
+          videos: videos,
+          totalCount: totalCount,
+          hasMore: hasMore ?? false,
+        );
       } else {
         throw FunnelcakeApiException(
           message: 'Failed to search videos',

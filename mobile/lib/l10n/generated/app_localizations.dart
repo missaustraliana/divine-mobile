@@ -10988,6 +10988,36 @@ abstract class AppLocalizations {
   /// **'Loading video results'**
   String get searchVideosLoadingLabel;
 
+  /// No description provided for @searchVideosSortOptionsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Sort video results'**
+  String get searchVideosSortOptionsLabel;
+
+  /// Label for the video search sort option that shows currently popular or trending results.
+  ///
+  /// In en, this message translates to:
+  /// **'Hot'**
+  String get searchVideosSortTrending;
+
+  /// Label for the video search sort option that ranks results by loop count.
+  ///
+  /// In en, this message translates to:
+  /// **'Most loops'**
+  String get searchVideosSortLoops;
+
+  /// Label for the video search sort option that ranks results by engagement.
+  ///
+  /// In en, this message translates to:
+  /// **'Most engaged'**
+  String get searchVideosSortEngagement;
+
+  /// Label for the video search sort option that shows the newest results first.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent'**
+  String get searchVideosSortRecent;
+
   /// No description provided for @searchListsSectionHeader.
   ///
   /// In en, this message translates to:
