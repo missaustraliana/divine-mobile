@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:openvine/notifications/bloc/notification_feed_bloc.dart';
 import 'package:openvine/notifications/providers/notification_repository_provider.dart';
 import 'package:openvine/notifications/view/notifications_view.dart';
+import 'package:openvine/notifications/widgets/mark_all_read_on_dispose.dart';
 import 'package:openvine/providers/app_providers.dart';
 
 /// Top-level page for the notifications tab.
@@ -51,13 +52,24 @@ class NotificationsPage extends ConsumerWidget {
 
     final followRepository = ref.watch(followRepositoryProvider);
 
+    // Key on the watched dependency identities so the bloc rebuilds when
+    // either repository swaps (account switch, sign-out → sign-in, or
+    // provider invalidation). Without this the BlocProvider element
+    // persists across rebuilds and keeps the bloc bound to stale
+    // repositories, while any mark-on-leave wrapper inside the subtree
+    // would otherwise fire against whichever notification repository the
+    // rebuilt widget tree captured — i.e. the new user's notifications.
+    // See `.claude/rules/state_management.md`.
     return BlocProvider(
       key: ValueKey((notificationRepository, followRepository)),
       create: (_) => NotificationFeedBloc(
         notificationRepository: notificationRepository,
         followRepository: followRepository,
       )..add(const NotificationFeedStarted()),
-      child: const NotificationsView(),
+      child: MarkAllReadOnDispose(
+        repository: notificationRepository,
+        child: const NotificationsView(),
+      ),
     );
   }
 }

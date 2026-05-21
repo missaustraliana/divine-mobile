@@ -13,6 +13,7 @@ import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/notifications/bloc/notification_feed_bloc.dart';
 import 'package:openvine/notifications/providers/notification_repository_provider.dart';
 import 'package:openvine/notifications/view/notifications_view.dart';
+import 'package:openvine/notifications/widgets/mark_all_read_on_dispose.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/screens/settings/invites_screen.dart';
 
@@ -39,13 +40,22 @@ class InboxNotificationsPage extends ConsumerWidget {
     }
     final followRepository = ref.watch(followRepositoryProvider);
 
+    // Key on the watched dependency identities so the bloc rebuilds when
+    // either repository swaps (account switch, sign-out → sign-in, or
+    // provider invalidation). The upstream KeyedSubtree in `inbox_view.dart`
+    // already forces this subtree to remount on pubkey change today, but
+    // pinning the contract here keeps the page safe even if the inbox
+    // scaffold is restructured. See `.claude/rules/state_management.md`.
     return BlocProvider(
       key: ValueKey((notificationRepository, followRepository)),
       create: (_) => NotificationFeedBloc(
         notificationRepository: notificationRepository,
         followRepository: followRepository,
       )..add(const NotificationFeedStarted()),
-      child: const _InboxNotificationsScaffold(),
+      child: MarkAllReadOnDispose(
+        repository: notificationRepository,
+        child: const _InboxNotificationsScaffold(),
+      ),
     );
   }
 }
