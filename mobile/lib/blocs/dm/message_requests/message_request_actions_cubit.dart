@@ -36,6 +36,8 @@ class MessageRequestActionsCubit extends Cubit<MessageRequestActionsState> {
       await _dmRepository.removeConversation(conversationId);
       emit(state.copyWith(status: MessageRequestActionsStatus.success));
     } catch (e, stackTrace) {
+      // Drift IO failures are expected. Per
+      // .claude/rules/error_handling.md they are NOT Reportable.
       addError(e, stackTrace);
       emit(state.copyWith(status: MessageRequestActionsStatus.error));
     }
@@ -49,6 +51,8 @@ class MessageRequestActionsCubit extends Cubit<MessageRequestActionsState> {
       await _dmRepository.markConversationsAsRead(conversationIds);
       emit(state.copyWith(status: MessageRequestActionsStatus.success));
     } catch (e, stackTrace) {
+      // Drift IO failures are expected. Per
+      // .claude/rules/error_handling.md they are NOT Reportable.
       addError(e, stackTrace);
       emit(state.copyWith(status: MessageRequestActionsStatus.error));
     }
@@ -62,6 +66,8 @@ class MessageRequestActionsCubit extends Cubit<MessageRequestActionsState> {
       await _dmRepository.removeConversations(conversationIds);
       emit(state.copyWith(status: MessageRequestActionsStatus.success));
     } catch (e, stackTrace) {
+      // Drift IO failures are expected. Per
+      // .claude/rules/error_handling.md they are NOT Reportable.
       addError(e, stackTrace);
       emit(state.copyWith(status: MessageRequestActionsStatus.error));
     }

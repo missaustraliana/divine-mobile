@@ -84,6 +84,8 @@ class RequestPreviewCubit extends Cubit<RequestPreviewState> {
         ),
       );
     } catch (e, stackTrace) {
+      // Drift read failures are expected. Per
+      // .claude/rules/error_handling.md they are NOT Reportable.
       addError(e, stackTrace);
       emit(state.copyWith(status: RequestPreviewStatus.error));
     }

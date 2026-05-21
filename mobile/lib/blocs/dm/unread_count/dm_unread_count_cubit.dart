@@ -17,6 +17,9 @@ class DmUnreadCountCubit extends Cubit<int> {
   DmUnreadCountCubit({required DmRepository dmRepository})
     : _dmRepository = dmRepository,
       super(0) {
+    // Drift stream IO errors are expected. Per
+    // .claude/rules/error_handling.md they are NOT Reportable; the
+    // `addError` tear-off keeps them in the unified log.
     _subscription = _dmRepository.watchUnreadAcceptedCount().listen(
       emit,
       onError: addError,

@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
+import 'package:openvine/observability/reportable_error.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:unified_logger/unified_logger.dart';
 
@@ -72,6 +73,8 @@ class ConversationMuteCubit extends Cubit<ConversationMuteState> {
     try {
       await _save(muted);
     } catch (e, stackTrace) {
+      // SharedPreferences IO failures are expected. Per
+      // .claude/rules/error_handling.md they are NOT Reportable.
       addError(e, stackTrace);
       emit(
         state.copyWith(
@@ -96,8 +99,19 @@ class ConversationMuteCubit extends Cubit<ConversationMuteState> {
     try {
       final list = (jsonDecode(stored) as List<dynamic>).cast<String>();
       emit(state.copyWith(mutedIds: list.toSet()));
-    } catch (e, stackTrace) {
+    } on FormatException catch (e, stackTrace) {
+      // Corrupted prefs JSON — matrix-NO (API/domain). Recover with
+      // empty set.
       addError(e, stackTrace);
+      Log.error(
+        'Failed to load muted conversations: $e',
+        name: 'ConversationMuteCubit',
+        category: LogCategory.system,
+      );
+    } catch (e, stackTrace) {
+      // `cast<String>()` / `as List<dynamic>` lazy `TypeError` means
+      // the stored shape is unexpected — matrix-YES (Invariant).
+      addError(Reportable(e, context: '_load'), stackTrace);
       Log.error(
         'Failed to load muted conversations: $e',
         name: 'ConversationMuteCubit',

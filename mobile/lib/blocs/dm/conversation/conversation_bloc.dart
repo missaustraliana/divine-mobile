@@ -10,6 +10,7 @@ import 'package:db_client/db_client.dart';
 import 'package:dm_repository/dm_repository.dart';
 import 'package:equatable/equatable.dart';
 import 'package:models/models.dart';
+import 'package:openvine/blocs/dm/reportable_sites.dart';
 import 'package:openvine/observability/reportable_error.dart';
 import 'package:rxdart/rxdart.dart';
 
@@ -86,6 +87,8 @@ class ConversationBloc extends Bloc<ConversationEvent, ConversationState> {
         );
       },
       onError: (error, stackTrace) {
+        // Drift / rxdart stream IO failures are expected here. Per
+        // .claude/rules/error_handling.md they are NOT Reportable.
         addError(error, stackTrace);
         return state.copyWith(status: ConversationStatus.error);
       },
@@ -100,8 +103,21 @@ class ConversationBloc extends Bloc<ConversationEvent, ConversationState> {
       await _dmRepository.deleteMessageForEveryone(event.rumorId);
       // The watchMessages stream automatically excludes deleted messages,
       // so the UI updates reactively — no manual state mutation needed.
-    } catch (e, stackTrace) {
-      addError(e, stackTrace);
+    } on Object catch (e, stackTrace) {
+      if (e is ArgumentError) {
+        // Rumor gone or not ours — recoverable; matrix-NO.
+        addError(e, stackTrace);
+        return;
+      }
+      // Anything else (e.g. signer `StateError('Failed to sign kind 5
+      // deletion event')`) is an invariant violation — matrix-YES.
+      addError(
+        Reportable(
+          e,
+          context: ConversationBlocReportableSites.onMessageDeleted,
+        ),
+        stackTrace,
+      );
     }
   }
 
@@ -176,6 +192,8 @@ class ConversationBloc extends Bloc<ConversationEvent, ConversationState> {
       }
       emit(state.copyWith(sendStatus: SendStatus.sent));
     } catch (e, stackTrace) {
+      // Dominated by the explicit `throw Exception(result.error)` above
+      // and repo IO — per .claude/rules/error_handling.md, matrix-NO.
       addError(e, stackTrace);
       emit(
         state.copyWith(
@@ -230,7 +248,10 @@ class ConversationBloc extends Bloc<ConversationEvent, ConversationState> {
 
     if (lastError != null) {
       addError(
-        Reportable(lastError, context: '_onSelfWrapRecoveryRequested'),
+        Reportable(
+          lastError,
+          context: ConversationBlocReportableSites.onSelfWrapRecoveryRequested,
+        ),
         lastStackTrace,
       );
     }

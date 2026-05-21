@@ -5,6 +5,7 @@ import 'package:bloc/bloc.dart';
 import 'package:content_blocklist_repository/content_blocklist_repository.dart';
 import 'package:dm_repository/dm_repository.dart';
 import 'package:equatable/equatable.dart';
+import 'package:openvine/observability/reportable_error.dart';
 import 'package:openvine/services/content_moderation_service.dart';
 import 'package:openvine/services/content_reporting_service.dart';
 
@@ -63,7 +64,10 @@ class ConversationActionsCubit extends Cubit<ConversationActionsState> {
       emit(state.copyWith(status: ConversationActionsStatus.idle));
       return result.success;
     } catch (e, stackTrace) {
-      addError(e, stackTrace);
+      // `ContentReportingService.reportUser` returns `ReportResult.failure`
+      // for expected publish/auth problems. Any throw escaping here is
+      // unexpected, so surface it as Reportable.
+      addError(Reportable(e, context: 'reportUser'), stackTrace);
       emit(state.copyWith(status: ConversationActionsStatus.idle));
       return false;
     }
@@ -82,6 +86,8 @@ class ConversationActionsCubit extends Cubit<ConversationActionsState> {
       );
       emit(state.copyWith(status: ConversationActionsStatus.success));
     } catch (e, stackTrace) {
+      // Blocklist IO / publish failures are expected. Per
+      // .claude/rules/error_handling.md they are NOT Reportable.
       addError(e, stackTrace);
       emit(state.copyWith(status: ConversationActionsStatus.failure));
     }
@@ -94,6 +100,8 @@ class ConversationActionsCubit extends Cubit<ConversationActionsState> {
       await _blocklistRepository.unblockUser(pubkey);
       emit(state.copyWith(status: ConversationActionsStatus.success));
     } catch (e, stackTrace) {
+      // Blocklist IO / publish failures are expected. Per
+      // .claude/rules/error_handling.md they are NOT Reportable.
       addError(e, stackTrace);
       emit(state.copyWith(status: ConversationActionsStatus.failure));
     }
@@ -109,6 +117,8 @@ class ConversationActionsCubit extends Cubit<ConversationActionsState> {
       emit(state.copyWith(status: ConversationActionsStatus.success));
       return true;
     } catch (e, stackTrace) {
+      // Drift write failures are expected. Per
+      // .claude/rules/error_handling.md they are NOT Reportable.
       addError(e, stackTrace);
       emit(state.copyWith(status: ConversationActionsStatus.failure));
       return false;
