@@ -278,13 +278,25 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
     var precedingDuration = Duration.zero;
     for (final clip in clips) {
       if (clip.id == clipId) {
+        // positionInClip and trimStart are both source-time offsets, so
+        // relative is also in source time.
         final relative = positionInClip - clip.trimStart;
         if (relative < Duration.zero || relative > clip.trimmedDuration) {
           return null;
         }
-        return precedingDuration + relative;
+        // Convert source-time relative offset to playback time before
+        // combining with precedingDuration (which is already playback-time).
+        final speed = clip.playbackSpeed ?? 1.0;
+        final relativePlayback = speed == 1.0
+            ? relative
+            : Duration(
+                microseconds: (relative.inMicroseconds / speed).round(),
+              );
+        return precedingDuration + relativePlayback;
       }
-      precedingDuration += clip.trimmedDuration;
+      // Accumulate in playback time (trimmedDuration ÷ speed) so that
+      // speed-adjusted clips contribute the correct wall-clock offset.
+      precedingDuration += clip.playbackDuration;
     }
     return null;
   }
@@ -384,6 +396,7 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
             start: clip.trimStart,
             end: clip.duration - clip.trimEnd,
             volume: clip.volume,
+            playbackSpeed: clip.playbackSpeed ?? 1.0,
           ),
     ], startPosition: currentPosition);
   }
@@ -455,6 +468,7 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
               start: clip.trimStart,
               end: clip.duration - clip.trimEnd,
               volume: clip.volume,
+              playbackSpeed: clip.playbackSpeed ?? 1.0,
             ),
       ],
       startPosition: startPosition != null && startPosition > Duration.zero
@@ -642,7 +656,8 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
           a.video != b.video ||
           a.trimStart != b.trimStart ||
           a.trimEnd != b.trimEnd ||
-          a.volume != b.volume) {
+          a.volume != b.volume ||
+          a.playbackSpeed != b.playbackSpeed) {
         return true;
       }
     }
@@ -804,6 +819,36 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
                 start: clip.trimStart,
                 end: clip.duration - clip.trimEnd,
                 volume: clip.volume,
+                playbackSpeed: clip.playbackSpeed ?? 1.0,
+              ),
+        ], startPosition: currentPosition);
+      },
+    );
+
+    // Update native player speeds when any clip's playback speed changes.
+    ref.listen<List<double?>>(
+      clipManagerProvider.select(
+        (s) => s.clips.map((c) => c.playbackSpeed).toList(),
+      ),
+      (previous, current) {
+        if (listEquals(previous, current)) return;
+
+        final clips = ref.read(clipManagerProvider).clips;
+        if (clips.isEmpty || !_isPlayerInitialized) return;
+        final currentPosition = context
+            .read<VideoEditorMainBloc>()
+            .state
+            .currentPosition;
+
+        _videoPlayer?.setClips([
+          for (final clip in clips)
+            if (clip.video.file?.path case final path?)
+              VideoClip(
+                uri: path,
+                start: clip.trimStart,
+                end: clip.duration - clip.trimEnd,
+                volume: clip.volume,
+                playbackSpeed: clip.playbackSpeed ?? 1.0,
               ),
         ], startPosition: currentPosition);
       },
@@ -888,7 +933,12 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
             _pendingSeekPosition = null;
             _isSeeking = false;
             _videoPlayer?.setClips([
-              VideoClip(uri: path, end: clip.duration, volume: clip.volume),
+              VideoClip(
+                uri: path,
+                end: clip.duration,
+                volume: clip.volume,
+                playbackSpeed: clip.playbackSpeed ?? 1.0,
+              ),
             ]);
           },
         ),
@@ -1023,6 +1073,7 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
                       start: clip.trimStart,
                       end: clip.duration - clip.trimEnd,
                       volume: clip.volume,
+                      playbackSpeed: clip.playbackSpeed ?? 1.0,
                     ),
               ], startPosition: startPosition);
               if (mounted) {

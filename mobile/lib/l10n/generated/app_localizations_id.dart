@@ -6916,6 +6916,16 @@ class AppLocalizationsId extends AppLocalizations {
       'Tidak dapat mengekstrak audio. Silakan coba lagi.';
 
   @override
+  String get videoEditorSpeedLabel => 'Kecepatan';
+
+  @override
+  String get videoEditorSetClipSpeedSemanticLabel =>
+      'Atur kecepatan putar untuk klip yang dipilih';
+
+  @override
+  String get videoEditorSpeedSheetTitle => 'Kecepatan Klip';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'Selesai mengedit timeline';
 

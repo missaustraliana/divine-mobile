@@ -7008,6 +7008,16 @@ class AppLocalizationsIt extends AppLocalizations {
       'Impossibile estrarre l\'audio. Riprova.';
 
   @override
+  String get videoEditorSpeedLabel => 'Velocità';
+
+  @override
+  String get videoEditorSetClipSpeedSemanticLabel =>
+      'Imposta la velocità di riproduzione per il clip selezionato';
+
+  @override
+  String get videoEditorSpeedSheetTitle => 'Velocità del clip';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'Termina modifica timeline';
 

@@ -7,6 +7,7 @@ import 'package:openvine/constants/video_editor_constants.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/services/video_editor/video_editor_split_service.dart';
 import 'package:openvine/widgets/video_editor/main_editor/video_editor_scope.dart';
+import 'package:openvine/widgets/video_editor/timeline_editor/controls/video_editor_clip_speed_sheet.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/controls/video_editor_timeline_controls.dart';
 
 /// Controls shown when a clip is in editing mode: Delete, Copy, Split, Done.
@@ -33,6 +34,7 @@ class _TimelineClipControlsState extends ConsumerState<TimelineClipControls> {
       onDelete: isLastClip ? null : () => _deleteClip(context, ref),
       onDuplicated: () => _duplicateClip(context, ref),
       onSplit: () => _splitClip(context),
+      onSpeed: () => _setPlaybackSpeed(context),
       onExtractAudio: () => _requestExtractAudio(context),
       isExtractingAudio: isExtractingAudio,
       // Done is gated while extraction is in flight purely as a UX cue —
@@ -47,6 +49,44 @@ class _TimelineClipControlsState extends ConsumerState<TimelineClipControls> {
                 const ClipEditorEditingStopped(),
               );
             },
+    );
+  }
+
+  Future<void> _setPlaybackSpeed(BuildContext context) async {
+    final bloc = context.read<ClipEditorBloc>();
+    final state = bloc.state;
+    if (state.currentClipIndex < 0 ||
+        state.currentClipIndex >= state.clips.length) {
+      return;
+    }
+    final clip = state.clips[state.currentClipIndex];
+    final editor = VideoEditorScope.of(context).requireEditor;
+
+    final result = await VineBottomSheet.show<double>(
+      context: context,
+      expanded: false,
+      scrollable: false,
+      isScrollControlled: true,
+      body: VideoEditorClipSpeedSheet(initialSpeed: clip.playbackSpeed ?? 1.0),
+    );
+
+    if (result == null || !mounted) return;
+
+    final updated = ClipEditorBloc.normalizeClipUpdate(
+      clips: state.clips,
+      clipIndex: state.currentClipIndex,
+      currentClip: clip,
+      proposedClip: clip.copyWith(playbackSpeed: result),
+    );
+    bloc.add(ClipEditorClipUpdated(clipId: clip.id, clip: updated));
+
+    editor.addHistory(
+      meta: {
+        ...editor.stateManager.activeMeta,
+        VideoEditorConstants.clipsStateHistoryKey: state.clips
+            .map((c) => c.id == clip.id ? updated.toJson() : c.toJson())
+            .toList(),
+      },
     );
   }
 
@@ -116,19 +156,19 @@ class _TimelineClipControlsState extends ConsumerState<TimelineClipControls> {
 
     final selectedClip = state.clips[state.currentClipIndex];
 
-    // Compute the split position relative to the current clip.
-    // The playhead shows a global timeline position — convert to the local
-    // offset within the selected clip.
+    // The playhead is in playback time; preceding clips must be accumulated
+    // with playbackDuration (not trimmedDuration) to stay in the same
+    // coordinate space.
     final globalPosition = widget.playheadPosition.value;
     var clipStart = Duration.zero;
     for (var i = 0; i < state.currentClipIndex; i++) {
-      clipStart += state.clips[i].trimmedDuration;
+      clipStart += state.clips[i].playbackDuration;
     }
-    final localPosition = globalPosition - clipStart;
+    final localPlaybackPosition = globalPosition - clipStart;
 
-    // Check if playhead is within the selected clip.
-    if (localPosition < Duration.zero ||
-        localPosition > selectedClip.trimmedDuration) {
+    // Bounds-check in playback time.
+    if (localPlaybackPosition < Duration.zero ||
+        localPlaybackPosition > selectedClip.playbackDuration) {
       ScaffoldMessenger.of(context).showSnackBar(
         DivineSnackbarContainer.snackBar(
           context.l10n.videoEditorSplitPlayheadOutsideClip,
@@ -136,6 +176,17 @@ class _TimelineClipControlsState extends ConsumerState<TimelineClipControls> {
       );
       return;
     }
+
+    // The split service and bloc expect a source-time offset relative to
+    // trimmedDuration.  Convert: source = playback × speed
+    // (since playbackDuration = trimmedDuration / speed).
+    final speed = selectedClip.playbackSpeed ?? 1.0;
+    final localPosition = speed == 1.0
+        ? localPlaybackPosition
+        : Duration(
+            microseconds: (localPlaybackPosition.inMicroseconds * speed)
+                .round(),
+          );
 
     if (!VideoEditorSplitService.isValidSplitPosition(
       selectedClip,

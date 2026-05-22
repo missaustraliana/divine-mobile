@@ -6976,6 +6976,16 @@ class AppLocalizationsNl extends AppLocalizations {
       'Kon audio niet extraheren. Probeer het opnieuw.';
 
   @override
+  String get videoEditorSpeedLabel => 'Snelheid';
+
+  @override
+  String get videoEditorSetClipSpeedSemanticLabel =>
+      'Afspeelsnelheid voor geselecteerd clip instellen';
+
+  @override
+  String get videoEditorSpeedSheetTitle => 'Clipsnelheid';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'Bewerken van tijdlijn voltooien';
 

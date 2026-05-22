@@ -6658,6 +6658,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get videoEditorExtractAudioFailed => '音声を抽出できませんでした。もう一度お試しください。';
 
   @override
+  String get videoEditorSpeedLabel => '速度';
+
+  @override
+  String get videoEditorSetClipSpeedSemanticLabel => '選択したクリップの再生速度を設定';
+
+  @override
+  String get videoEditorSpeedSheetTitle => 'クリップの速度';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel => 'タイムライン編集を終了';
 
   @override

@@ -6798,6 +6798,16 @@ class AppLocalizationsAm extends AppLocalizations {
   String get videoEditorExtractAudioFailed => 'ድምፅ ማዎጣት አልተቻለም። እንደገና ሞክር።';
 
   @override
+  String get videoEditorSpeedLabel => 'ፍጥነት';
+
+  @override
+  String get videoEditorSetClipSpeedSemanticLabel =>
+      'ለተመረጠው ክሊፕ የማጫወቻ ፍጥነት ያዘጋጁ';
+
+  @override
+  String get videoEditorSpeedSheetTitle => 'የክሊፕ ፍጥነት';
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'የጊዜ መስመር አርትዖትን ጨርስ';
 
