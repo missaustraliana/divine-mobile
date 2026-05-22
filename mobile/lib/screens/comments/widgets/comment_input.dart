@@ -3,7 +3,7 @@
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
-import 'package:openvine/blocs/comments/comments_bloc.dart';
+import 'package:openvine/blocs/comments/comment_composer/comment_composer_bloc.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/screens/comments/widgets/mention_overlay.dart';
 
@@ -344,7 +344,9 @@ class _CommentTextField extends StatelessWidget {
         : isReplying
         ? 'Add a reply'
         : 'Add a comment';
-    final hintText = isEditing ? 'Edit comment...' : 'Add comment...';
+    final hintText = isEditing
+        ? context.l10n.commentsInputHintEdit
+        : context.l10n.commentsInputHint;
     // Top-level comments keep Enter-to-send for quick posting, while reply/edit
     // flows stay multiline so users can compose longer text in-place.
     final isComposingMultiline = isReplying || isEditing;
@@ -425,9 +427,10 @@ class _KeyboardDismissButton extends StatelessWidget {
 /// Send button that appears when text is entered.
 ///
 /// Stays visually as a sendable up-arrow at all times. Comment posting is
-/// optimistic at the BLoC layer (see CommentsBloc._onSubmitted): the
-/// comment lands in the list before the network call, so this button has
-/// no in-flight state to surface — matching WhatsApp/Telegram-style
+/// optimistic at the BLoC layer (see `CommentComposerBloc._onSubmitted` —
+/// emits `ComposerOutboxInsertPlaceholder` before awaiting `postComment`):
+/// the comment lands in the list before the network call, so this button
+/// has no in-flight state to surface — matching WhatsApp/Telegram-style
 /// instant-send affordance.
 class _SendButton extends StatelessWidget {
   const _SendButton({required this.onSubmit});

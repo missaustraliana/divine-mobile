@@ -10,10 +10,10 @@ import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:models/models.dart' show UserProfile;
-import 'package:openvine/blocs/comments/comments_bloc.dart';
+import 'package:openvine/blocs/comments/comment_composer/comment_composer_bloc.dart';
+import 'package:openvine/blocs/comments/comment_reactions/comment_reactions_bloc.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/l10n/localized_time_formatter.dart';
 import 'package:openvine/providers/nostr_client_provider.dart';
@@ -210,9 +210,10 @@ class _CommentItemState extends ConsumerState<CommentItem> {
   }) async {
     if (!mounted) return;
 
-    // Capture BLoC reference before async gap to avoid using context
-    // after the widget may have been unmounted
-    final bloc = context.read<CommentsBloc>();
+    // Capture BLoC references before async gap to avoid using context
+    // after the widget may have been unmounted.
+    final reactionsBloc = context.read<CommentReactionsBloc>();
+    final composerBloc = context.read<CommentComposerBloc>();
 
     final CommentOptionResult? result;
 
@@ -233,9 +234,9 @@ class _CommentItemState extends ConsumerState<CommentItem> {
 
     switch (result) {
       case CommentDeleteResult():
-        bloc.add(CommentDeleteRequested(widget.comment.id));
+        reactionsBloc.add(CommentDeleteRequested(widget.comment.id));
       case CommentReportResult(:final reason, :final details):
-        bloc.add(
+        reactionsBloc.add(
           CommentReportRequested(
             commentId: widget.comment.id,
             authorPubkey: widget.comment.authorPubkey,
@@ -244,12 +245,15 @@ class _CommentItemState extends ConsumerState<CommentItem> {
           ),
         );
       case CommentBlockUserResult(:final authorPubkey):
-        bloc.add(CommentBlockUserRequested(authorPubkey));
+        reactionsBloc.add(CommentBlockUserRequested(authorPubkey));
       case CommentEditResult(:final commentId, :final content):
-        bloc.add(
+        composerBloc.add(
           CommentEditModeEntered(
             commentId: commentId,
             originalContent: content,
+            originalComment: widget.comment,
+            originalReplyToEventId: widget.comment.replyToEventId,
+            originalReplyToAuthorPubkey: widget.comment.replyToAuthorPubkey,
           ),
         );
     }
@@ -412,11 +416,12 @@ class _CommentContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isEmoji = _isEmojiOnly(content);
-    final baseStyle = TextStyle(
-      color: VineTheme.onSurface,
-      fontSize: isEmoji ? _emojiOnlyFontSize : 14,
-      height: isEmoji ? null : 20 / 14,
-    );
+    final baseStyle = isEmoji
+        ? const TextStyle(
+            color: VineTheme.onSurface,
+            fontSize: _emojiOnlyFontSize,
+          )
+        : VineTheme.bodyMediumFont(color: VineTheme.onSurface);
     return LinkifiedText(
       text: content,
       style: baseStyle,
@@ -448,27 +453,26 @@ class _ActionsRow extends StatelessWidget {
         Semantics(
           identifier: 'reply_button',
           button: true,
-          label: 'Reply to comment',
+          label: context.l10n.commentReplySemanticLabel,
           child: InkWell(
             onTap: () {
-              context.read<CommentsBloc>().add(CommentReplyToggled(commentId));
+              context.read<CommentComposerBloc>().add(
+                CommentReplyToggled(commentId),
+              );
             },
             child: ConstrainedBox(
               constraints: const BoxConstraints(minHeight: 16),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  SvgPicture.asset(
-                    DivineIconName.arrowBendDownRight.assetPath,
-                    height: MediaQuery.textScalerOf(context).scale(11),
-                    colorFilter: const ColorFilter.mode(
-                      VineTheme.onSurface,
-                      BlendMode.srcIn,
-                    ),
+                  DivineIcon(
+                    icon: DivineIconName.arrowBendDownRight,
+                    size: MediaQuery.textScalerOf(context).scale(11),
+                    color: VineTheme.onSurface,
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'Reply',
+                    context.l10n.commentReply,
                     style: VineTheme.labelLargeFont(
                       color: VineTheme.onSurfaceMuted,
                     ),
@@ -501,8 +505,8 @@ class _CommentVoteButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocSelector<
-      CommentsBloc,
-      CommentsState,
+      CommentReactionsBloc,
+      CommentReactionsState,
       ({bool isUpvoted, bool isDownvoted, int upvotes, int downvotes})
     >(
       selector: (state) => (
@@ -521,10 +525,12 @@ class _CommentVoteButtons extends StatelessWidget {
             Semantics(
               identifier: 'upvote_button',
               button: true,
-              label: voteState.isUpvoted ? 'Remove upvote' : 'Upvote comment',
+              label: voteState.isUpvoted
+                  ? context.l10n.commentRemoveUpvoteLabel
+                  : context.l10n.commentUpvoteLabel,
               child: InkWell(
                 onTap: () {
-                  context.read<CommentsBloc>().add(
+                  context.read<CommentReactionsBloc>().add(
                     CommentVoteToggled(
                       commentId: commentId,
                       authorPubkey: authorPubkey,
@@ -537,15 +543,12 @@ class _CommentVoteButtons extends StatelessWidget {
                     horizontal: 4,
                     vertical: 2,
                   ),
-                  child: SvgPicture.asset(
-                    DivineIconName.arrowFatUp.assetPath,
-                    height: MediaQuery.textScalerOf(context).scale(16),
-                    colorFilter: ColorFilter.mode(
-                      voteState.isUpvoted
-                          ? VineTheme.vineGreen
-                          : VineTheme.onSurfaceMuted,
-                      BlendMode.srcIn,
-                    ),
+                  child: DivineIcon(
+                    icon: DivineIconName.arrowFatUp,
+                    size: MediaQuery.textScalerOf(context).scale(16),
+                    color: voteState.isUpvoted
+                        ? VineTheme.vineGreen
+                        : VineTheme.onSurfaceMuted,
                   ),
                 ),
               ),
@@ -570,11 +573,11 @@ class _CommentVoteButtons extends StatelessWidget {
               identifier: 'downvote_button',
               button: true,
               label: voteState.isDownvoted
-                  ? 'Remove downvote'
-                  : 'Downvote comment',
+                  ? context.l10n.commentRemoveDownvoteLabel
+                  : context.l10n.commentDownvoteLabel,
               child: InkWell(
                 onTap: () {
-                  context.read<CommentsBloc>().add(
+                  context.read<CommentReactionsBloc>().add(
                     CommentVoteToggled(
                       commentId: commentId,
                       authorPubkey: authorPubkey,
@@ -587,15 +590,12 @@ class _CommentVoteButtons extends StatelessWidget {
                     horizontal: 4,
                     vertical: 2,
                   ),
-                  child: SvgPicture.asset(
-                    DivineIconName.arrowFatDown.assetPath,
-                    height: MediaQuery.textScalerOf(context).scale(16),
-                    colorFilter: ColorFilter.mode(
-                      voteState.isDownvoted
-                          ? VineTheme.likeRed
-                          : VineTheme.onSurfaceMuted,
-                      BlendMode.srcIn,
-                    ),
+                  child: DivineIcon(
+                    icon: DivineIconName.arrowFatDown,
+                    size: MediaQuery.textScalerOf(context).scale(16),
+                    color: voteState.isDownvoted
+                        ? VineTheme.likeRed
+                        : VineTheme.onSurfaceMuted,
                   ),
                 ),
               ),
