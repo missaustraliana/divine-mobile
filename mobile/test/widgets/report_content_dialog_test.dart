@@ -101,6 +101,11 @@ void main() {
     ).thenAnswer((_) async => true);
   });
 
+  Future<void> setLargeSurface(WidgetTester tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+  }
+
   group('$ReportContentDialog constructor', () {
     test(
       'throws when neither a video nor message identifiers are provided',
@@ -132,7 +137,7 @@ void main() {
     );
 
     testWidgets('renders form heading and policy notice', (tester) async {
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
 
       await tester.pumpWidget(buildSubject());
       await tester.pumpAndSettle();
@@ -141,7 +146,7 @@ void main() {
     });
 
     testWidgets('renders all report reason options', (tester) async {
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
 
       await tester.pumpWidget(buildSubject());
       await tester.pumpAndSettle();
@@ -158,7 +163,7 @@ void main() {
     });
 
     testWidgets('renders subtitle text for each reason', (tester) async {
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
 
       await tester.pumpWidget(buildSubject());
       await tester.pumpAndSettle();
@@ -170,7 +175,7 @@ void main() {
     testWidgets('details field is hidden until Other is selected', (
       tester,
     ) async {
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
 
       await tester.pumpWidget(buildSubject());
       await tester.pumpAndSettle();
@@ -186,7 +191,7 @@ void main() {
     testWidgets(
       'Submit button is visible even before selecting a reason (Apple requirement)',
       (tester) async {
-        await tester.binding.setSurfaceSize(const Size(800, 1200));
+        await setLargeSurface(tester);
 
         await tester.pumpWidget(buildSubject());
         await tester.pumpAndSettle();
@@ -211,7 +216,7 @@ void main() {
     testWidgets(
       'Submit button shows error when tapped without selecting reason',
       (tester) async {
-        await tester.binding.setSurfaceSize(const Size(800, 1200));
+        await setLargeSurface(tester);
 
         await tester.pumpWidget(buildSubject());
         await tester.pumpAndSettle();
@@ -230,7 +235,7 @@ void main() {
     testWidgets(
       'Submit button shows error when Other selected without details',
       (tester) async {
-        await tester.binding.setSurfaceSize(const Size(800, 1200));
+        await setLargeSurface(tester);
 
         await tester.pumpWidget(buildSubject());
         await tester.pumpAndSettle();
@@ -252,7 +257,7 @@ void main() {
     testWidgets('renders correct number of report reason options', (
       tester,
     ) async {
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
 
       await tester.pumpWidget(buildSubject());
       await tester.pumpAndSettle();
@@ -375,7 +380,7 @@ void main() {
     testWidgets('selecting reason and tapping Submit calls reportContent', (
       tester,
     ) async {
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
       await openReportDialog(tester);
 
       await tester.tap(find.text(l10n.reportReasonSpam));
@@ -399,7 +404,7 @@ void main() {
     testWidgets('successful report shows $ReportConfirmationDialog', (
       tester,
     ) async {
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
       await openReportDialog(tester);
 
       await tester.tap(find.text(l10n.reportReasonHarassment));
@@ -428,7 +433,7 @@ void main() {
           ),
         ).thenAnswer((_) => completer.future);
 
-        await tester.binding.setSurfaceSize(const Size(800, 1200));
+        await setLargeSurface(tester);
         await openReportDialog(tester);
 
         await tester.tap(find.text(l10n.reportReasonSpam));
@@ -463,7 +468,7 @@ void main() {
         ),
       ).thenAnswer((_) async => ReportResult.failure('Server error'));
 
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
       await openReportDialog(tester);
 
       await tester.tap(find.text(l10n.reportReasonSpam));
@@ -488,7 +493,7 @@ void main() {
         ),
       ).thenThrow(Exception('Network error'));
 
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
       await openReportDialog(tester);
 
       await tester.tap(find.text(l10n.reportReasonSpam));
@@ -515,7 +520,7 @@ void main() {
           ),
         ).thenAnswer((_) async => ReportResult.failure('Server error'));
 
-        await tester.binding.setSurfaceSize(const Size(800, 1200));
+        await setLargeSurface(tester);
         await openBottomSheetReport(tester);
 
         await tester.tap(find.text(l10n.reportReasonSpam));
@@ -535,7 +540,7 @@ void main() {
     testWidgets(
       'bottom sheet path surfaces validation errors inline without snackbars',
       (tester) async {
-        await tester.binding.setSurfaceSize(const Size(800, 1200));
+        await setLargeSurface(tester);
         await openBottomSheetReport(tester);
 
         await tester.ensureVisible(
@@ -552,7 +557,7 @@ void main() {
     testWidgets('Other reason with details submits successfully', (
       tester,
     ) async {
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
       await openReportDialog(tester);
 
       await tester.tap(find.text(l10n.reportReasonOther));
@@ -724,7 +729,7 @@ void main() {
     testWidgets('sends DM to moderation team after successful report', (
       tester,
     ) async {
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
       await openAndSubmitReport(tester);
 
       verify(
@@ -739,7 +744,7 @@ void main() {
     testWidgets('DM content includes report reason and event ID', (
       tester,
     ) async {
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
       await openAndSubmitReport(tester);
 
       final captured = verify(
@@ -777,7 +782,7 @@ void main() {
         ),
       ).thenThrow(Exception('DM relay unreachable'));
 
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
       await openAndSubmitReport(tester);
 
       expect(
@@ -820,7 +825,7 @@ void main() {
           ],
         );
 
-        await tester.binding.setSurfaceSize(const Size(800, 1200));
+        await setLargeSurface(tester);
         await tester.pumpWidget(
           testProviderScope(
             mockNostrService: mockNostrClient,
@@ -957,7 +962,7 @@ void main() {
     testWidgets(
       'moderation DM body uses DM Message Report header and Message ID label',
       (tester) async {
-        await tester.binding.setSurfaceSize(const Size(800, 1200));
+        await setLargeSurface(tester);
         await openAndSubmitMessageReport(tester);
 
         final captured = verify(
@@ -1089,7 +1094,7 @@ void main() {
     testWidgets(
       'submission calls reportUser with the user pubkey and skips reportContent',
       (tester) async {
-        await tester.binding.setSurfaceSize(const Size(800, 1200));
+        await setLargeSurface(tester);
         await openAndSubmitUserReport(tester);
 
         verify(
@@ -1117,7 +1122,7 @@ void main() {
     testWidgets(
       'moderation DM body uses User Report header and the synthetic user_<pubkey> event id',
       (tester) async {
-        await tester.binding.setSurfaceSize(const Size(800, 1200));
+        await setLargeSurface(tester);
         await openAndSubmitUserReport(tester);
 
         final captured = verify(
@@ -1150,7 +1155,7 @@ void main() {
     testWidgets('successful user report shows the in-sheet confirmation', (
       tester,
     ) async {
-      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      await setLargeSurface(tester);
       await openAndSubmitUserReport(tester);
 
       expect(find.text(l10n.reportReceivedTitle), findsOneWidget);
