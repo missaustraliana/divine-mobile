@@ -5227,6 +5227,18 @@ class AppLocalizationsJa extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => '太字';
+
+  @override
+  String get dmFormatItalic => '斜体';
+
+  @override
+  String get dmFormatStrikethrough => '取り消し線';
+
+  @override
+  String get dmFormatCode => 'コード';
+
+  @override
   String get dmStatusPending => '送信中';
 
   @override

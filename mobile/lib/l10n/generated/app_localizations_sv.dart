@@ -5454,6 +5454,18 @@ class AppLocalizationsSv extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => 'Fet';
+
+  @override
+  String get dmFormatItalic => 'Kursiv';
+
+  @override
+  String get dmFormatStrikethrough => 'Genomstruken';
+
+  @override
+  String get dmFormatCode => 'Kod';
+
+  @override
   String get dmStatusPending => 'Skickar';
 
   @override

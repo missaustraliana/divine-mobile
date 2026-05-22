@@ -5507,6 +5507,18 @@ class AppLocalizationsBg extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => 'Получер';
+
+  @override
+  String get dmFormatItalic => 'Курсив';
+
+  @override
+  String get dmFormatStrikethrough => 'Зачеркнат';
+
+  @override
+  String get dmFormatCode => 'Код';
+
+  @override
   String get dmStatusPending => 'Изпращаме';
 
   @override

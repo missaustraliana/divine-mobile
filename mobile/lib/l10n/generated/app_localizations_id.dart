@@ -5429,6 +5429,18 @@ class AppLocalizationsId extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => 'Tebal';
+
+  @override
+  String get dmFormatItalic => 'Miring';
+
+  @override
+  String get dmFormatStrikethrough => 'Coret';
+
+  @override
+  String get dmFormatCode => 'Kode';
+
+  @override
   String get dmStatusPending => 'Mengirim';
 
   @override

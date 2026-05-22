@@ -5244,6 +5244,18 @@ class AppLocalizationsKo extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => '굵게';
+
+  @override
+  String get dmFormatItalic => '기울임꼴';
+
+  @override
+  String get dmFormatStrikethrough => '취소선';
+
+  @override
+  String get dmFormatCode => '코드';
+
+  @override
   String get dmStatusPending => '보내는 중';
 
   @override

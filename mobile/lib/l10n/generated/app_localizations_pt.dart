@@ -5487,6 +5487,18 @@ class AppLocalizationsPt extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => 'Negrito';
+
+  @override
+  String get dmFormatItalic => 'Itálico';
+
+  @override
+  String get dmFormatStrikethrough => 'Tachado';
+
+  @override
+  String get dmFormatCode => 'Código';
+
+  @override
   String get dmStatusPending => 'Enviando';
 
   @override

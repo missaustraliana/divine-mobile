@@ -5589,6 +5589,18 @@ class AppLocalizationsPl extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => 'Pogrubienie';
+
+  @override
+  String get dmFormatItalic => 'Kursywa';
+
+  @override
+  String get dmFormatStrikethrough => 'Przekreślenie';
+
+  @override
+  String get dmFormatCode => 'Kod';
+
+  @override
   String get dmStatusPending => 'Wysyłanie';
 
   @override

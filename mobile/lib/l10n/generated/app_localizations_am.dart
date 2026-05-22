@@ -5342,6 +5342,18 @@ class AppLocalizationsAm extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => 'ደማቅ';
+
+  @override
+  String get dmFormatItalic => 'አዘንብል';
+
+  @override
+  String get dmFormatStrikethrough => 'መሰረዝ';
+
+  @override
+  String get dmFormatCode => 'ኮድ';
+
+  @override
   String get dmStatusPending => 'በመላክ ላይ';
 
   @override

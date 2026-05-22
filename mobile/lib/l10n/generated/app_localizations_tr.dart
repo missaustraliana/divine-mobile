@@ -5435,6 +5435,18 @@ class AppLocalizationsTr extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => 'Kalın';
+
+  @override
+  String get dmFormatItalic => 'İtalik';
+
+  @override
+  String get dmFormatStrikethrough => 'Üstü çizili';
+
+  @override
+  String get dmFormatCode => 'Kod';
+
+  @override
   String get dmStatusPending => 'Gönderiliyor';
 
   @override

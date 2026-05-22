@@ -5503,6 +5503,18 @@ class AppLocalizationsEs extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => 'Negrita';
+
+  @override
+  String get dmFormatItalic => 'Cursiva';
+
+  @override
+  String get dmFormatStrikethrough => 'Tachado';
+
+  @override
+  String get dmFormatCode => 'Código';
+
+  @override
   String get dmStatusPending => 'Enviando';
 
   @override

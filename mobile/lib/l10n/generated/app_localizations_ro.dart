@@ -5602,6 +5602,18 @@ class AppLocalizationsRo extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => 'Aldin';
+
+  @override
+  String get dmFormatItalic => 'Cursiv';
+
+  @override
+  String get dmFormatStrikethrough => 'Tăiat';
+
+  @override
+  String get dmFormatCode => 'Cod';
+
+  @override
   String get dmStatusPending => 'Se trimite';
 
   @override

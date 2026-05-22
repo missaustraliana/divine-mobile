@@ -5521,6 +5521,18 @@ class AppLocalizationsDe extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => 'Fett';
+
+  @override
+  String get dmFormatItalic => 'Kursiv';
+
+  @override
+  String get dmFormatStrikethrough => 'Durchgestrichen';
+
+  @override
+  String get dmFormatCode => 'Code';
+
+  @override
   String get dmStatusPending => 'Wird gesendet';
 
   @override

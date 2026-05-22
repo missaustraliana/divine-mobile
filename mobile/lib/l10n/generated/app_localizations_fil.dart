@@ -5523,6 +5523,18 @@ class AppLocalizationsFil extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmFormatBold => 'Makapal';
+
+  @override
+  String get dmFormatItalic => 'Pahilis';
+
+  @override
+  String get dmFormatStrikethrough => 'May guhit';
+
+  @override
+  String get dmFormatCode => 'Code';
+
+  @override
   String get dmStatusPending => 'Nagpapadala';
 
   @override
