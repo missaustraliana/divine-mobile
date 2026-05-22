@@ -2630,6 +2630,14 @@ class AppLocalizationsFil extends AppLocalizations {
   String get authSignBackIn => 'Mag-sign in muli';
 
   @override
+  String get authRecoveryDraftsOwner =>
+      'Ang iyong mga draft at clip ay naka-save para sa account na ito';
+
+  @override
+  String get authRecoveryOtherAccountWarning =>
+      'Ang pag-sign in dito ay magtatago ng mga draft at clip na iyon';
+
+  @override
   String get authTermsPrefix =>
       'Sa pagpili ng opsyon sa itaas, kinukumpirma mo na ikaw ay 16 na taong gulang o mas matanda at sumasang-ayon sa ';
 

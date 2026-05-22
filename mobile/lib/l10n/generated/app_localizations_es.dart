@@ -2619,6 +2619,14 @@ class AppLocalizationsEs extends AppLocalizations {
   String get authSignBackIn => 'Volver a iniciar sesión';
 
   @override
+  String get authRecoveryDraftsOwner =>
+      'Tus borradores y clips están guardados en esta cuenta';
+
+  @override
+  String get authRecoveryOtherAccountWarning =>
+      'Iniciar sesión aquí ocultará esos borradores y clips';
+
+  @override
   String get authTermsPrefix =>
       'Al seleccionar una opción, confirmás que tenés al menos 16 años y aceptás los ';
 

@@ -2468,6 +2468,12 @@ class AppLocalizationsKo extends AppLocalizations {
   String get authSignBackIn => '다시 로그인';
 
   @override
+  String get authRecoveryDraftsOwner => '임시저장 및 클립이 이 계정에 저장되어 있어요';
+
+  @override
+  String get authRecoveryOtherAccountWarning => '여기서 로그인하면 해당 임시저장과 클립이 숨겨져요';
+
+  @override
   String get authTermsPrefix =>
       '위에서 옵션을 선택하면 만 16세 이상임을 확인하고 다음 내용에 동의하는 것이에요: ';
 

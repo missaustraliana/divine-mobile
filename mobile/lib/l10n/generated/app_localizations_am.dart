@@ -2539,6 +2539,13 @@ class AppLocalizationsAm extends AppLocalizations {
   String get authSignBackIn => 'ተመልሰው ይግቡ';
 
   @override
+  String get authRecoveryDraftsOwner => 'ረቂቆችዎ እና ክሊፖችዎ ለዚህ መለያ ተቀምጠዋል';
+
+  @override
+  String get authRecoveryOtherAccountWarning =>
+      'እዚህ መግባት እነዚያ ረቂቆች እና ክሊፖች ይደብቃቸዋል';
+
+  @override
   String get authTermsPrefix =>
       'ከላይ ያለውን አማራጭ በመምረጥ፣ ቢያንስ 16 ዓመት እንደሆናችሁ አረጋግጠዋል እና በዚህ ተስማምተዋል።';
 

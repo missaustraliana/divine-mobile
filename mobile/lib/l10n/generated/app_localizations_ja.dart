@@ -2458,6 +2458,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get authSignBackIn => 'もう一回サインイン';
 
   @override
+  String get authRecoveryDraftsOwner => '下書きとクリップはこのアカウントに保存されています';
+
+  @override
+  String get authRecoveryOtherAccountWarning => 'ここでサインインするとそれらが非表示になります';
+
+  @override
   String get authTermsPrefix => '上のオプションを選ぶと、16歳以上であることを確認し、次に同意したことになるよ: ';
 
   @override

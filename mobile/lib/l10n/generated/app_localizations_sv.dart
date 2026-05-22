@@ -2583,6 +2583,14 @@ class AppLocalizationsSv extends AppLocalizations {
   String get authSignBackIn => 'Logga in igen';
 
   @override
+  String get authRecoveryDraftsOwner =>
+      'Dina utkast och klipp är sparade för det här kontot';
+
+  @override
+  String get authRecoveryOtherAccountWarning =>
+      'Loggar du in här döljs de utkasten och klippen';
+
+  @override
   String get authTermsPrefix =>
       'Genom att välja ett alternativ ovan bekräftar du att du är minst 16 år gammal och godkänner ';
 

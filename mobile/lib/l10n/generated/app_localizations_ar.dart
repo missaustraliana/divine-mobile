@@ -2557,6 +2557,13 @@ class AppLocalizationsAr extends AppLocalizations {
   String get authSignBackIn => 'عد إلى تسجيل الدخول';
 
   @override
+  String get authRecoveryDraftsOwner => 'مسوداتك ومقاطعك محفوظة لهذا الحساب';
+
+  @override
+  String get authRecoveryOtherAccountWarning =>
+      'تسجيل الدخول هنا سيُخفي تلك المسودات والمقاطع';
+
+  @override
   String get authTermsPrefix =>
       'باختيار خيار أعلاه، أنت تؤكّد أنّ عمرك 16 عامًا على الأقل وتوافق على ';
 

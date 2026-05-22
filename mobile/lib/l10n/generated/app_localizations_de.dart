@@ -2617,6 +2617,14 @@ class AppLocalizationsDe extends AppLocalizations {
   String get authSignBackIn => 'Wieder anmelden';
 
   @override
+  String get authRecoveryDraftsOwner =>
+      'Deine Entwürfe und Clips sind für dieses Konto gespeichert';
+
+  @override
+  String get authRecoveryOtherAccountWarning =>
+      'Hier anmelden verbirgt diese Entwürfe und Clips';
+
+  @override
   String get authTermsPrefix =>
       'Indem du oben eine Option wählst, bestätigst du, dass du mindestens 16 Jahre alt bist und den ';
 

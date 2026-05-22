@@ -5,6 +5,7 @@
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -285,6 +286,15 @@ class _ReturningUserLayout extends StatelessWidget {
                 profile: account.profile,
               ),
 
+              // Session-recovery banner: visible when sign-out left an anchor
+              // so the welcome screen can explain where local drafts/clips
+              // live before the user confirms a sign-in.
+              if (state.hasRecoveryAnchor)
+                _CrossAccountRecoveryBanner(
+                  isSelectedAccountAnchor:
+                      account.pubkeyHex == state.recoveryAnchorPubkeyHex,
+                ),
+
               const Spacer(),
 
               if (lastError != null) ...[
@@ -339,6 +349,83 @@ class _ReturningUserLayout extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Contextual banner shown when sign-out left a session-recovery anchor.
+///
+/// When [isSelectedAccountAnchor] is true the selected account IS the anchor
+/// account (the safe default), so the banner reassures the user that their
+/// local drafts/clips belong here. When false, the user has explicitly switched
+/// the dropdown to a different account, and the banner warns that those
+/// drafts/clips will be hidden after sign-in.
+class _CrossAccountRecoveryBanner extends StatefulWidget {
+  const _CrossAccountRecoveryBanner({required this.isSelectedAccountAnchor});
+
+  final bool isSelectedAccountAnchor;
+
+  @override
+  State<_CrossAccountRecoveryBanner> createState() =>
+      _CrossAccountRecoveryBannerState();
+}
+
+class _CrossAccountRecoveryBannerState
+    extends State<_CrossAccountRecoveryBanner> {
+  String? _announcedMessage;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final message = _message(context);
+    if (_announcedMessage == message) return;
+    _announcedMessage = message;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        message,
+        Directionality.of(context),
+      );
+    });
+  }
+
+  String _message(BuildContext context) {
+    return widget.isSelectedAccountAnchor
+        ? context.l10n.authRecoveryDraftsOwner
+        : context.l10n.authRecoveryOtherAccountWarning;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final message = _message(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: VineTheme.accentYellowBackground,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          spacing: 8,
+          children: [
+            const ExcludeSemantics(
+              child: DivineIcon(
+                icon: DivineIconName.warningCircle,
+                size: 16,
+                color: VineTheme.accentYellow,
+              ),
+            ),
+            Expanded(
+              child: Text(
+                message,
+                style: VineTheme.bodySmallFont(color: VineTheme.accentYellow),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
