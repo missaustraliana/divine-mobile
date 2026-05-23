@@ -427,6 +427,43 @@ void main() {
       expect(result.errorMessage, contains('No stored rumor'));
     });
 
+    test('retry marks failed when send returns failure', () async {
+      final rumor = reactionRumor();
+      when(
+        () => mockDao.getRumorJson(id: rumor.id, ownerPubkey: _ownerPubkey),
+      ).thenAnswer((_) async => jsonEncode(rumor.toJson()));
+      when(
+        () => mockDao.markPending(id: rumor.id, ownerPubkey: _ownerPubkey),
+      ).thenAnswer((_) async {});
+      when(
+        () => mockMessageService.sendRumor(
+          rumorEvent: any(named: 'rumorEvent'),
+          recipientPubkey: _otherPubkey,
+        ),
+      ).thenAnswer((_) async => const NIP17SendResult.failure('relay down'));
+      when(
+        () => mockDao.markFailed(
+          placeholderId: rumor.id,
+          ownerPubkey: _ownerPubkey,
+        ),
+      ).thenAnswer((_) async {});
+
+      final repository = createRepository();
+      final result = await repository.retry(
+        rumorId: rumor.id,
+        targetMessageAuthor: _otherPubkey,
+      );
+
+      expect(result.success, isFalse);
+      expect(result.errorMessage, 'relay down');
+      verify(
+        () => mockDao.markFailed(
+          placeholderId: rumor.id,
+          ownerPubkey: _ownerPubkey,
+        ),
+      ).called(1);
+    });
+
     test(
       'removeOwn soft-deletes locally and publishes wrapped kind 5',
       () async {
@@ -547,6 +584,35 @@ void main() {
           ownerPubkey: _ownerPubkey,
         ),
       ).called(1);
+    });
+
+    test('persistIncoming reports dao upsert failures', () async {
+      when(
+        () => mockDao.upsertIncoming(
+          id: _reactionRumorId,
+          conversationId: any(named: 'conversationId'),
+          targetMessageId: _targetMessageId,
+          targetMessageAuthor: _otherPubkey,
+          reactorPubkey: _ownerPubkey,
+          emoji: '🔥',
+          createdAt: 1_700_000_000,
+          giftWrapId: _giftWrapId,
+          ownerPubkey: _ownerPubkey,
+        ),
+      ).thenThrow(StateError('boom'));
+
+      final repository = createRepository();
+      await repository.persistIncoming(
+        rumorEvent: reactionRumor(),
+        giftWrapId: _giftWrapId,
+      );
+
+      expect(
+        reporterSites,
+        contains(
+          DmReactionsRepositoryReportableSites.persistIncomingDaoUpsert,
+        ),
+      );
     });
 
     test(
