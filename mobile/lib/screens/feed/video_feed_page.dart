@@ -41,6 +41,7 @@ import 'package:openvine/widgets/video_feed_item/double_tap_heart_overlay.dart';
 import 'package:openvine/widgets/video_feed_item/feed_videos.dart';
 import 'package:openvine/widgets/video_feed_item/pooled_video_error_overlay.dart';
 import 'package:openvine/widgets/video_feed_item/video_interactions_bloc_key.dart';
+import 'package:openvine/widgets/video_feed_item/video_loading_placeholder.dart';
 import 'package:openvine/widgets/web_video_auth_header_provider.dart';
 import 'package:openvine/widgets/web_video_feed.dart';
 import 'package:openvine/widgets/web_video_player.dart';
@@ -1247,9 +1248,9 @@ class _PooledVideoFeedItemContentState
                 videoController: videoController,
                 isPortrait: isPortrait,
               ),
-          loadingBuilder: (context) => _VideoLoadingPlaceholder(
+          loadingBuilder: (context) => VideoLoadingPlaceholder(
             thumbnailUrl: video.thumbnailUrl,
-            isPortrait: isPortrait,
+            shouldPortraitExpand: isPortrait,
             videoId: video.id,
             feedMode: widget.contextTitle,
             index: widget.index,
@@ -1403,129 +1404,6 @@ class _SlowExternalVideoOverlay extends StatelessWidget {
         );
       },
     );
-  }
-}
-
-class _VideoLoadingPlaceholder extends StatefulWidget {
-  const _VideoLoadingPlaceholder({
-    required this.videoId,
-    required this.index,
-    this.feedMode,
-    this.thumbnailUrl,
-    this.isPortrait = true,
-  });
-
-  final String videoId;
-  final int index;
-  final String? feedMode;
-  final String? thumbnailUrl;
-  final bool isPortrait;
-
-  @override
-  State<_VideoLoadingPlaceholder> createState() =>
-      _VideoLoadingPlaceholderState();
-}
-
-class _VideoLoadingPlaceholderState extends State<_VideoLoadingPlaceholder> {
-  bool _loggedStart = false;
-  bool _loggedLoaded = false;
-  bool _loggedError = false;
-
-  void _logStartIfNeeded() {
-    if (_loggedStart) return;
-    _loggedStart = true;
-    Log.debug(
-      'Feed thumbnail load_start: mode=${widget.feedMode ?? 'unknown'}, '
-      'index=${widget.index}, eventId=${widget.videoId}, '
-      'thumbnailUrl=${widget.thumbnailUrl}',
-      name: 'VideoFeedPage',
-      category: LogCategory.video,
-    );
-  }
-
-  void _logLoadedIfNeeded() {
-    if (_loggedLoaded) return;
-    _loggedLoaded = true;
-    Log.debug(
-      'Feed thumbnail loaded: mode=${widget.feedMode ?? 'unknown'}, '
-      'index=${widget.index}, eventId=${widget.videoId}, '
-      'thumbnailUrl=${widget.thumbnailUrl}',
-      name: 'VideoFeedPage',
-      category: LogCategory.video,
-    );
-  }
-
-  void _logErrorIfNeeded(Object error) {
-    if (_loggedError) return;
-    _loggedError = true;
-    Log.warning(
-      'Feed thumbnail load_failed: mode=${widget.feedMode ?? 'unknown'}, '
-      'index=${widget.index}, eventId=${widget.videoId}, '
-      'thumbnailUrl=${widget.thumbnailUrl}, error=$error',
-      name: 'VideoFeedPage',
-      category: LogCategory.video,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (widget.thumbnailUrl == null) {
-      if (!_loggedStart) {
-        _loggedStart = true;
-        Log.debug(
-          'Feed thumbnail missing: mode=${widget.feedMode ?? 'unknown'}, '
-          'index=${widget.index}, eventId=${widget.videoId}',
-          name: 'VideoFeedPage',
-          category: LogCategory.video,
-        );
-      }
-      return const _LoadingIndicator();
-    }
-
-    // Portrait: fill height, crop sides (cover)
-    // Landscape: fit entirely, centered (contain)
-    final boxFit = widget.isPortrait ? BoxFit.cover : BoxFit.contain;
-    _logStartIfNeeded();
-
-    return ColoredBox(
-      color: VineTheme.backgroundColor,
-      child: SizedBox.expand(
-        child: Image.network(
-          widget.thumbnailUrl!,
-          fit: boxFit,
-          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-            if (wasSynchronouslyLoaded || frame != null) {
-              _logLoadedIfNeeded();
-            }
-            return child;
-          },
-          loadingBuilder: (context, child, loadingProgress) {
-            if (loadingProgress == null) {
-              _logLoadedIfNeeded();
-              return child;
-            }
-
-            return Stack(
-              fit: StackFit.expand,
-              children: [child, const _LoadingIndicator()],
-            );
-          },
-          errorBuilder: (context, error, stackTrace) {
-            _logErrorIfNeeded(error);
-            return const _LoadingIndicator();
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _LoadingIndicator extends StatelessWidget {
-  const _LoadingIndicator();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(child: BrandedLoadingIndicator(size: 60));
   }
 }
 
