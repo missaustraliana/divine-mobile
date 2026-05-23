@@ -9692,6 +9692,42 @@ abstract class AppLocalizations {
   /// **'Report'**
   String get dmMessageActionReport;
 
+  /// Screen-reader label for the '+' button at the end of the quick-row that opens the full emoji picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Add custom emoji reaction'**
+  String get dmReactionAddCustomA11yLabel;
+
+  /// Screen-reader label for a reaction chip created by the current account.
+  ///
+  /// In en, this message translates to:
+  /// **'Your reaction: {emoji}'**
+  String dmReactionChipOwnA11yLabel(String emoji);
+
+  /// Screen-reader label for a reaction chip created by another participant.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} reacted with {emoji}'**
+  String dmReactionChipOtherA11yLabel(String name, String emoji);
+
+  /// Screen-reader label for a reaction chip whose publish is in flight.
+  ///
+  /// In en, this message translates to:
+  /// **'Sending reaction: {emoji}'**
+  String dmReactionChipPendingA11yLabel(String emoji);
+
+  /// Screen-reader label for a reaction chip whose publish failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Reaction failed, double tap to retry'**
+  String get dmReactionChipFailedA11yLabel;
+
+  /// Live-region announcement on chip retry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retrying reaction'**
+  String get dmReactionChipRetryAnnouncement;
+
   /// Label for the Bold formatting action in the DM composer's text-selection context menu. Wraps the selected text with markdown bold markers (e.g. **text**).
   ///
   /// In en, this message translates to:

@@ -9454,6 +9454,794 @@ class DirectMessagesCompanion extends UpdateCompanion<DirectMessageRow> {
   }
 }
 
+class $DmMessageReactionsTable extends DmMessageReactions
+    with TableInfo<$DmMessageReactionsTable, DmReactionRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $DmMessageReactionsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _conversationIdMeta = const VerificationMeta(
+    'conversationId',
+  );
+  @override
+  late final GeneratedColumn<String> conversationId = GeneratedColumn<String>(
+    'conversation_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _targetMessageIdMeta = const VerificationMeta(
+    'targetMessageId',
+  );
+  @override
+  late final GeneratedColumn<String> targetMessageId = GeneratedColumn<String>(
+    'target_message_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _targetMessageAuthorMeta =
+      const VerificationMeta('targetMessageAuthor');
+  @override
+  late final GeneratedColumn<String> targetMessageAuthor =
+      GeneratedColumn<String>(
+        'target_message_author',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _reactorPubkeyMeta = const VerificationMeta(
+    'reactorPubkey',
+  );
+  @override
+  late final GeneratedColumn<String> reactorPubkey = GeneratedColumn<String>(
+    'reactor_pubkey',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _emojiMeta = const VerificationMeta('emoji');
+  @override
+  late final GeneratedColumn<String> emoji = GeneratedColumn<String>(
+    'emoji',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _giftWrapIdMeta = const VerificationMeta(
+    'giftWrapId',
+  );
+  @override
+  late final GeneratedColumn<String> giftWrapId = GeneratedColumn<String>(
+    'gift_wrap_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _ownerPubkeyMeta = const VerificationMeta(
+    'ownerPubkey',
+  );
+  @override
+  late final GeneratedColumn<String> ownerPubkey = GeneratedColumn<String>(
+    'owner_pubkey',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _isDeletedMeta = const VerificationMeta(
+    'isDeleted',
+  );
+  @override
+  late final GeneratedColumn<bool> isDeleted = GeneratedColumn<bool>(
+    'is_deleted',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_deleted" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _rumorEventJsonMeta = const VerificationMeta(
+    'rumorEventJson',
+  );
+  @override
+  late final GeneratedColumn<String> rumorEventJson = GeneratedColumn<String>(
+    'rumor_event_json',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _publishStatusMeta = const VerificationMeta(
+    'publishStatus',
+  );
+  @override
+  late final GeneratedColumn<String> publishStatus = GeneratedColumn<String>(
+    'publish_status',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    conversationId,
+    targetMessageId,
+    targetMessageAuthor,
+    reactorPubkey,
+    emoji,
+    createdAt,
+    giftWrapId,
+    ownerPubkey,
+    isDeleted,
+    rumorEventJson,
+    publishStatus,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'dm_message_reactions';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<DmReactionRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('conversation_id')) {
+      context.handle(
+        _conversationIdMeta,
+        conversationId.isAcceptableOrUnknown(
+          data['conversation_id']!,
+          _conversationIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_conversationIdMeta);
+    }
+    if (data.containsKey('target_message_id')) {
+      context.handle(
+        _targetMessageIdMeta,
+        targetMessageId.isAcceptableOrUnknown(
+          data['target_message_id']!,
+          _targetMessageIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_targetMessageIdMeta);
+    }
+    if (data.containsKey('target_message_author')) {
+      context.handle(
+        _targetMessageAuthorMeta,
+        targetMessageAuthor.isAcceptableOrUnknown(
+          data['target_message_author']!,
+          _targetMessageAuthorMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_targetMessageAuthorMeta);
+    }
+    if (data.containsKey('reactor_pubkey')) {
+      context.handle(
+        _reactorPubkeyMeta,
+        reactorPubkey.isAcceptableOrUnknown(
+          data['reactor_pubkey']!,
+          _reactorPubkeyMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_reactorPubkeyMeta);
+    }
+    if (data.containsKey('emoji')) {
+      context.handle(
+        _emojiMeta,
+        emoji.isAcceptableOrUnknown(data['emoji']!, _emojiMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_emojiMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('gift_wrap_id')) {
+      context.handle(
+        _giftWrapIdMeta,
+        giftWrapId.isAcceptableOrUnknown(
+          data['gift_wrap_id']!,
+          _giftWrapIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('owner_pubkey')) {
+      context.handle(
+        _ownerPubkeyMeta,
+        ownerPubkey.isAcceptableOrUnknown(
+          data['owner_pubkey']!,
+          _ownerPubkeyMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_ownerPubkeyMeta);
+    }
+    if (data.containsKey('is_deleted')) {
+      context.handle(
+        _isDeletedMeta,
+        isDeleted.isAcceptableOrUnknown(data['is_deleted']!, _isDeletedMeta),
+      );
+    }
+    if (data.containsKey('rumor_event_json')) {
+      context.handle(
+        _rumorEventJsonMeta,
+        rumorEventJson.isAcceptableOrUnknown(
+          data['rumor_event_json']!,
+          _rumorEventJsonMeta,
+        ),
+      );
+    }
+    if (data.containsKey('publish_status')) {
+      context.handle(
+        _publishStatusMeta,
+        publishStatus.isAcceptableOrUnknown(
+          data['publish_status']!,
+          _publishStatusMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id, ownerPubkey};
+  @override
+  DmReactionRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return DmReactionRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      conversationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}conversation_id'],
+      )!,
+      targetMessageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}target_message_id'],
+      )!,
+      targetMessageAuthor: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}target_message_author'],
+      )!,
+      reactorPubkey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}reactor_pubkey'],
+      )!,
+      emoji: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}emoji'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      giftWrapId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}gift_wrap_id'],
+      ),
+      ownerPubkey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}owner_pubkey'],
+      )!,
+      isDeleted: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_deleted'],
+      )!,
+      rumorEventJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}rumor_event_json'],
+      ),
+      publishStatus: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}publish_status'],
+      ),
+    );
+  }
+
+  @override
+  $DmMessageReactionsTable createAlias(String alias) {
+    return $DmMessageReactionsTable(attachedDatabase, alias);
+  }
+}
+
+class DmReactionRow extends DataClass implements Insertable<DmReactionRow> {
+  /// The reaction rumor event id (kind 7). Stable across recipient + self
+  /// wraps. Combined with [ownerPubkey] it forms the dedup key.
+  final String id;
+
+  /// Conversation the target message belongs to. Indexed for chip render.
+  final String conversationId;
+
+  /// Rumor id of the kind-14/15 message being reacted to.
+  final String targetMessageId;
+
+  /// Pubkey of the author of the target message. Carried so future detail
+  /// sheets and NIP-25 `p` tag echoes don't need a join.
+  final String targetMessageAuthor;
+
+  /// Pubkey of the user who created this reaction.
+  final String reactorPubkey;
+
+  /// Reaction content. Almost always an emoji codepoint; per NIP-25 may
+  /// also be a NIP-30 `:shortcode:` (rendered as-is at v1, no lookup).
+  final String emoji;
+
+  /// Unix timestamp from the rumor's `created_at`.
+  final int createdAt;
+
+  /// The first gift-wrap id we observed carrying this reaction. Kept for
+  /// dedup-of-incoming and for relay-replay protection. Nullable for
+  /// optimistic rows that have not yet been published.
+  final String? giftWrapId;
+
+  /// Hex public key of the account viewing this reaction (multi-account
+  /// isolation).
+  final String ownerPubkey;
+
+  /// Soft-delete marker for NIP-09 kind 5 deletions and for own-reaction
+  /// supersede (cap-at-one). Soft delete preserves the audit trail and
+  /// blocks stale relay re-delivery from "un-deleting" the row.
+  final bool isDeleted;
+
+  /// Serialized rumor JSON for pending rows that may need retry.
+  /// Null once successfully published.
+  final String? rumorEventJson;
+
+  /// Publish status for outgoing rows; null for incoming (received from
+  /// relay). Values: `pending`, `sent`, `failed`.
+  final String? publishStatus;
+  const DmReactionRow({
+    required this.id,
+    required this.conversationId,
+    required this.targetMessageId,
+    required this.targetMessageAuthor,
+    required this.reactorPubkey,
+    required this.emoji,
+    required this.createdAt,
+    this.giftWrapId,
+    required this.ownerPubkey,
+    required this.isDeleted,
+    this.rumorEventJson,
+    this.publishStatus,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['conversation_id'] = Variable<String>(conversationId);
+    map['target_message_id'] = Variable<String>(targetMessageId);
+    map['target_message_author'] = Variable<String>(targetMessageAuthor);
+    map['reactor_pubkey'] = Variable<String>(reactorPubkey);
+    map['emoji'] = Variable<String>(emoji);
+    map['created_at'] = Variable<int>(createdAt);
+    if (!nullToAbsent || giftWrapId != null) {
+      map['gift_wrap_id'] = Variable<String>(giftWrapId);
+    }
+    map['owner_pubkey'] = Variable<String>(ownerPubkey);
+    map['is_deleted'] = Variable<bool>(isDeleted);
+    if (!nullToAbsent || rumorEventJson != null) {
+      map['rumor_event_json'] = Variable<String>(rumorEventJson);
+    }
+    if (!nullToAbsent || publishStatus != null) {
+      map['publish_status'] = Variable<String>(publishStatus);
+    }
+    return map;
+  }
+
+  DmMessageReactionsCompanion toCompanion(bool nullToAbsent) {
+    return DmMessageReactionsCompanion(
+      id: Value(id),
+      conversationId: Value(conversationId),
+      targetMessageId: Value(targetMessageId),
+      targetMessageAuthor: Value(targetMessageAuthor),
+      reactorPubkey: Value(reactorPubkey),
+      emoji: Value(emoji),
+      createdAt: Value(createdAt),
+      giftWrapId: giftWrapId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(giftWrapId),
+      ownerPubkey: Value(ownerPubkey),
+      isDeleted: Value(isDeleted),
+      rumorEventJson: rumorEventJson == null && nullToAbsent
+          ? const Value.absent()
+          : Value(rumorEventJson),
+      publishStatus: publishStatus == null && nullToAbsent
+          ? const Value.absent()
+          : Value(publishStatus),
+    );
+  }
+
+  factory DmReactionRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return DmReactionRow(
+      id: serializer.fromJson<String>(json['id']),
+      conversationId: serializer.fromJson<String>(json['conversationId']),
+      targetMessageId: serializer.fromJson<String>(json['targetMessageId']),
+      targetMessageAuthor: serializer.fromJson<String>(
+        json['targetMessageAuthor'],
+      ),
+      reactorPubkey: serializer.fromJson<String>(json['reactorPubkey']),
+      emoji: serializer.fromJson<String>(json['emoji']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      giftWrapId: serializer.fromJson<String?>(json['giftWrapId']),
+      ownerPubkey: serializer.fromJson<String>(json['ownerPubkey']),
+      isDeleted: serializer.fromJson<bool>(json['isDeleted']),
+      rumorEventJson: serializer.fromJson<String?>(json['rumorEventJson']),
+      publishStatus: serializer.fromJson<String?>(json['publishStatus']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'conversationId': serializer.toJson<String>(conversationId),
+      'targetMessageId': serializer.toJson<String>(targetMessageId),
+      'targetMessageAuthor': serializer.toJson<String>(targetMessageAuthor),
+      'reactorPubkey': serializer.toJson<String>(reactorPubkey),
+      'emoji': serializer.toJson<String>(emoji),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'giftWrapId': serializer.toJson<String?>(giftWrapId),
+      'ownerPubkey': serializer.toJson<String>(ownerPubkey),
+      'isDeleted': serializer.toJson<bool>(isDeleted),
+      'rumorEventJson': serializer.toJson<String?>(rumorEventJson),
+      'publishStatus': serializer.toJson<String?>(publishStatus),
+    };
+  }
+
+  DmReactionRow copyWith({
+    String? id,
+    String? conversationId,
+    String? targetMessageId,
+    String? targetMessageAuthor,
+    String? reactorPubkey,
+    String? emoji,
+    int? createdAt,
+    Value<String?> giftWrapId = const Value.absent(),
+    String? ownerPubkey,
+    bool? isDeleted,
+    Value<String?> rumorEventJson = const Value.absent(),
+    Value<String?> publishStatus = const Value.absent(),
+  }) => DmReactionRow(
+    id: id ?? this.id,
+    conversationId: conversationId ?? this.conversationId,
+    targetMessageId: targetMessageId ?? this.targetMessageId,
+    targetMessageAuthor: targetMessageAuthor ?? this.targetMessageAuthor,
+    reactorPubkey: reactorPubkey ?? this.reactorPubkey,
+    emoji: emoji ?? this.emoji,
+    createdAt: createdAt ?? this.createdAt,
+    giftWrapId: giftWrapId.present ? giftWrapId.value : this.giftWrapId,
+    ownerPubkey: ownerPubkey ?? this.ownerPubkey,
+    isDeleted: isDeleted ?? this.isDeleted,
+    rumorEventJson: rumorEventJson.present
+        ? rumorEventJson.value
+        : this.rumorEventJson,
+    publishStatus: publishStatus.present
+        ? publishStatus.value
+        : this.publishStatus,
+  );
+  DmReactionRow copyWithCompanion(DmMessageReactionsCompanion data) {
+    return DmReactionRow(
+      id: data.id.present ? data.id.value : this.id,
+      conversationId: data.conversationId.present
+          ? data.conversationId.value
+          : this.conversationId,
+      targetMessageId: data.targetMessageId.present
+          ? data.targetMessageId.value
+          : this.targetMessageId,
+      targetMessageAuthor: data.targetMessageAuthor.present
+          ? data.targetMessageAuthor.value
+          : this.targetMessageAuthor,
+      reactorPubkey: data.reactorPubkey.present
+          ? data.reactorPubkey.value
+          : this.reactorPubkey,
+      emoji: data.emoji.present ? data.emoji.value : this.emoji,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      giftWrapId: data.giftWrapId.present
+          ? data.giftWrapId.value
+          : this.giftWrapId,
+      ownerPubkey: data.ownerPubkey.present
+          ? data.ownerPubkey.value
+          : this.ownerPubkey,
+      isDeleted: data.isDeleted.present ? data.isDeleted.value : this.isDeleted,
+      rumorEventJson: data.rumorEventJson.present
+          ? data.rumorEventJson.value
+          : this.rumorEventJson,
+      publishStatus: data.publishStatus.present
+          ? data.publishStatus.value
+          : this.publishStatus,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DmReactionRow(')
+          ..write('id: $id, ')
+          ..write('conversationId: $conversationId, ')
+          ..write('targetMessageId: $targetMessageId, ')
+          ..write('targetMessageAuthor: $targetMessageAuthor, ')
+          ..write('reactorPubkey: $reactorPubkey, ')
+          ..write('emoji: $emoji, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('giftWrapId: $giftWrapId, ')
+          ..write('ownerPubkey: $ownerPubkey, ')
+          ..write('isDeleted: $isDeleted, ')
+          ..write('rumorEventJson: $rumorEventJson, ')
+          ..write('publishStatus: $publishStatus')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    conversationId,
+    targetMessageId,
+    targetMessageAuthor,
+    reactorPubkey,
+    emoji,
+    createdAt,
+    giftWrapId,
+    ownerPubkey,
+    isDeleted,
+    rumorEventJson,
+    publishStatus,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is DmReactionRow &&
+          other.id == this.id &&
+          other.conversationId == this.conversationId &&
+          other.targetMessageId == this.targetMessageId &&
+          other.targetMessageAuthor == this.targetMessageAuthor &&
+          other.reactorPubkey == this.reactorPubkey &&
+          other.emoji == this.emoji &&
+          other.createdAt == this.createdAt &&
+          other.giftWrapId == this.giftWrapId &&
+          other.ownerPubkey == this.ownerPubkey &&
+          other.isDeleted == this.isDeleted &&
+          other.rumorEventJson == this.rumorEventJson &&
+          other.publishStatus == this.publishStatus);
+}
+
+class DmMessageReactionsCompanion extends UpdateCompanion<DmReactionRow> {
+  final Value<String> id;
+  final Value<String> conversationId;
+  final Value<String> targetMessageId;
+  final Value<String> targetMessageAuthor;
+  final Value<String> reactorPubkey;
+  final Value<String> emoji;
+  final Value<int> createdAt;
+  final Value<String?> giftWrapId;
+  final Value<String> ownerPubkey;
+  final Value<bool> isDeleted;
+  final Value<String?> rumorEventJson;
+  final Value<String?> publishStatus;
+  final Value<int> rowid;
+  const DmMessageReactionsCompanion({
+    this.id = const Value.absent(),
+    this.conversationId = const Value.absent(),
+    this.targetMessageId = const Value.absent(),
+    this.targetMessageAuthor = const Value.absent(),
+    this.reactorPubkey = const Value.absent(),
+    this.emoji = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.giftWrapId = const Value.absent(),
+    this.ownerPubkey = const Value.absent(),
+    this.isDeleted = const Value.absent(),
+    this.rumorEventJson = const Value.absent(),
+    this.publishStatus = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  DmMessageReactionsCompanion.insert({
+    required String id,
+    required String conversationId,
+    required String targetMessageId,
+    required String targetMessageAuthor,
+    required String reactorPubkey,
+    required String emoji,
+    required int createdAt,
+    this.giftWrapId = const Value.absent(),
+    required String ownerPubkey,
+    this.isDeleted = const Value.absent(),
+    this.rumorEventJson = const Value.absent(),
+    this.publishStatus = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       conversationId = Value(conversationId),
+       targetMessageId = Value(targetMessageId),
+       targetMessageAuthor = Value(targetMessageAuthor),
+       reactorPubkey = Value(reactorPubkey),
+       emoji = Value(emoji),
+       createdAt = Value(createdAt),
+       ownerPubkey = Value(ownerPubkey);
+  static Insertable<DmReactionRow> custom({
+    Expression<String>? id,
+    Expression<String>? conversationId,
+    Expression<String>? targetMessageId,
+    Expression<String>? targetMessageAuthor,
+    Expression<String>? reactorPubkey,
+    Expression<String>? emoji,
+    Expression<int>? createdAt,
+    Expression<String>? giftWrapId,
+    Expression<String>? ownerPubkey,
+    Expression<bool>? isDeleted,
+    Expression<String>? rumorEventJson,
+    Expression<String>? publishStatus,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (conversationId != null) 'conversation_id': conversationId,
+      if (targetMessageId != null) 'target_message_id': targetMessageId,
+      if (targetMessageAuthor != null)
+        'target_message_author': targetMessageAuthor,
+      if (reactorPubkey != null) 'reactor_pubkey': reactorPubkey,
+      if (emoji != null) 'emoji': emoji,
+      if (createdAt != null) 'created_at': createdAt,
+      if (giftWrapId != null) 'gift_wrap_id': giftWrapId,
+      if (ownerPubkey != null) 'owner_pubkey': ownerPubkey,
+      if (isDeleted != null) 'is_deleted': isDeleted,
+      if (rumorEventJson != null) 'rumor_event_json': rumorEventJson,
+      if (publishStatus != null) 'publish_status': publishStatus,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  DmMessageReactionsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? conversationId,
+    Value<String>? targetMessageId,
+    Value<String>? targetMessageAuthor,
+    Value<String>? reactorPubkey,
+    Value<String>? emoji,
+    Value<int>? createdAt,
+    Value<String?>? giftWrapId,
+    Value<String>? ownerPubkey,
+    Value<bool>? isDeleted,
+    Value<String?>? rumorEventJson,
+    Value<String?>? publishStatus,
+    Value<int>? rowid,
+  }) {
+    return DmMessageReactionsCompanion(
+      id: id ?? this.id,
+      conversationId: conversationId ?? this.conversationId,
+      targetMessageId: targetMessageId ?? this.targetMessageId,
+      targetMessageAuthor: targetMessageAuthor ?? this.targetMessageAuthor,
+      reactorPubkey: reactorPubkey ?? this.reactorPubkey,
+      emoji: emoji ?? this.emoji,
+      createdAt: createdAt ?? this.createdAt,
+      giftWrapId: giftWrapId ?? this.giftWrapId,
+      ownerPubkey: ownerPubkey ?? this.ownerPubkey,
+      isDeleted: isDeleted ?? this.isDeleted,
+      rumorEventJson: rumorEventJson ?? this.rumorEventJson,
+      publishStatus: publishStatus ?? this.publishStatus,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (conversationId.present) {
+      map['conversation_id'] = Variable<String>(conversationId.value);
+    }
+    if (targetMessageId.present) {
+      map['target_message_id'] = Variable<String>(targetMessageId.value);
+    }
+    if (targetMessageAuthor.present) {
+      map['target_message_author'] = Variable<String>(
+        targetMessageAuthor.value,
+      );
+    }
+    if (reactorPubkey.present) {
+      map['reactor_pubkey'] = Variable<String>(reactorPubkey.value);
+    }
+    if (emoji.present) {
+      map['emoji'] = Variable<String>(emoji.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (giftWrapId.present) {
+      map['gift_wrap_id'] = Variable<String>(giftWrapId.value);
+    }
+    if (ownerPubkey.present) {
+      map['owner_pubkey'] = Variable<String>(ownerPubkey.value);
+    }
+    if (isDeleted.present) {
+      map['is_deleted'] = Variable<bool>(isDeleted.value);
+    }
+    if (rumorEventJson.present) {
+      map['rumor_event_json'] = Variable<String>(rumorEventJson.value);
+    }
+    if (publishStatus.present) {
+      map['publish_status'] = Variable<String>(publishStatus.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DmMessageReactionsCompanion(')
+          ..write('id: $id, ')
+          ..write('conversationId: $conversationId, ')
+          ..write('targetMessageId: $targetMessageId, ')
+          ..write('targetMessageAuthor: $targetMessageAuthor, ')
+          ..write('reactorPubkey: $reactorPubkey, ')
+          ..write('emoji: $emoji, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('giftWrapId: $giftWrapId, ')
+          ..write('ownerPubkey: $ownerPubkey, ')
+          ..write('isDeleted: $isDeleted, ')
+          ..write('rumorEventJson: $rumorEventJson, ')
+          ..write('publishStatus: $publishStatus, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $ConversationsTable extends Conversations
     with TableInfo<$ConversationsTable, ConversationRow> {
   @override
@@ -11433,6 +12221,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $DraftsTable drafts = $DraftsTable(this);
   late final $ClipsTable clips = $ClipsTable(this);
   late final $DirectMessagesTable directMessages = $DirectMessagesTable(this);
+  late final $DmMessageReactionsTable dmMessageReactions =
+      $DmMessageReactionsTable(this);
   late final $ConversationsTable conversations = $ConversationsTable(this);
   late final $OutgoingDmsTable outgoingDms = $OutgoingDmsTable(this);
   late final UserProfilesDao userProfilesDao = UserProfilesDao(
@@ -11472,6 +12262,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final DirectMessagesDao directMessagesDao = DirectMessagesDao(
     this as AppDatabase,
   );
+  late final DmReactionsDao dmReactionsDao = DmReactionsDao(
+    this as AppDatabase,
+  );
   late final ConversationsDao conversationsDao = ConversationsDao(
     this as AppDatabase,
   );
@@ -11497,6 +12290,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     drafts,
     clips,
     directMessages,
+    dmMessageReactions,
     conversations,
     outgoingDms,
   ];
@@ -15965,6 +16759,364 @@ typedef $$DirectMessagesTableProcessedTableManager =
       DirectMessageRow,
       PrefetchHooks Function()
     >;
+typedef $$DmMessageReactionsTableCreateCompanionBuilder =
+    DmMessageReactionsCompanion Function({
+      required String id,
+      required String conversationId,
+      required String targetMessageId,
+      required String targetMessageAuthor,
+      required String reactorPubkey,
+      required String emoji,
+      required int createdAt,
+      Value<String?> giftWrapId,
+      required String ownerPubkey,
+      Value<bool> isDeleted,
+      Value<String?> rumorEventJson,
+      Value<String?> publishStatus,
+      Value<int> rowid,
+    });
+typedef $$DmMessageReactionsTableUpdateCompanionBuilder =
+    DmMessageReactionsCompanion Function({
+      Value<String> id,
+      Value<String> conversationId,
+      Value<String> targetMessageId,
+      Value<String> targetMessageAuthor,
+      Value<String> reactorPubkey,
+      Value<String> emoji,
+      Value<int> createdAt,
+      Value<String?> giftWrapId,
+      Value<String> ownerPubkey,
+      Value<bool> isDeleted,
+      Value<String?> rumorEventJson,
+      Value<String?> publishStatus,
+      Value<int> rowid,
+    });
+
+class $$DmMessageReactionsTableFilterComposer
+    extends Composer<_$AppDatabase, $DmMessageReactionsTable> {
+  $$DmMessageReactionsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get targetMessageId => $composableBuilder(
+    column: $table.targetMessageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get targetMessageAuthor => $composableBuilder(
+    column: $table.targetMessageAuthor,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get reactorPubkey => $composableBuilder(
+    column: $table.reactorPubkey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get emoji => $composableBuilder(
+    column: $table.emoji,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get giftWrapId => $composableBuilder(
+    column: $table.giftWrapId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ownerPubkey => $composableBuilder(
+    column: $table.ownerPubkey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isDeleted => $composableBuilder(
+    column: $table.isDeleted,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get rumorEventJson => $composableBuilder(
+    column: $table.rumorEventJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get publishStatus => $composableBuilder(
+    column: $table.publishStatus,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$DmMessageReactionsTableOrderingComposer
+    extends Composer<_$AppDatabase, $DmMessageReactionsTable> {
+  $$DmMessageReactionsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get targetMessageId => $composableBuilder(
+    column: $table.targetMessageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get targetMessageAuthor => $composableBuilder(
+    column: $table.targetMessageAuthor,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get reactorPubkey => $composableBuilder(
+    column: $table.reactorPubkey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get emoji => $composableBuilder(
+    column: $table.emoji,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get giftWrapId => $composableBuilder(
+    column: $table.giftWrapId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ownerPubkey => $composableBuilder(
+    column: $table.ownerPubkey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isDeleted => $composableBuilder(
+    column: $table.isDeleted,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get rumorEventJson => $composableBuilder(
+    column: $table.rumorEventJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get publishStatus => $composableBuilder(
+    column: $table.publishStatus,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$DmMessageReactionsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $DmMessageReactionsTable> {
+  $$DmMessageReactionsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get targetMessageId => $composableBuilder(
+    column: $table.targetMessageId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get targetMessageAuthor => $composableBuilder(
+    column: $table.targetMessageAuthor,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get reactorPubkey => $composableBuilder(
+    column: $table.reactorPubkey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get emoji =>
+      $composableBuilder(column: $table.emoji, builder: (column) => column);
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get giftWrapId => $composableBuilder(
+    column: $table.giftWrapId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get ownerPubkey => $composableBuilder(
+    column: $table.ownerPubkey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get isDeleted =>
+      $composableBuilder(column: $table.isDeleted, builder: (column) => column);
+
+  GeneratedColumn<String> get rumorEventJson => $composableBuilder(
+    column: $table.rumorEventJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get publishStatus => $composableBuilder(
+    column: $table.publishStatus,
+    builder: (column) => column,
+  );
+}
+
+class $$DmMessageReactionsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $DmMessageReactionsTable,
+          DmReactionRow,
+          $$DmMessageReactionsTableFilterComposer,
+          $$DmMessageReactionsTableOrderingComposer,
+          $$DmMessageReactionsTableAnnotationComposer,
+          $$DmMessageReactionsTableCreateCompanionBuilder,
+          $$DmMessageReactionsTableUpdateCompanionBuilder,
+          (
+            DmReactionRow,
+            BaseReferences<
+              _$AppDatabase,
+              $DmMessageReactionsTable,
+              DmReactionRow
+            >,
+          ),
+          DmReactionRow,
+          PrefetchHooks Function()
+        > {
+  $$DmMessageReactionsTableTableManager(
+    _$AppDatabase db,
+    $DmMessageReactionsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$DmMessageReactionsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$DmMessageReactionsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$DmMessageReactionsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> conversationId = const Value.absent(),
+                Value<String> targetMessageId = const Value.absent(),
+                Value<String> targetMessageAuthor = const Value.absent(),
+                Value<String> reactorPubkey = const Value.absent(),
+                Value<String> emoji = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<String?> giftWrapId = const Value.absent(),
+                Value<String> ownerPubkey = const Value.absent(),
+                Value<bool> isDeleted = const Value.absent(),
+                Value<String?> rumorEventJson = const Value.absent(),
+                Value<String?> publishStatus = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => DmMessageReactionsCompanion(
+                id: id,
+                conversationId: conversationId,
+                targetMessageId: targetMessageId,
+                targetMessageAuthor: targetMessageAuthor,
+                reactorPubkey: reactorPubkey,
+                emoji: emoji,
+                createdAt: createdAt,
+                giftWrapId: giftWrapId,
+                ownerPubkey: ownerPubkey,
+                isDeleted: isDeleted,
+                rumorEventJson: rumorEventJson,
+                publishStatus: publishStatus,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String conversationId,
+                required String targetMessageId,
+                required String targetMessageAuthor,
+                required String reactorPubkey,
+                required String emoji,
+                required int createdAt,
+                Value<String?> giftWrapId = const Value.absent(),
+                required String ownerPubkey,
+                Value<bool> isDeleted = const Value.absent(),
+                Value<String?> rumorEventJson = const Value.absent(),
+                Value<String?> publishStatus = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => DmMessageReactionsCompanion.insert(
+                id: id,
+                conversationId: conversationId,
+                targetMessageId: targetMessageId,
+                targetMessageAuthor: targetMessageAuthor,
+                reactorPubkey: reactorPubkey,
+                emoji: emoji,
+                createdAt: createdAt,
+                giftWrapId: giftWrapId,
+                ownerPubkey: ownerPubkey,
+                isDeleted: isDeleted,
+                rumorEventJson: rumorEventJson,
+                publishStatus: publishStatus,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$DmMessageReactionsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $DmMessageReactionsTable,
+      DmReactionRow,
+      $$DmMessageReactionsTableFilterComposer,
+      $$DmMessageReactionsTableOrderingComposer,
+      $$DmMessageReactionsTableAnnotationComposer,
+      $$DmMessageReactionsTableCreateCompanionBuilder,
+      $$DmMessageReactionsTableUpdateCompanionBuilder,
+      (
+        DmReactionRow,
+        BaseReferences<_$AppDatabase, $DmMessageReactionsTable, DmReactionRow>,
+      ),
+      DmReactionRow,
+      PrefetchHooks Function()
+    >;
 typedef $$ConversationsTableCreateCompanionBuilder =
     ConversationsCompanion Function({
       required String id,
@@ -16817,6 +17969,8 @@ class $AppDatabaseManager {
       $$ClipsTableTableManager(_db, _db.clips);
   $$DirectMessagesTableTableManager get directMessages =>
       $$DirectMessagesTableTableManager(_db, _db.directMessages);
+  $$DmMessageReactionsTableTableManager get dmMessageReactions =>
+      $$DmMessageReactionsTableTableManager(_db, _db.dmMessageReactions);
   $$ConversationsTableTableManager get conversations =>
       $$ConversationsTableTableManager(_db, _db.conversations);
   $$OutgoingDmsTableTableManager get outgoingDms =>

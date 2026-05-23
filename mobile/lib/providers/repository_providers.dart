@@ -458,10 +458,52 @@ Future<MuteService> muteService(Ref ref) async {
 /// Non-nullable: the repository works without keys at construction time.
 /// Read operations return cached/empty data; write operations check keys.
 @Riverpod(keepAlive: true)
+DmReactionsRepository dmReactionsRepository(Ref ref) {
+  final db = ref.watch(databaseProvider);
+  final repository = DmReactionsRepository(
+    reactionsDao: db.dmReactionsDao,
+    errorReporter: (error, stackTrace, {required site}) {
+      unawaited(
+        CrashReportingService.instance.recordError(
+          error,
+          stackTrace,
+          reason: 'DmReactionsRepository.$site',
+        ),
+      );
+    },
+  );
+  ref.onDispose(repository.clearCredentials);
+
+  final nostrService = ref.watch(nostrServiceProvider);
+  final isReady = ref.watch(nostrSessionProvider).isReadyForActiveClient;
+  if (!isReady) {
+    repository.clearCredentials();
+    return repository;
+  }
+
+  final publicKey = nostrService.publicKey;
+  if (publicKey.isEmpty) {
+    repository.clearCredentials();
+    return repository;
+  }
+
+  repository.setCredentials(
+    userPubkey: publicKey,
+    messageService: NIP17MessageService(
+      signer: nostrService.signer,
+      senderPublicKey: publicKey,
+      nostrService: nostrService,
+    ),
+  );
+  return repository;
+}
+
+@Riverpod(keepAlive: true)
 DmRepository dmRepository(Ref ref) {
   final nostrService = ref.watch(nostrServiceProvider);
   final db = ref.watch(databaseProvider);
   final prefs = ref.watch(sharedPreferencesProvider);
+  final reactionsRepository = ref.watch(dmReactionsRepositoryProvider);
 
   final repository = DmRepository(
     nostrClient: nostrService,
@@ -469,6 +511,7 @@ DmRepository dmRepository(Ref ref) {
     conversationsDao: db.conversationsDao,
     outgoingDmsDao: db.outgoingDmsDao,
     syncState: DmSyncState(prefs),
+    reactionsRepository: reactionsRepository,
     errorReporter: (error, stackTrace, {required site}) {
       unawaited(
         CrashReportingService.instance.recordError(
@@ -490,17 +533,17 @@ DmRepository dmRepository(Ref ref) {
     final publicKey = nostrService.publicKey;
     if (publicKey.isNotEmpty) {
       final signer = nostrService.signer;
+      final messageService = NIP17MessageService(
+        signer: signer,
+        senderPublicKey: publicKey,
+        nostrService: nostrService,
+      );
 
       repository.setCredentials(
         userPubkey: publicKey,
         signer: signer,
-        messageService: NIP17MessageService(
-          signer: signer,
-          senderPublicKey: publicKey,
-          nostrService: nostrService,
-        ),
+        messageService: messageService,
       );
-
       // Open the gift-wrap subscription for the whole authenticated
       // session. Bounded by `since: newestSyncedAt - 2d` and isolate
       // decrypt so cold start stays cheap regardless of lifetime DM count.

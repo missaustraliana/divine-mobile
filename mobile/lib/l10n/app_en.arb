@@ -3049,6 +3049,36 @@
   "@dmMessageActionReport": {
     "description": "Long-press menu action on a received DM bubble that opens the report flow for that specific message."
   },
+  "dmReactionAddCustomA11yLabel": "Add custom emoji reaction",
+  "@dmReactionAddCustomA11yLabel": {
+    "description": "Screen-reader label for the '+' button at the end of the quick-row that opens the full emoji picker."
+  },
+  "dmReactionChipOwnA11yLabel": "Your reaction: {emoji}",
+  "@dmReactionChipOwnA11yLabel": {
+    "description": "Screen-reader label for a reaction chip created by the current account.",
+    "placeholders": { "emoji": { "type": "String" } }
+  },
+  "dmReactionChipOtherA11yLabel": "{name} reacted with {emoji}",
+  "@dmReactionChipOtherA11yLabel": {
+    "description": "Screen-reader label for a reaction chip created by another participant.",
+    "placeholders": {
+      "name": { "type": "String" },
+      "emoji": { "type": "String" }
+    }
+  },
+  "dmReactionChipPendingA11yLabel": "Sending reaction: {emoji}",
+  "@dmReactionChipPendingA11yLabel": {
+    "description": "Screen-reader label for a reaction chip whose publish is in flight.",
+    "placeholders": { "emoji": { "type": "String" } }
+  },
+  "dmReactionChipFailedA11yLabel": "Reaction failed, double tap to retry",
+  "@dmReactionChipFailedA11yLabel": {
+    "description": "Screen-reader label for a reaction chip whose publish failed."
+  },
+  "dmReactionChipRetryAnnouncement": "Retrying reaction",
+  "@dmReactionChipRetryAnnouncement": {
+    "description": "Live-region announcement on chip retry."
+  },
   "dmFormatBold": "Bold",
   "@dmFormatBold": {
     "description": "Label for the Bold formatting action in the DM composer's text-selection context menu. Wraps the selected text with markdown bold markers (e.g. **text**)."

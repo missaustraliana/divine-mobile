@@ -785,6 +785,94 @@ class DirectMessages extends Table {
   ];
 }
 
+/// Stores NIP-25 emoji reactions on NIP-17 direct messages.
+///
+/// Reactions ride the same seal+gift-wrap envelope as kind 14/15 messages
+/// (NIP-17 spec line 14: "kind 7 reactions may be sent to an encrypted
+/// chat"). Each row stores one reaction by one user on one target message.
+///
+/// Dedup is `(id, owner_pubkey)` — the reaction rumor id is stable across
+/// the recipient + self gift-wraps; on a multi-device account both wraps
+/// can arrive locally and must collapse to one row.
+@DataClassName('DmReactionRow')
+class DmMessageReactions extends Table {
+  @override
+  String get tableName => 'dm_message_reactions';
+
+  /// The reaction rumor event id (kind 7). Stable across recipient + self
+  /// wraps. Combined with [ownerPubkey] it forms the dedup key.
+  TextColumn get id => text()();
+
+  /// Conversation the target message belongs to. Indexed for chip render.
+  TextColumn get conversationId => text().named('conversation_id')();
+
+  /// Rumor id of the kind-14/15 message being reacted to.
+  TextColumn get targetMessageId => text().named('target_message_id')();
+
+  /// Pubkey of the author of the target message. Carried so future detail
+  /// sheets and NIP-25 `p` tag echoes don't need a join.
+  TextColumn get targetMessageAuthor => text().named('target_message_author')();
+
+  /// Pubkey of the user who created this reaction.
+  TextColumn get reactorPubkey => text().named('reactor_pubkey')();
+
+  /// Reaction content. Almost always an emoji codepoint; per NIP-25 may
+  /// also be a NIP-30 `:shortcode:` (rendered as-is at v1, no lookup).
+  TextColumn get emoji => text()();
+
+  /// Unix timestamp from the rumor's `created_at`.
+  IntColumn get createdAt => integer().named('created_at')();
+
+  /// The first gift-wrap id we observed carrying this reaction. Kept for
+  /// dedup-of-incoming and for relay-replay protection. Nullable for
+  /// optimistic rows that have not yet been published.
+  TextColumn get giftWrapId => text().nullable().named('gift_wrap_id')();
+
+  /// Hex public key of the account viewing this reaction (multi-account
+  /// isolation).
+  TextColumn get ownerPubkey => text().named('owner_pubkey')();
+
+  /// Soft-delete marker for NIP-09 kind 5 deletions and for own-reaction
+  /// supersede (cap-at-one). Soft delete preserves the audit trail and
+  /// blocks stale relay re-delivery from "un-deleting" the row.
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+
+  /// Serialized rumor JSON for pending rows that may need retry.
+  /// Null once successfully published.
+  TextColumn get rumorEventJson =>
+      text().nullable().named('rumor_event_json')();
+
+  /// Publish status for outgoing rows; null for incoming (received from
+  /// relay). Values: `pending`, `sent`, `failed`.
+  TextColumn get publishStatus => text().nullable().named('publish_status')();
+
+  @override
+  Set<Column> get primaryKey => {id, ownerPubkey};
+
+  List<Index> get indexes => [
+    Index(
+      'idx_dm_reactions_target_live',
+      'CREATE INDEX IF NOT EXISTS idx_dm_reactions_target_live '
+          'ON dm_message_reactions '
+          '(conversation_id, target_message_id) '
+          'WHERE is_deleted = 0',
+    ),
+    Index(
+      'idx_dm_reactions_reactor',
+      'CREATE INDEX IF NOT EXISTS idx_dm_reactions_reactor '
+          'ON dm_message_reactions '
+          '(target_message_id, reactor_pubkey) '
+          'WHERE is_deleted = 0',
+    ),
+    Index(
+      'idx_dm_reactions_owner_created',
+      'CREATE INDEX IF NOT EXISTS idx_dm_reactions_owner_created '
+          'ON dm_message_reactions (owner_pubkey, created_at)',
+    ),
+  ];
+}
+
 /// Denormalized conversation metadata for fast list queries.
 ///
 /// Each row represents a unique chat room defined by the set of participant

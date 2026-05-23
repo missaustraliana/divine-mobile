@@ -1,6 +1,7 @@
 export 'clips_dao.dart';
 export 'conversations_dao.dart';
 export 'direct_messages_dao.dart';
+export 'dm_reactions_dao.dart';
 export 'drafts_dao.dart';
 export 'hashtag_stats_dao.dart';
 export 'nip05_verifications_dao.dart';

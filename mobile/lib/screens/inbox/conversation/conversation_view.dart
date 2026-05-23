@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:models/models.dart';
 import 'package:openvine/blocs/dm/conversation/conversation_bloc.dart';
+import 'package:openvine/blocs/dm/reactions/conversation_reactions_cubit.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/l10n/localized_time_formatter.dart';
 import 'package:openvine/providers/app_providers.dart';
@@ -361,22 +362,45 @@ class _MessageList extends StatelessWidget {
     BuildContext context,
     DmMessage message,
     bool isSent,
+    DmDeliveryStatus deliveryStatus,
   ) async {
     final videoUrl = tryExtractDivineVideoUrl(message.content);
-    final action = await MessageActionsSheet.show(
+    // Reaction picker hidden on failed-send own DMs — reacting to a
+    // message the recipient never received is meaningless (#4633 round 25).
+    final showPicker = !(isSent && deliveryStatus == DmDeliveryStatus.failed);
+    final result = await ReactionPickerOverlay.show(
       context: context,
       isSent: isSent,
       isVideoShare: videoUrl != null,
+      showPicker: showPicker,
     );
-    if (action == null) return;
+    if (result == null) return;
     if (!context.mounted) return;
 
+    if (result.emoji != null) {
+      context.read<ConversationReactionsCubit>().add(
+        ConversationReactionToggled(
+          conversationId: message.conversationId,
+          messageId: message.id,
+          messageAuthorPubkey: message.senderPubkey,
+          emoji: result.emoji!,
+        ),
+      );
+      return;
+    }
+    if (result.openFullPicker) {
+      // Full picker integration is staged for v1 by triggering the
+      // emoji_picker_flutter sheet. Caller-side gating keeps this
+      // off the critical path while the dependency is wired in.
+      // TODO(#4633): wire full emoji_picker_flutter sheet.
+      return;
+    }
+    final action = result.action;
+    if (action == null) return;
     switch (action) {
       case MessageAction.copy:
         await ClipboardUtils.copy(context, message.content);
       case MessageAction.copyVideoUrl:
-        // Defensive: the sheet only surfaces this action when videoUrl
-        // is non-null, but guard against a future caller change.
         if (videoUrl == null) return;
         await ClipboardUtils.copy(context, videoUrl);
       case MessageAction.delete:
@@ -435,34 +459,55 @@ class _MessageList extends StatelessWidget {
             index == 0 ||
             messages[index - 1].senderPubkey != message.senderPubkey;
 
-        MessageBubble buildBubble(DmDeliveryStatus status) => MessageBubble(
-          message: message.content,
-          timestamp: LocalizedTimeFormatter.formatMessageTime(
-            context.l10n,
-            message.createdAt,
-            locale: Localizations.localeOf(context).toLanguageTag(),
-            use24Hour: MediaQuery.of(context).alwaysUse24HourFormat,
-          ),
-          isSent: isSent,
-          isFirstInGroup: isFirstInGroup,
-          isLastInGroup: isLastInGroup,
-          onLongPress: () => _onMessageLongPress(context, message, isSent),
-          deliveryStatus: status,
-        );
+        Widget buildBubbleWithReactions(DmDeliveryStatus status) {
+          final bubble = MessageBubble(
+            message: message.content,
+            timestamp: LocalizedTimeFormatter.formatMessageTime(
+              context.l10n,
+              message.createdAt,
+              locale: Localizations.localeOf(context).toLanguageTag(),
+              use24Hour: MediaQuery.of(context).alwaysUse24HourFormat,
+            ),
+            isSent: isSent,
+            isFirstInGroup: isFirstInGroup,
+            isLastInGroup: isLastInGroup,
+            onLongPress: () =>
+                _onMessageLongPress(context, message, isSent, status),
+            deliveryStatus: status,
+          );
+          return Column(
+            crossAxisAlignment: isSent
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
+            children: [
+              bubble,
+              ReactionsRow(
+                conversationId: message.conversationId,
+                messageId: message.id,
+                messageAuthorPubkey: message.senderPubkey,
+                ownerPubkey: currentPubkey,
+                isSentByMe: isSent,
+                otherParticipantName: senderDisplayName,
+              ),
+            ],
+          );
+        }
 
         // Per-row BlocSelector scopes rebuilds to just the indicator's
         // status — the bubble body stays cached across watchOutgoing
         // ticks affecting other rows. Received bubbles never read the
         // outgoing queue, so they bypass the selector and short-circuit
         // to `delivered`.
-        if (!isSent) return buildBubble(DmDeliveryStatus.delivered);
+        if (!isSent) {
+          return buildBubbleWithReactions(DmDeliveryStatus.delivered);
+        }
         return BlocSelector<
           ConversationBloc,
           ConversationState,
           DmDeliveryStatus
         >(
           selector: (state) => state.statusFor(message.id),
-          builder: (_, status) => buildBubble(status),
+          builder: (_, status) => buildBubbleWithReactions(status),
         );
       },
     );

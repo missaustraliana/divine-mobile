@@ -31,6 +31,7 @@ const _notificationRetentionDays = 7;
     Drafts,
     Clips,
     DirectMessages,
+    DmMessageReactions,
     Conversations,
     OutgoingDms,
   ],
@@ -49,6 +50,7 @@ const _notificationRetentionDays = 7;
     DraftsDao,
     ClipsDao,
     DirectMessagesDao,
+    DmReactionsDao,
     ConversationsDao,
     OutgoingDmsDao,
   ],
@@ -484,6 +486,50 @@ class AppDatabase extends _$AppDatabase {
     await customStatement('''
       CREATE INDEX IF NOT EXISTS idx_outgoing_dms_queued_at
       ON outgoing_dms (queued_at)
+    ''');
+
+    // Check if dm_message_reactions table exists, create if missing.
+    // Added for #4633 (DM emoji reactions). Schema version stays at 1 —
+    // same runtime CREATE-IF-NOT-EXISTS pattern as outgoing_dms above.
+    final dmReactionsResult = await customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table' "
+      "AND name='dm_message_reactions'",
+    ).get();
+
+    if (dmReactionsResult.isEmpty) {
+      await customStatement('''
+        CREATE TABLE dm_message_reactions (
+          id TEXT NOT NULL,
+          conversation_id TEXT NOT NULL,
+          target_message_id TEXT NOT NULL,
+          target_message_author TEXT NOT NULL,
+          reactor_pubkey TEXT NOT NULL,
+          emoji TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          gift_wrap_id TEXT,
+          owner_pubkey TEXT NOT NULL,
+          is_deleted INTEGER NOT NULL DEFAULT 0,
+          rumor_event_json TEXT,
+          publish_status TEXT,
+          PRIMARY KEY (id, owner_pubkey)
+        )
+      ''');
+    }
+    // Create indexes unconditionally so the runtime path matches Drift's
+    // m.createAll() output (the schema-parity test pins this).
+    await customStatement('''
+      CREATE INDEX IF NOT EXISTS idx_dm_reactions_target_live
+      ON dm_message_reactions (conversation_id, target_message_id)
+      WHERE is_deleted = 0
+    ''');
+    await customStatement('''
+      CREATE INDEX IF NOT EXISTS idx_dm_reactions_reactor
+      ON dm_message_reactions (target_message_id, reactor_pubkey)
+      WHERE is_deleted = 0
+    ''');
+    await customStatement('''
+      CREATE INDEX IF NOT EXISTS idx_dm_reactions_owner_created
+      ON dm_message_reactions (owner_pubkey, created_at)
     ''');
 
     // Populate new columns from existing JSON data blobs

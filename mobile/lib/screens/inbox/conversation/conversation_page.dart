@@ -8,6 +8,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:openvine/blocs/dm/conversation/collaborator_invite_actions_cubit.dart';
 import 'package:openvine/blocs/dm/conversation/conversation_bloc.dart';
+import 'package:openvine/blocs/dm/reactions/conversation_reactions_cubit.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/screens/inbox/conversation/conversation_view.dart';
 
@@ -41,6 +42,7 @@ class ConversationPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final dmRepository = ref.watch(dmRepositoryProvider);
+    final reactionsRepository = ref.watch(dmReactionsRepositoryProvider);
     final inviteStateStore = ref.watch(collaboratorInviteStateStoreProvider);
     final inviteResponseService = ref.watch(
       collaboratorResponseServiceProvider,
@@ -68,6 +70,17 @@ class ConversationPage extends ConsumerWidget {
             dmRepository: dmRepository,
             conversationId: conversationId,
           )..add(const ConversationStarted()),
+        ),
+        // Reactions cubit; same identity-keying as ConversationBloc.
+        BlocProvider<ConversationReactionsCubit>(
+          key: ValueKey((reactionsRepository, currentPubkey, 'reactions')),
+          create: (_) =>
+              ConversationReactionsCubit(
+                reactionsRepository: reactionsRepository,
+                ownerPubkey: currentPubkey,
+              )..add(
+                ConversationReactionsStarted(conversationId: conversationId),
+              ),
         ),
         // Same identity-keying as ConversationBloc above: the response
         // service composes `authServiceProvider` + `nostrServiceProvider`
