@@ -1722,11 +1722,12 @@ class VideoFeedController extends ChangeNotifier {
       // Classify the error immediately so the type is available if retry
       // exhausts all sources and _markLoadError is called without a message.
       _errorTypes[index] = _classifyError(error, index);
-      // Only act on errors during initial load. Once the video is playing
-      // successfully (LoadState.ready), mpv may emit non-critical errors
-      // (e.g. on loop seeks, transient network hiccups) that should not
-      // trigger a source failover.
-      if (loadState == LoadState.loading) {
+      // Only fail over on ready-state errors when the error is classified as
+      // a critical source failure (401/403/404). Generic ready-state errors
+      // are often transient mpv noise during loops or rebuffers.
+      if (loadState == LoadState.loading ||
+          (loadState == LoadState.ready &&
+              _errorTypes[index] != VideoErrorType.generic)) {
         unawaited(_retryCurrentVideoWithNextSource(index));
       }
     });
