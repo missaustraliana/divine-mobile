@@ -5538,6 +5538,47 @@ class AppLocalizationsId extends AppLocalizations {
   String get curatedListVideoNotAvailable => 'Video tidak tersedia';
 
   @override
+  String get curatedListActionsTooltip => 'List actions';
+
+  @override
+  String get curatedListUnfollowAction => 'Unfollow list';
+
+  @override
+  String get curatedListUnfollowedSnack => 'Unfollowed list';
+
+  @override
+  String get curatedListUnfollowFailed => 'Couldn\'t unfollow list';
+
+  @override
+  String get curatedListDeleteConfirmTitle => 'Delete list?';
+
+  @override
+  String get curatedListDeleteConfirmBody =>
+      'This removes the list from relays. Videos in the list will not be deleted.';
+
+  @override
+  String get curatedListDeletedSnack => 'Deleted list';
+
+  @override
+  String get curatedListDeleteFailed => 'Couldn\'t delete list';
+
+  @override
+  String get peopleListsActionsTooltip => 'List actions';
+
+  @override
+  String get listDeleteAction => 'Delete list';
+
+  @override
+  String get peopleListsDeleteConfirmTitle => 'Delete list?';
+
+  @override
+  String get peopleListsDeleteConfirmBody =>
+      'This removes the list for everyone. The people in it will not be unfollowed.';
+
+  @override
+  String get peopleListsDeleteFailed => 'Couldn\'t delete list';
+
+  @override
   String get commonRetry => 'Coba lagi';
 
   @override

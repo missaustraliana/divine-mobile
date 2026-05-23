@@ -3,6 +3,7 @@
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsService;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:models/models.dart' hide LogCategory;
@@ -17,6 +18,8 @@ import 'package:openvine/utils/nostr_key_utils.dart';
 import 'package:openvine/widgets/composable_video_grid.dart';
 import 'package:openvine/widgets/user_name.dart';
 import 'package:unified_logger/unified_logger.dart';
+
+enum _CuratedListAction { delete, unfollow }
 
 class CuratedListFeedScreen extends ConsumerStatefulWidget {
   /// Route name for this screen.
@@ -84,6 +87,7 @@ class _CuratedListFeedScreenState extends ConsumerState<CuratedListFeedScreen> {
               showBackButton: true,
               onBackPressed: context.pop,
               actions: [_buildSubscribeAction()],
+              customActions: _buildListCustomActions(),
             )
           : null,
       body: videosAsync.when(
@@ -157,10 +161,7 @@ class _CuratedListFeedScreenState extends ConsumerState<CuratedListFeedScreen> {
               const SizedBox(height: 16),
               Text(
                 context.l10n.curatedListFailedToLoad,
-                style: const TextStyle(
-                  color: VineTheme.likeRed,
-                  fontSize: 18,
-                ),
+                style: const TextStyle(color: VineTheme.likeRed, fontSize: 18),
               ),
               const SizedBox(height: 8),
               Padding(
@@ -343,6 +344,162 @@ class _CuratedListFeedScreenState extends ConsumerState<CuratedListFeedScreen> {
     );
   }
 
+  List<Widget> _buildListCustomActions() {
+    final action = _primaryListAction();
+    if (action == null) {
+      return const [];
+    }
+
+    return [
+      _CuratedListActionsMenu(
+        action: action,
+        onSelected: (action) {
+          switch (action) {
+            case _CuratedListAction.delete:
+              _confirmDeleteList();
+            case _CuratedListAction.unfollow:
+              _unfollowList();
+          }
+        },
+      ),
+    ];
+  }
+
+  _CuratedListAction? _primaryListAction() {
+    final serviceAsync = ref.watch(curatedListsStateProvider);
+    final service = ref.read(curatedListsStateProvider.notifier).service;
+
+    return serviceAsync.whenOrNull(
+      data: (_) {
+        final isOwned = service?.isOwnedList(widget.listId) ?? false;
+        if (isOwned) {
+          return _CuratedListAction.delete;
+        }
+
+        final isSubscribed =
+            service?.isSubscribedToList(widget.listId) ?? false;
+        if (isSubscribed) {
+          return _CuratedListAction.unfollow;
+        }
+
+        return null;
+      },
+    );
+  }
+
+  Future<void> _confirmDeleteList() async {
+    final l10n = context.l10n;
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: VineTheme.surfaceContainer,
+        title: Text(
+          l10n.curatedListDeleteConfirmTitle,
+          style: VineTheme.titleMediumFont(),
+        ),
+        content: Text(
+          l10n.curatedListDeleteConfirmBody,
+          style: VineTheme.bodyMediumFont(color: VineTheme.secondaryText),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(
+              l10n.commonCancel,
+              style: VineTheme.labelMediumFont(color: VineTheme.secondaryText),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(
+              l10n.commonDelete,
+              style: VineTheme.labelMediumFont(color: VineTheme.error),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldDelete != true || !mounted) {
+      return;
+    }
+
+    await _deleteOwnedList();
+  }
+
+  Future<void> _deleteOwnedList() async {
+    final service = ref.read(curatedListsStateProvider.notifier).service;
+    final didDelete = await service?.deleteOwnedList(widget.listId) ?? false;
+
+    if (!mounted) {
+      return;
+    }
+
+    if (!didDelete) {
+      final message = context.l10n.curatedListDeleteFailed;
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        message,
+        Directionality.of(context),
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: VineTheme.error),
+      );
+      return;
+    }
+
+    ref.invalidate(curatedListsProvider);
+    final message = context.l10n.curatedListDeletedSnack;
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      message,
+      Directionality.of(context),
+    );
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: VineTheme.vineGreen),
+    );
+
+    if (context.canPop()) {
+      context.pop();
+    }
+  }
+
+  Future<void> _unfollowList() async {
+    final service = ref.read(curatedListsStateProvider.notifier).service;
+    final didUnfollow =
+        await service?.unsubscribeFromList(widget.listId) ?? false;
+
+    if (!mounted) {
+      return;
+    }
+
+    if (!didUnfollow) {
+      final message = context.l10n.curatedListUnfollowFailed;
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        message,
+        Directionality.of(context),
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: VineTheme.error),
+      );
+      return;
+    }
+
+    ref.invalidate(curatedListsProvider);
+    final message = context.l10n.curatedListUnfollowedSnack;
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      message,
+      Directionality.of(context),
+    );
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: VineTheme.vineGreen),
+    );
+  }
+
   Future<void> _toggleSubscription() async {
     setState(() {
       _isTogglingSubscription = true;
@@ -402,5 +559,38 @@ class _CuratedListFeedScreenState extends ConsumerState<CuratedListFeedScreen> {
         });
       }
     }
+  }
+}
+
+class _CuratedListActionsMenu extends StatelessWidget {
+  const _CuratedListActionsMenu({
+    required this.action,
+    required this.onSelected,
+  });
+
+  final _CuratedListAction action;
+  final ValueChanged<_CuratedListAction> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<_CuratedListAction>(
+      tooltip: context.l10n.curatedListActionsTooltip,
+      color: VineTheme.surfaceContainer,
+      icon: const DivineIcon(
+        icon: DivineIconName.dotsThreeVertical,
+        color: VineTheme.whiteText,
+      ),
+      onSelected: onSelected,
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: action,
+          child: Text(switch (action) {
+            _CuratedListAction.delete => context.l10n.listDeleteAction,
+            _CuratedListAction.unfollow =>
+              context.l10n.curatedListUnfollowAction,
+          }, style: const TextStyle(color: VineTheme.primaryText)),
+        ),
+      ],
+    );
   }
 }

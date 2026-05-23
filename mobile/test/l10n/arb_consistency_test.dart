@@ -272,6 +272,25 @@ const _knownUntranslatedDebt = {
   'curatedListFailedToLoad',
   'curatedListNoVideosAvailable',
   'curatedListVideoNotAvailable',
+  // Added by curated list overflow actions. Existing locales fall back to
+  // English until the next translation pass.
+  'curatedListActionsTooltip',
+  'curatedListUnfollowAction',
+  'curatedListUnfollowedSnack',
+  'curatedListUnfollowFailed',
+  // Added by owned curated-list delete actions. Existing locales fall back to
+  // English until the next translation pass.
+  'curatedListDeleteConfirmTitle',
+  'curatedListDeleteConfirmBody',
+  'curatedListDeletedSnack',
+  'curatedListDeleteFailed',
+  // Added by owned people-list delete actions. Existing locales fall back to
+  // English until the next translation pass.
+  'peopleListsActionsTooltip',
+  'listDeleteAction',
+  'peopleListsDeleteConfirmTitle',
+  'peopleListsDeleteConfirmBody',
+  'peopleListsDeleteFailed',
   'appsPermissionsTitle',
   'appsPermissionsEmptyTitle',
   'appsPermissionsEmptySubtitle',

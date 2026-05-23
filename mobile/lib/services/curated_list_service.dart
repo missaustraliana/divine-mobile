@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:models/models.dart' hide LogCategory;
 import 'package:nostr_client/nostr_client.dart';
 import 'package:nostr_sdk/event.dart';
+import 'package:nostr_sdk/event_kind.dart';
 import 'package:nostr_sdk/filter.dart';
 import 'package:openvine/services/auth_service.dart';
 import 'package:openvine/utils/curated_list_ext.dart';
@@ -212,6 +213,7 @@ class CuratedListService extends ChangeNotifier {
     try {
       final now = DateTime.now();
       final listId = id ?? 'list_${now.millisecondsSinceEpoch}';
+      final ownerPubkey = _currentAuthenticatedPubkey();
 
       final newList = CuratedList(
         id: listId,
@@ -219,6 +221,7 @@ class CuratedListService extends ChangeNotifier {
         description: description,
         imageUrl: imageUrl,
         videoEventIds: const [],
+        pubkey: ownerPubkey,
         createdAt: now,
         updatedAt: now,
         isPublic: isPublic,
@@ -477,6 +480,95 @@ class CuratedListService extends ChangeNotifier {
       );
       return false;
     }
+  }
+
+  /// Delete a list owned by the current user.
+  ///
+  /// Public lists publish a NIP-09 deletion event for the kind 30005
+  /// coordinate before local state is removed. Private lists are local-only and
+  /// can be removed without relay publication.
+  Future<bool> deleteOwnedList(String listId) async {
+    try {
+      if (listId == defaultListId) {
+        Log.warning(
+          'Cannot delete default list',
+          name: 'CuratedListService',
+          category: LogCategory.system,
+        );
+        return false;
+      }
+
+      final listIndex = _lists.indexWhere((list) => list.id == listId);
+      if (listIndex == -1) {
+        return false;
+      }
+
+      final list = _lists[listIndex];
+      if (!isOwnedList(listId)) {
+        Log.warning(
+          'Cannot delete list not owned by current user: $listId',
+          name: 'CuratedListService',
+          category: LogCategory.system,
+        );
+        return false;
+      }
+
+      if (list.isPublic) {
+        final currentPubkey = _currentAuthenticatedPubkey();
+        if (currentPubkey == null || currentPubkey.isEmpty) {
+          return false;
+        }
+
+        final event = await _authService.createAndSignEvent(
+          kind: EventKind.eventDeletion,
+          content: 'Deleted curated list $listId',
+          tags: [
+            ['a', '30005:$currentPubkey:$listId'],
+            ['k', '30005'],
+          ],
+        );
+        if (event == null) {
+          return false;
+        }
+
+        final publishResult = await _nostrService.publishEvent(event);
+        if (publishResult is! PublishSuccess) {
+          Log.warning(
+            'Failed to publish curated list deletion: ${publishResult.failureReason}',
+            name: 'CuratedListService',
+            category: LogCategory.system,
+          );
+          return false;
+        }
+      }
+
+      await _removeListAndSubscription(listId, listIndex);
+
+      Log.info(
+        'Deleted owned curated list: ${list.name} ($listId)',
+        name: 'CuratedListService',
+        category: LogCategory.system,
+      );
+
+      return true;
+    } catch (e, stackTrace) {
+      Log.error(
+        'Failed to delete owned curated list: $e',
+        name: 'CuratedListService',
+        category: LogCategory.system,
+        error: e,
+        stackTrace: stackTrace,
+      );
+      return false;
+    }
+  }
+
+  Future<void> _removeListAndSubscription(String listId, int listIndex) async {
+    _lists.removeAt(listIndex);
+    _subscribedListIds.remove(listId);
+    await _saveLists();
+    await _saveSubscribedListIds();
+    _onListUnsubscribed?.call(listId);
   }
 
   // === ENHANCED PLAYLIST FEATURES ===
@@ -834,6 +926,39 @@ class CuratedListService extends ChangeNotifier {
     return _subscribedListIds.contains(listId);
   }
 
+  /// Check whether the current user owns a locally cached curated list.
+  bool isOwnedList(String listId) {
+    final currentPubkey = _currentAuthenticatedPubkey();
+    if (currentPubkey == null || currentPubkey.isEmpty) {
+      return false;
+    }
+
+    final list = getListById(listId);
+    if (list == null) {
+      return false;
+    }
+
+    final ownerPubkey = list.pubkey;
+    if (ownerPubkey == null) {
+      return false;
+    }
+
+    return ownerPubkey == currentPubkey;
+  }
+
+  String? _currentAuthenticatedPubkey() {
+    if (!_authService.isAuthenticated) {
+      return null;
+    }
+
+    final currentPubkey = _authService.currentPublicKeyHex;
+    if (currentPubkey == null || currentPubkey.isEmpty) {
+      return null;
+    }
+
+    return currentPubkey;
+  }
+
   /// Get readable summary of lists containing a video
   String getVideoListSummary(String videoEventId) {
     final listsContaining = getListsContainingVideo(videoEventId);
@@ -989,6 +1114,7 @@ class CuratedListService extends ChangeNotifier {
   /// Save subscribed list IDs to local storage
   Future<void> _saveSubscribedListIds() async {
     try {
+      notifyListeners();
       final subscribedJson = _subscribedListIds.toList();
       await _prefs.setString(
         subscribedListsStorageKey,

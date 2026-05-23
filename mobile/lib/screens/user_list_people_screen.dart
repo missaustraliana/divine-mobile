@@ -3,6 +3,7 @@
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsService;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -21,12 +22,14 @@ import 'package:openvine/widgets/scroll_to_hide_mixin.dart';
 import 'package:openvine/widgets/user_avatar.dart';
 import 'package:unified_logger/unified_logger.dart';
 
+enum _PeopleListAction { delete }
+
 /// Screen that renders a single NIP-51 kind 30000 people list.
 ///
 /// The screen is addressed by [listId] and selects the matching [UserList]
 /// from [PeopleListsBloc] with a [BlocSelector], so edits made elsewhere
 /// (add/remove member, rename) are reflected without rebuilding the route.
-class UserListPeopleScreen extends StatelessWidget {
+class UserListPeopleScreen extends StatefulWidget {
   const UserListPeopleScreen({required this.listId, super.key});
 
   /// GoRouter name for this route.
@@ -39,20 +42,85 @@ class UserListPeopleScreen extends StatelessWidget {
   final String listId;
 
   @override
+  State<UserListPeopleScreen> createState() => _UserListPeopleScreenState();
+}
+
+class _UserListPeopleScreenState extends State<UserListPeopleScreen> {
+  String? _pendingDeleteListId;
+
+  void _deleteList(String listId) {
+    setState(() {
+      _pendingDeleteListId = listId;
+    });
+    context.read<PeopleListsBloc>().add(
+      PeopleListsDeleteRequested(listId: listId),
+    );
+  }
+
+  bool _deleteSettled(PeopleListsState previous, PeopleListsState current) {
+    final pendingListId = _pendingDeleteListId;
+    if (pendingListId == null) return false;
+
+    final hadPendingDelete = previous.pendingMutations.values.any(
+      (mutation) =>
+          mutation.kind == PeopleListsMutationKind.deleteList &&
+          mutation.listId == pendingListId,
+    );
+    final hasPendingDelete = current.pendingMutations.values.any(
+      (mutation) =>
+          mutation.kind == PeopleListsMutationKind.deleteList &&
+          mutation.listId == pendingListId,
+    );
+    return hadPendingDelete && !hasPendingDelete;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return BlocSelector<PeopleListsBloc, PeopleListsState, UserList?>(
-      selector: (state) {
-        for (final list in state.lists) {
-          if (list.id == listId) return list;
+    return BlocListener<PeopleListsBloc, PeopleListsState>(
+      listenWhen: _deleteSettled,
+      listener: (context, state) {
+        final failed = state.status == PeopleListsStatus.failure;
+        setState(() {
+          _pendingDeleteListId = null;
+        });
+        if (failed) {
+          final message = context.l10n.peopleListsDeleteFailed;
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            message,
+            Directionality.of(context),
+          );
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message), backgroundColor: VineTheme.error),
+          );
+          return;
         }
-        return null;
-      },
-      builder: (context, userList) {
-        if (userList == null) {
-          return const _ListNotFoundView();
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          context.l10n.curatedListDeletedSnack,
+          Directionality.of(context),
+        );
+        if (context.canPop()) {
+          context.pop();
         }
-        return _UserListPeopleView(userList: userList);
       },
+      child: BlocSelector<PeopleListsBloc, PeopleListsState, UserList?>(
+        selector: (state) {
+          for (final list in state.lists) {
+            if (list.id == widget.listId) return list;
+          }
+          return null;
+        },
+        builder: (context, userList) {
+          if (userList == null) {
+            return const _ListNotFoundView();
+          }
+          return _UserListPeopleView(
+            userList: userList,
+            onDeleteConfirmed: _deleteList,
+          );
+        },
+      ),
     );
   }
 }
@@ -138,9 +206,13 @@ class _PeopleListAppBarTitle extends StatelessWidget {
 
 /// Body view for a resolved [UserList].
 class _UserListPeopleView extends ConsumerStatefulWidget {
-  const _UserListPeopleView({required this.userList});
+  const _UserListPeopleView({
+    required this.userList,
+    required this.onDeleteConfirmed,
+  });
 
   final UserList userList;
+  final ValueChanged<String> onDeleteConfirmed;
 
   @override
   ConsumerState<_UserListPeopleView> createState() =>
@@ -152,9 +224,45 @@ class _UserListPeopleViewState extends ConsumerState<_UserListPeopleView>
   int? _activeVideoIndex;
 
   void _navigateToAddPeople(String listId) {
-    context.push(
-      '/people-lists/${Uri.encodeComponent(listId)}/add-people',
+    context.push('/people-lists/${Uri.encodeComponent(listId)}/add-people');
+  }
+
+  Future<void> _confirmDeleteList(UserList userList) async {
+    final l10n = context.l10n;
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: VineTheme.surfaceContainer,
+        title: Text(
+          l10n.peopleListsDeleteConfirmTitle,
+          style: VineTheme.titleMediumFont(),
+        ),
+        content: Text(
+          l10n.peopleListsDeleteConfirmBody,
+          style: VineTheme.bodyMediumFont(color: VineTheme.secondaryText),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(
+              l10n.commonCancel,
+              style: VineTheme.labelMediumFont(color: VineTheme.secondaryText),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(
+              l10n.commonDelete,
+              style: VineTheme.labelMediumFont(color: VineTheme.error),
+            ),
+          ),
+        ],
+      ),
     );
+
+    if (shouldDelete != true || !mounted) return;
+
+    widget.onDeleteConfirmed(userList.id);
   }
 
   @override
@@ -176,6 +284,17 @@ class _UserListPeopleViewState extends ConsumerState<_UserListPeopleView>
                     semanticLabel:
                         context.l10n.peopleListsAddPeopleSemanticLabel,
                     onPressed: () => _navigateToAddPeople(userList.id),
+                  ),
+              ],
+              customActions: [
+                if (userList.isEditable)
+                  _PeopleListActionsMenu(
+                    onSelected: (action) {
+                      switch (action) {
+                        case _PeopleListAction.delete:
+                          _confirmDeleteList(userList);
+                      }
+                    },
                   ),
               ],
             )
@@ -479,6 +598,34 @@ class _UserListPeopleViewState extends ConsumerState<_UserListPeopleView>
   }
 }
 
+class _PeopleListActionsMenu extends StatelessWidget {
+  const _PeopleListActionsMenu({required this.onSelected});
+
+  final ValueChanged<_PeopleListAction> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<_PeopleListAction>(
+      tooltip: context.l10n.peopleListsActionsTooltip,
+      color: VineTheme.surfaceContainer,
+      icon: const DivineIcon(
+        icon: DivineIconName.dotsThreeVertical,
+        color: VineTheme.whiteText,
+      ),
+      onSelected: onSelected,
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: _PeopleListAction.delete,
+          child: Text(
+            context.l10n.listDeleteAction,
+            style: const TextStyle(color: VineTheme.primaryText),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Horizontal carousel of people avatars for a user list.
 @visibleForTesting
 class PeopleCarousel extends StatelessWidget {
@@ -565,9 +712,7 @@ class _PeopleAvatarItem extends ConsumerWidget {
     if (shouldRemove != true || !context.mounted) return;
 
     final bloc = context.read<PeopleListsBloc>()
-      ..add(
-        PeopleListsPubkeyRemoveRequested(listId: listId, pubkey: pubkey),
-      );
+      ..add(PeopleListsPubkeyRemoveRequested(listId: listId, pubkey: pubkey));
 
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(
