@@ -2029,7 +2029,7 @@ void main() {
       );
 
       blocTest<VideoFeedBloc, VideoFeedBlocState>(
-        'subscribes to subscribedListsStream via emit.onEach on startup',
+        'subscribes to subscribedListsStream on startup',
         setUp: () {
           final videos = createTestVideos(pageSize);
 
@@ -2153,12 +2153,39 @@ void main() {
 
     group('close', () {
       test('does not throw when stream emits after close', () async {
+        final videos = createTestVideos(pageSize);
+
+        when(() => mockFollowRepository.followingPubkeys).thenReturn(['a']);
+        when(
+          () => mockVideosRepository.getHomeFeedVideos(
+            authors: any(named: 'authors'),
+            videoRefs: any(named: 'videoRefs'),
+            userPubkey: any(named: 'userPubkey'),
+            limit: any(named: 'limit'),
+            until: any(named: 'until'),
+            skipCache: any(named: 'skipCache'),
+          ),
+        ).thenAnswer((_) async => HomeFeedResult(videos: videos));
+
         final bloc = createBloc();
+        bloc.add(const VideoFeedStarted(mode: FeedMode.following));
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(followingController.hasListener, isTrue);
+        expect(curatedListsController.hasListener, isTrue);
 
         await bloc.close();
+        expect(followingController.hasListener, isFalse);
+        expect(curatedListsController.hasListener, isFalse);
 
         // After closing, stream events should not cause errors
         expect(() => followingController.add(['a']), returnsNormally);
+        expect(
+          () => curatedListsController.add([createTestList()]),
+          returnsNormally,
+        );
+        await Future<void>.delayed(Duration.zero);
       });
     });
 

@@ -84,6 +84,8 @@ class VideoFeedBloc extends Bloc<VideoFeedEvent, VideoFeedBlocState> {
   final Duration _autoRefreshMinInterval;
   final FeedPerformanceTracker? _feedTracker;
   final HomeFeedCache _homeFeedCache;
+  StreamSubscription<List<String>>? _followingSubscription;
+  StreamSubscription<List<CuratedList>>? _curatedListsSubscription;
 
   /// Whether the cache has already been served for this BLoC instance.
   ///
@@ -113,9 +115,6 @@ class VideoFeedBloc extends Bloc<VideoFeedEvent, VideoFeedBlocState> {
   ///
   /// Also subscribes to [CuratedListRepository.subscribedListsStream]
   /// (skipping the first replay) so curated list changes refresh the feed.
-  ///
-  /// Both subscriptions use `unawaited` on the first so neither blocks the
-  /// other — `emit.onEach` never completes for BehaviorSubject streams.
   ///
   /// If a feed mode was previously saved to SharedPreferences, that mode is
   /// restored. Otherwise [event.mode] is used.
@@ -149,6 +148,7 @@ class VideoFeedBloc extends Bloc<VideoFeedEvent, VideoFeedBlocState> {
     );
 
     await _loadVideos(source, emit);
+    if (emit.isDone) return;
 
     // After the initial load, check for the "no follows" CTA. Needed for
     // BLoC re-creation (e.g. navigating back to home) when the follow repo
@@ -169,6 +169,11 @@ class VideoFeedBloc extends Bloc<VideoFeedEvent, VideoFeedBlocState> {
       }
     }
 
+    if (emit.isDone) return;
+
+    await _followingSubscription?.cancel();
+    await _curatedListsSubscription?.cancel();
+
     // Subscribe to following list changes.
     //
     // The first replay can mean one of two things:
@@ -180,27 +185,39 @@ class VideoFeedBloc extends Bloc<VideoFeedEvent, VideoFeedBlocState> {
     // Distinguish those cases by comparing the first replay with the list
     // used for the initial fetch instead of relying on isInitialized.
     var isFirstFollowingEmission = true;
-    unawaited(
-      emit.onEach<List<String>>(
-        _followRepository.followingStream,
-        onData: (pubkeys) {
-          if (isFirstFollowingEmission) {
-            isFirstFollowingEmission = false;
-            if (_listsEqual(pubkeys, initialFollowingPubkeys)) {
-              return;
-            }
-          }
+    _followingSubscription = _followRepository.followingStream.listen((
+      pubkeys,
+    ) {
+      if (isFirstFollowingEmission) {
+        isFirstFollowingEmission = false;
+        if (_listsEqual(pubkeys, initialFollowingPubkeys)) {
+          return;
+        }
+      }
 
-          add(VideoFeedFollowingListChanged(pubkeys));
-        },
-      ),
-    );
+      _addIfOpen(VideoFeedFollowingListChanged(pubkeys));
+    });
 
     // Subscribe to curated list changes.
-    await emit.onEach<List<CuratedList>>(
-      _curatedListRepository.subscribedListsStream.skip(1),
-      onData: (lists) => add(VideoFeedCuratedListsChanged(lists)),
-    );
+    _curatedListsSubscription = _curatedListRepository.subscribedListsStream
+        .skip(1)
+        .listen((lists) {
+          _addIfOpen(VideoFeedCuratedListsChanged(lists));
+        });
+  }
+
+  void _addIfOpen(VideoFeedEvent event) {
+    if (isClosed) return;
+    add(event);
+  }
+
+  @override
+  Future<void> close() async {
+    await _followingSubscription?.cancel();
+    await _curatedListsSubscription?.cancel();
+    _followingSubscription = null;
+    _curatedListsSubscription = null;
+    return super.close();
   }
 
   VideoFeedSource _restoreSource(FeedMode fallbackMode) {
