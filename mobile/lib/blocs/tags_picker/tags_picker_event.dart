@@ -22,6 +22,16 @@ final class TagsPickerTagsAdded extends TagsPickerEvent {
   List<Object?> get props => [rawTokens];
 }
 
+/// User selected a suggestion chip while keeping the current search active.
+final class TagsPickerSuggestionSelected extends TagsPickerEvent {
+  const TagsPickerSuggestionSelected(this.tag);
+
+  final String tag;
+
+  @override
+  List<Object?> get props => [tag];
+}
+
 /// User removed a previously selected tag.
 final class TagsPickerTagRemoved extends TagsPickerEvent {
   const TagsPickerTagRemoved(this.tag);
@@ -42,11 +52,7 @@ final class TagsPickerQueryChanged extends TagsPickerEvent {
   List<Object?> get props => [query];
 }
 
-/// The suggestion list was cleared synchronously (e.g. after a suggestion tap).
-///
-/// Unlike [TagsPickerQueryChanged], this event is not debounced — it resets
-/// [TagsPickerState.query] and [TagsPickerState.suggestions] immediately so
-/// stale results are never visible after the user commits a tag.
-final class TagsPickerSearchReset extends TagsPickerEvent {
-  const TagsPickerSearchReset();
+/// Clears the current query and search results immediately.
+final class TagsPickerSearchCleared extends TagsPickerEvent {
+  const TagsPickerSearchCleared();
 }
