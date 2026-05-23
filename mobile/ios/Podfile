@@ -185,7 +185,7 @@ post_install do |installer|
   cupertino_http_framework_re =
     /\s*-framework\s+(?:"cupertino_http"|'cupertino_http'|cupertino_http\b)/
   cupertino_http_keep_symbol =
-    '-u "__NativeCupertinoHttp_wrapListenerBlock_1pl9qdv"'
+    '-u "__NativeCupertinoHttp_wrapListenerBlock_1tz5yf"'
   linked_any = false
 
   installer.aggregate_targets.each do |aggregate_target|
@@ -199,7 +199,7 @@ post_install do |installer|
       linked_any ||= content.match?(cupertino_http_framework_re)
       new_content = content.dup
 
-      if new_content !~ /-u\s+"?__NativeCupertinoHttp_wrapListenerBlock_1pl9qdv"?/
+      if new_content !~ /-u\s+"?__NativeCupertinoHttp_wrapListenerBlock_1tz5yf"?/
         if new_content =~ /^OTHER_LDFLAGS\s*=\s*(.*)$/
           existing = Regexp.last_match(1).strip
           replacement = "OTHER_LDFLAGS = #{existing} #{cupertino_http_keep_symbol}".strip
