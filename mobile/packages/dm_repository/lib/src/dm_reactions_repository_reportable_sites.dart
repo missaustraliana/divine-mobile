@@ -12,6 +12,11 @@ abstract class DmReactionsRepositoryReportableSites {
   /// Programming-invariant violation — the validator above passed.
   static const String persistIncomingDaoUpsert = 'persistIncoming.daoUpsert';
 
+  /// `handleIncomingDeletion`: DAO soft-delete threw despite a validated
+  /// matching reaction row.
+  static const String handleIncomingDeletionSoftDelete =
+      'handleIncomingDeletion.softDelete';
+
   /// `publish`: optimistic DAO insert threw before any send attempt.
   /// Programming-invariant violation — placeholder ids are uuid-shaped
   /// and the row is fresh.

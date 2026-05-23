@@ -3049,10 +3049,6 @@
   "@dmMessageActionReport": {
     "description": "Long-press menu action on a received DM bubble that opens the report flow for that specific message."
   },
-  "dmReactionPickerOpenA11yLabel": "Open reaction picker",
-  "@dmReactionPickerOpenA11yLabel": {
-    "description": "Screen-reader label for the gesture that opens the reaction picker on a DM bubble."
-  },
   "dmReactionAddCustomA11yLabel": "Add custom emoji reaction",
   "@dmReactionAddCustomA11yLabel": {
     "description": "Screen-reader label for the '+' button at the end of the quick-row that opens the full emoji picker."
@@ -3082,26 +3078,6 @@
   "dmReactionChipRetryAnnouncement": "Retrying reaction",
   "@dmReactionChipRetryAnnouncement": {
     "description": "Live-region announcement on chip retry."
-  },
-  "dmReactionChipSuccessAnnouncement": "Reaction sent",
-  "@dmReactionChipSuccessAnnouncement": {
-    "description": "Live-region announcement after a reaction successfully publishes."
-  },
-  "dmReactionPickerOfflineHint": "Reaction will retry when you're online",
-  "@dmReactionPickerOfflineHint": {
-    "description": "Toast hint shown when a reaction publish fails and the user is likely offline."
-  },
-  "dmReactionDetailSheetTitle": "Reactions",
-  "@dmReactionDetailSheetTitle": {
-    "description": "Title of the bottom sheet showing who reacted with which emoji. v1 only used in group conversations."
-  },
-  "dmReactionDetailSheetReactorLabel": "{name} reacted with {emoji}",
-  "@dmReactionDetailSheetReactorLabel": {
-    "description": "Row in the reaction detail sheet showing one reactor and their emoji.",
-    "placeholders": {
-      "name": { "type": "String" },
-      "emoji": { "type": "String" }
-    }
   },
   "dmFormatBold": "Bold",
   "@dmFormatBold": {

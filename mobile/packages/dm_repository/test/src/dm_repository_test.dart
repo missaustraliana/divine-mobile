@@ -30,6 +30,9 @@ class _MockDirectMessagesDao extends Mock implements DirectMessagesDao {}
 
 class _MockConversationsDao extends Mock implements ConversationsDao {}
 
+class _MockDmReactionsRepository extends Mock
+    implements DmReactionsRepository {}
+
 class _MockNostrSigner extends Mock implements NostrSigner {}
 
 class _FakeEvent extends Fake implements Event {}
@@ -107,6 +110,7 @@ void main() {
     late _MockNIP17MessageService mockMessageService;
     late _MockDirectMessagesDao mockDirectMessagesDao;
     late _MockConversationsDao mockConversationsDao;
+    late _MockDmReactionsRepository mockReactionsRepository;
     late List<_ReporterCall> reporterCalls;
 
     setUpAll(() {
@@ -120,6 +124,7 @@ void main() {
       mockMessageService = _MockNIP17MessageService();
       mockDirectMessagesDao = _MockDirectMessagesDao();
       mockConversationsDao = _MockConversationsDao();
+      mockReactionsRepository = _MockDmReactionsRepository();
       reporterCalls = <_ReporterCall>[];
 
       // Stub relay properties used by startListening() log.
@@ -205,6 +210,7 @@ void main() {
       Nip04Decryptor? nip04Decryptor,
       DmSyncState? syncState,
       OutgoingDmsDao? outgoingDmsDao,
+      DmReactionsRepository? reactionsRepository,
     }) {
       return DmRepository(
         nostrClient: mockNostrClient,
@@ -217,6 +223,7 @@ void main() {
         rumorDecryptor: rumorDecryptor,
         nip04Decryptor: nip04Decryptor,
         syncState: syncState,
+        reactionsRepository: reactionsRepository,
         errorReporter: (error, stackTrace, {required site}) {
           reporterCalls.add(_ReporterCall(error, stackTrace, site));
         },
@@ -6049,6 +6056,105 @@ void main() {
         await controller.close();
         await repository.stopListening();
       });
+    });
+
+    group('receive pipeline - wrapped reaction deletion', () {
+      Event createGiftWrapDeletionRumor() {
+        return Event.fromJson({
+          'id': _giftWrapEventId,
+          'pubkey': _validPubkeyC,
+          'created_at': 1700000100,
+          'kind': EventKind.giftWrap,
+          'tags': [
+            ['p', _validPubkeyA],
+          ],
+          'content': 'wrapped',
+          'sig': '',
+        });
+      }
+
+      void stubWrappedDeleteSubscription(StreamController<Event> controller) {
+        when(
+          () => mockNostrClient.subscribe(
+            any(),
+            subscriptionId: any(named: 'subscriptionId'),
+          ),
+        ).thenAnswer((_) => controller.stream);
+        when(() => mockNostrClient.unsubscribe(any())).thenAnswer((_) async {});
+      }
+
+      test(
+        'routes wrapped kind 5 rumor with k=7 to reactions repository',
+        () async {
+          final controller = StreamController<Event>();
+          stubWrappedDeleteSubscription(controller);
+
+          when(
+            () => mockDirectMessagesDao.hasGiftWrap(_giftWrapEventId),
+          ).thenAnswer((_) async => false);
+          when(
+            () => mockReactionsRepository.handleIncomingDeletion(
+              rumorEvent: any(named: 'rumorEvent'),
+              giftWrapId: _giftWrapEventId,
+            ),
+          ).thenAnswer((_) async {});
+
+          final repository = createRepository(
+            reactionsRepository: mockReactionsRepository,
+            rumorDecryptor: (_, _) async => Event.fromJson({
+              'id': _rumorEventId,
+              'pubkey': _validPubkeyB,
+              'created_at': 1700000000,
+              'kind': EventKind.eventDeletion,
+              'tags': [
+                ['e', _giftWrapEventId2],
+                ['k', EventKind.reaction.toString()],
+              ],
+              'content': '',
+              'sig': '',
+            }),
+          );
+          await repository.startListening();
+
+          controller.add(createGiftWrapDeletionRumor());
+          await Future<void>.delayed(Duration.zero);
+
+          verify(
+            () => mockReactionsRepository.handleIncomingDeletion(
+              rumorEvent: any(named: 'rumorEvent'),
+              giftWrapId: _giftWrapEventId,
+            ),
+          ).called(1);
+          verifyNever(
+            () => mockDirectMessagesDao.insertMessage(
+              id: any(named: 'id'),
+              conversationId: any(named: 'conversationId'),
+              senderPubkey: any(named: 'senderPubkey'),
+              content: any(named: 'content'),
+              createdAt: any(named: 'createdAt'),
+              giftWrapId: any(named: 'giftWrapId'),
+              messageKind: any(named: 'messageKind'),
+              ownerPubkey: any(named: 'ownerPubkey'),
+              replyToId: any(named: 'replyToId'),
+              subject: any(named: 'subject'),
+              tagsJson: any(named: 'tagsJson'),
+              fileType: any(named: 'fileType'),
+              encryptionAlgorithm: any(named: 'encryptionAlgorithm'),
+              decryptionKey: any(named: 'decryptionKey'),
+              decryptionNonce: any(named: 'decryptionNonce'),
+              fileHash: any(named: 'fileHash'),
+              originalFileHash: any(named: 'originalFileHash'),
+              fileSize: any(named: 'fileSize'),
+              dimensions: any(named: 'dimensions'),
+              blurhash: any(named: 'blurhash'),
+              thumbnailUrl: any(named: 'thumbnailUrl'),
+            ),
+          );
+
+          await controller.close();
+          await repository.stopListening();
+        },
+      );
     });
 
     group('_refreshConversationPreview', () {

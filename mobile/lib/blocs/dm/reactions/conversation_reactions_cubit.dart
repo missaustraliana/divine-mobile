@@ -7,6 +7,7 @@ import 'dart:async';
 
 import 'package:bloc/bloc.dart';
 import 'package:bloc_concurrency/bloc_concurrency.dart';
+import 'package:collection/collection.dart';
 import 'package:dm_repository/dm_repository.dart';
 import 'package:equatable/equatable.dart';
 import 'package:meta/meta.dart';
@@ -32,14 +33,8 @@ class ConversationReactionsCubit
   }) : _reactionsRepository = reactionsRepository,
        _ownerPubkey = ownerPubkey,
        super(const ConversationReactionsState()) {
-    on<ConversationReactionsStarted>(
-      _onStarted,
-      transformer: restartable(),
-    );
-    on<ConversationReactionToggled>(
-      _onToggled,
-      transformer: sequential(),
-    );
+    on<ConversationReactionsStarted>(_onStarted, transformer: restartable());
+    on<ConversationReactionToggled>(_onToggled, transformer: sequential());
     on<ConversationReactionRetryRequested>(
       _onRetryRequested,
       transformer: sequential(),
@@ -72,9 +67,8 @@ class ConversationReactionsCubit
     _subscription = _reactionsRepository
         .watchForConversation(event.conversationId)
         .listen(
-          (reactions) => add(
-            _ConversationReactionsSubscriptionTicked(reactions),
-          ),
+          (reactions) =>
+              add(_ConversationReactionsSubscriptionTicked(reactions)),
         );
   }
 
@@ -108,9 +102,8 @@ class ConversationReactionsCubit
 
     // Publish path. Emit pending immediately so the chip flips fast.
     final nextPending =
-        Map<ReactionPublishKey, ReactionPublishLocalStatus>.from(
-          state.pending,
-        )..[key] = ReactionPublishLocalStatus.sending;
+        Map<ReactionPublishKey, ReactionPublishLocalStatus>.from(state.pending)
+          ..[key] = ReactionPublishLocalStatus.sending;
     emit(state.copyWith(pending: nextPending));
 
     try {
@@ -161,9 +154,8 @@ class ConversationReactionsCubit
       emoji: event.emoji,
     );
     final nextPending =
-        Map<ReactionPublishKey, ReactionPublishLocalStatus>.from(
-          state.pending,
-        )..[key] = ReactionPublishLocalStatus.sending;
+        Map<ReactionPublishKey, ReactionPublishLocalStatus>.from(state.pending)
+          ..[key] = ReactionPublishLocalStatus.sending;
     emit(state.copyWith(pending: nextPending));
 
     try {
@@ -227,13 +219,4 @@ class _ReactionPublishException implements Exception {
 
   @override
   String toString() => 'ReactionPublishException($site): $inner';
-}
-
-extension _IterableExtensions<T> on Iterable<T> {
-  T? firstWhereOrNull(bool Function(T element) test) {
-    for (final element in this) {
-      if (test(element)) return element;
-    }
-    return null;
-  }
 }

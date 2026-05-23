@@ -4,9 +4,11 @@
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsService;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:models/models.dart';
 import 'package:openvine/blocs/dm/reactions/conversation_reactions_cubit.dart';
+import 'package:openvine/l10n/l10n.dart';
 
 /// Aggregated chip data for one (emoji) across reactors on one message.
 class _AggregatedReaction {
@@ -15,7 +17,6 @@ class _AggregatedReaction {
     required this.count,
     required this.ownRumorId,
     required this.targetAuthor,
-    required this.targetMessageId,
     required this.isOwn,
     required this.isPending,
     required this.isFailed,
@@ -25,7 +26,6 @@ class _AggregatedReaction {
   int count;
   String? ownRumorId;
   final String targetAuthor;
-  final String targetMessageId;
   bool isOwn;
   bool isPending;
   bool isFailed;
@@ -42,6 +42,7 @@ class ReactionsRow extends StatelessWidget {
     required this.messageAuthorPubkey,
     required this.ownerPubkey,
     required this.isSentByMe,
+    this.otherParticipantName,
     this.blockedPubkeys = const <String>{},
     super.key,
   });
@@ -60,6 +61,9 @@ class ReactionsRow extends StatelessWidget {
 
   /// True if the bubble was sent by the current account.
   final bool isSentByMe;
+
+  /// Display name for the other participant in this 1:1 conversation.
+  final String? otherParticipantName;
 
   /// Pubkeys whose reactions should be hidden.
   final Set<String> blockedPubkeys;
@@ -80,11 +84,7 @@ class ReactionsRow extends StatelessWidget {
         )) {
           return true;
         }
-        return !_pendingForMessageEquals(
-          prev.pending,
-          curr.pending,
-          messageId,
-        );
+        return !_pendingForMessageEquals(prev.pending, curr.pending, messageId);
       },
       builder: (context, state) {
         final reactions = state.reactionsFor(messageId);
@@ -92,10 +92,7 @@ class ReactionsRow extends StatelessWidget {
             .where((r) => !blockedPubkeys.contains(r.reactorPubkey))
             .toList(growable: false);
         if (visible.isEmpty) return const SizedBox.shrink();
-        final aggregated = _aggregate(
-          context: context,
-          reactions: visible,
-        );
+        final aggregated = _aggregate(context: context, reactions: visible);
         if (aggregated.isEmpty) return const SizedBox.shrink();
         // Anchor the chip(s) to the bubble's corner using an explicit
         // Align — the parent ListView gives a full-width slot, and
@@ -114,6 +111,7 @@ class ReactionsRow extends StatelessWidget {
               emoji: agg.emoji,
               count: agg.count,
               variant: variant,
+              semanticLabel: _semanticLabelFor(context, agg, variant),
               onTap: () => _onTap(context, agg),
               onLongPress: agg.isFailed
                   ? () => _onLongPressFailed(context, agg)
@@ -170,7 +168,6 @@ class ReactionsRow extends StatelessWidget {
           count: 1,
           ownRumorId: isOwn ? r.id : null,
           targetAuthor: messageAuthorPubkey,
-          targetMessageId: messageId,
           isOwn: isOwn,
           isPending:
               localStatus == ReactionPublishLocalStatus.sending ||
@@ -206,6 +203,11 @@ class ReactionsRow extends StatelessWidget {
 
     final cubit = context.read<ConversationReactionsCubit>();
     if (agg.isFailed && agg.ownRumorId != null) {
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        context.l10n.dmReactionChipRetryAnnouncement,
+        Directionality.of(context),
+      );
       cubit.add(
         ConversationReactionRetryRequested(
           rumorId: agg.ownRumorId!,
@@ -227,10 +229,7 @@ class ReactionsRow extends StatelessWidget {
     );
   }
 
-  void _onLongPressFailed(
-    BuildContext context,
-    _AggregatedReaction agg,
-  ) {
+  void _onLongPressFailed(BuildContext context, _AggregatedReaction agg) {
     // For v1 we treat long-press on a failed own chip as "remove
     // locally"; the cubit just calls removeOwn which soft-deletes and
     // emits a NIP-09 deletion if it was published, or simply collapses
@@ -245,6 +244,25 @@ class ReactionsRow extends StatelessWidget {
         emoji: agg.emoji,
       ),
     );
+  }
+
+  String _semanticLabelFor(
+    BuildContext context,
+    _AggregatedReaction agg,
+    ReactionChipVariant variant,
+  ) {
+    final l10n = context.l10n;
+    return switch (variant) {
+      ReactionChipVariant.pending => l10n.dmReactionChipPendingA11yLabel(
+        agg.emoji,
+      ),
+      ReactionChipVariant.failed => l10n.dmReactionChipFailedA11yLabel,
+      ReactionChipVariant.own => l10n.dmReactionChipOwnA11yLabel(agg.emoji),
+      ReactionChipVariant.theirs => l10n.dmReactionChipOtherA11yLabel(
+        otherParticipantName ?? agg.targetAuthor,
+        agg.emoji,
+      ),
+    };
   }
 }
 

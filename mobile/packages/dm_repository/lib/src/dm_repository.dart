@@ -514,10 +514,18 @@ class DmRepository {
       }
 
       // NIP-17 spec line 14 explicitly permits kind 7 reactions inside
-      // the gift-wrap envelope. Route them to the reactions repository
+      // the gift-wrap envelope. Reaction deletions are also wrapped by
+      // this feature so the remove path preserves DM privacy. Route both
       // before the DM-only kinds gate below. #4633.
       if (rumorEvent.kind == EventKind.reaction) {
         await _reactionsRepository?.persistIncoming(
+          rumorEvent: rumorEvent,
+          giftWrapId: giftWrapEvent.id,
+        );
+        return;
+      }
+      if (rumorEvent.kind == EventKind.eventDeletion) {
+        await _reactionsRepository?.handleIncomingDeletion(
           rumorEvent: rumorEvent,
           giftWrapId: giftWrapEvent.id,
         );

@@ -778,7 +778,7 @@ final class DmReactionsRepositoryProvider
 }
 
 String _$dmReactionsRepositoryHash() =>
-    r'ff6af5b7b6e76436e3c231882d84ad1c5aea4a12';
+    r'6ef28a0c4a76c2ece84048f04c0b8962a1f1ab48';
 
 @ProviderFor(dmRepository)
 const dmRepositoryProvider = DmRepositoryProvider._();
@@ -819,7 +819,7 @@ final class DmRepositoryProvider
   }
 }
 
-String _$dmRepositoryHash() => r'070777d4239684a9bd3665ea8f417b6399c9ba61';
+String _$dmRepositoryHash() => r'8615e6933fe33237f950109dfd78803e8d709093';
 
 /// Provider for CommentsRepository instance
 ///

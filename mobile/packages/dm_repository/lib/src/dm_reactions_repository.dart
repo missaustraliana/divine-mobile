@@ -22,11 +22,7 @@ import 'package:unified_logger/unified_logger.dart';
 /// Network/IO failures from `sendRumor` are NOT routed through this —
 /// only DAO surprises are Reportable per the error-handling matrix.
 typedef DmReactionsRepositoryErrorReporter =
-    void Function(
-      Object error,
-      StackTrace stackTrace, {
-      required String site,
-    });
+    void Function(Object error, StackTrace stackTrace, {required String site});
 
 /// Public outcome of an outgoing reaction publish attempt.
 @immutable
@@ -208,10 +204,7 @@ class DmReactionsRepository {
               site: DmReactionsRepositoryReportableSites.publishSwapPlaceholder,
             );
           }
-          return DmReactionPublishResult(
-            success: true,
-            rumorId: rumorId,
-          );
+          return DmReactionPublishResult(success: true, rumorId: rumorId);
         case NIP17SendFailure(:final error):
           await _reactionsDao.markFailed(
             placeholderId: rumorId,
@@ -283,10 +276,7 @@ class DmReactionsRepository {
     // send — the user-visible recovery path is the chip falling back
     // to `failed` via the next branch.
     try {
-      await _reactionsDao.markPending(
-        id: rumorId,
-        ownerPubkey: _userPubkey,
-      );
+      await _reactionsDao.markPending(id: rumorId, ownerPubkey: _userPubkey);
     } on Object {
       // best-effort
     }
@@ -317,10 +307,7 @@ class DmReactionsRepository {
           );
       }
     } on Object catch (e) {
-      Log.warning(
-        'DM reaction retry threw: $e',
-        category: LogCategory.system,
-      );
+      Log.warning('DM reaction retry threw: $e', category: LogCategory.system);
       await _reactionsDao.markFailed(
         placeholderId: rumorId,
         ownerPubkey: _userPubkey,
@@ -342,10 +329,7 @@ class DmReactionsRepository {
     final messageService = _messageService;
     if (messageService == null || _userPubkey.isEmpty) return;
     try {
-      await _reactionsDao.softDelete(
-        id: rumorId,
-        ownerPubkey: _userPubkey,
-      );
+      await _reactionsDao.softDelete(id: rumorId, ownerPubkey: _userPubkey);
     } on Object catch (e, st) {
       _errorReporter?.call(
         e,
@@ -426,6 +410,52 @@ class DmReactionsRepository {
     }
   }
 
+  /// Apply an incoming wrapped NIP-09 kind-5 deletion for a reaction row.
+  ///
+  /// DM message deletions use the top-level kind-5 path in [DmRepository].
+  /// This handler is specifically for wrapped deletions emitted by the
+  /// reactions feature, which tag the deleted event with `k=7`.
+  Future<void> handleIncomingDeletion({
+    required Event rumorEvent,
+    required String giftWrapId,
+  }) async {
+    if (_userPubkey.isEmpty) return;
+    if (rumorEvent.kind != EventKind.eventDeletion) return;
+    if (!_targetsReactionKind(rumorEvent.tags)) return;
+
+    for (final tag in rumorEvent.tags) {
+      if (tag.length < 2 || tag[0] != 'e') continue;
+      final rumorId = tag[1];
+      final row = await _reactionsDao.getById(
+        id: rumorId,
+        ownerPubkey: _userPubkey,
+      );
+      if (row == null || row.isDeleted) continue;
+
+      // NIP-09: only the original reaction author may delete their reaction.
+      if (row.reactorPubkey != rumorEvent.pubkey) {
+        Log.debug(
+          'Ignoring wrapped reaction deletion for $rumorId: author mismatch '
+          '(event=${rumorEvent.pubkey}, reactor=${row.reactorPubkey}, '
+          'giftWrap=$giftWrapId)',
+          category: LogCategory.system,
+        );
+        continue;
+      }
+
+      try {
+        await _reactionsDao.softDelete(id: rumorId, ownerPubkey: _userPubkey);
+      } on Object catch (e, st) {
+        _errorReporter?.call(
+          e,
+          st,
+          site: DmReactionsRepositoryReportableSites
+              .handleIncomingDeletionSoftDelete,
+        );
+      }
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
@@ -457,10 +487,7 @@ class DmReactionsRepository {
     required NIP17MessageService messageService,
   }) async {
     try {
-      await _reactionsDao.softDelete(
-        id: priorRow.id,
-        ownerPubkey: _userPubkey,
-      );
+      await _reactionsDao.softDelete(id: priorRow.id, ownerPubkey: _userPubkey);
     } on Object {
       // Best-effort; the new publish proceeds regardless.
     }
@@ -535,5 +562,16 @@ class DmReactionsRepository {
       publishStatus: publishStatus,
       giftWrapId: row.giftWrapId,
     );
+  }
+
+  bool _targetsReactionKind(List<List<String>> tags) {
+    for (final tag in tags) {
+      if (tag.length >= 2 &&
+          tag[0] == 'k' &&
+          tag[1] == EventKind.reaction.toString()) {
+        return true;
+      }
+    }
+    return false;
   }
 }

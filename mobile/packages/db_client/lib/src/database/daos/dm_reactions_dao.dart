@@ -99,12 +99,11 @@ class DmReactionsDao extends DatabaseAccessor<AppDatabase>
     required String id,
     required String ownerPubkey,
   }) async {
-    await (update(dmMessageReactions)..where(
-          (t) => t.id.equals(id) & t.ownerPubkey.equals(ownerPubkey),
-        ))
-        .write(
-          const DmMessageReactionsCompanion(publishStatus: Value('pending')),
-        );
+    await (update(
+      dmMessageReactions,
+    )..where((t) => t.id.equals(id) & t.ownerPubkey.equals(ownerPubkey))).write(
+      const DmMessageReactionsCompanion(publishStatus: Value('pending')),
+    );
   }
 
   /// Soft-delete a row (NIP-09 kind 5 deletion received, or own-reaction
@@ -113,9 +112,8 @@ class DmReactionsDao extends DatabaseAccessor<AppDatabase>
     required String id,
     required String ownerPubkey,
   }) async {
-    return (update(dmMessageReactions)..where(
-          (t) => t.id.equals(id) & t.ownerPubkey.equals(ownerPubkey),
-        ))
+    return (update(dmMessageReactions)
+          ..where((t) => t.id.equals(id) & t.ownerPubkey.equals(ownerPubkey)))
         .write(const DmMessageReactionsCompanion(isDeleted: Value(true)));
   }
 
@@ -124,10 +122,9 @@ class DmReactionsDao extends DatabaseAccessor<AppDatabase>
     required String id,
     required String ownerPubkey,
   }) async {
-    return (delete(dmMessageReactions)..where(
-          (t) => t.id.equals(id) & t.ownerPubkey.equals(ownerPubkey),
-        ))
-        .go();
+    return (delete(
+      dmMessageReactions,
+    )..where((t) => t.id.equals(id) & t.ownerPubkey.equals(ownerPubkey))).go();
   }
 
   /// Upsert an incoming reaction. Idempotent on `(id, owner_pubkey)`.
@@ -200,12 +197,22 @@ class DmReactionsDao extends DatabaseAccessor<AppDatabase>
     required String ownerPubkey,
   }) async {
     final query = select(dmMessageReactions)
-      ..where(
-        (t) => t.id.equals(id) & t.ownerPubkey.equals(ownerPubkey),
-      )
+      ..where((t) => t.id.equals(id) & t.ownerPubkey.equals(ownerPubkey))
       ..limit(1);
     final row = await query.getSingleOrNull();
     return row?.rumorEventJson;
+  }
+
+  /// Return a single reaction row by stable reaction rumor id, or `null`
+  /// when no row matches in this account's view.
+  Future<DmReactionRow?> getById({
+    required String id,
+    required String ownerPubkey,
+  }) {
+    final query = select(dmMessageReactions)
+      ..where((t) => t.id.equals(id) & t.ownerPubkey.equals(ownerPubkey))
+      ..limit(1);
+    return query.getSingleOrNull();
   }
 
   /// Has the gift wrap with id `giftWrapId` already produced a row? Used by the

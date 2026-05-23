@@ -460,7 +460,7 @@ Future<MuteService> muteService(Ref ref) async {
 @Riverpod(keepAlive: true)
 DmReactionsRepository dmReactionsRepository(Ref ref) {
   final db = ref.watch(databaseProvider);
-  return DmReactionsRepository(
+  final repository = DmReactionsRepository(
     reactionsDao: db.dmReactionsDao,
     errorReporter: (error, stackTrace, {required site}) {
       unawaited(
@@ -472,6 +472,30 @@ DmReactionsRepository dmReactionsRepository(Ref ref) {
       );
     },
   );
+  ref.onDispose(repository.clearCredentials);
+
+  final nostrService = ref.watch(nostrServiceProvider);
+  final isReady = ref.watch(nostrSessionProvider).isReadyForActiveClient;
+  if (!isReady) {
+    repository.clearCredentials();
+    return repository;
+  }
+
+  final publicKey = nostrService.publicKey;
+  if (publicKey.isEmpty) {
+    repository.clearCredentials();
+    return repository;
+  }
+
+  repository.setCredentials(
+    userPubkey: publicKey,
+    messageService: NIP17MessageService(
+      signer: nostrService.signer,
+      senderPublicKey: publicKey,
+      nostrService: nostrService,
+    ),
+  );
+  return repository;
 }
 
 @Riverpod(keepAlive: true)
@@ -520,11 +544,6 @@ DmRepository dmRepository(Ref ref) {
         signer: signer,
         messageService: messageService,
       );
-      reactionsRepository.setCredentials(
-        userPubkey: publicKey,
-        messageService: messageService,
-      );
-
       // Open the gift-wrap subscription for the whole authenticated
       // session. Bounded by `since: newestSyncedAt - 2d` and isolate
       // decrypt so cold start stays cheap regardless of lifetime DM count.
