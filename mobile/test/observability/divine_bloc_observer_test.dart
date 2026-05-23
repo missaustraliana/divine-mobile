@@ -19,6 +19,16 @@ class _CountCubit extends Cubit<int> {
   void boom(Object error, StackTrace stackTrace) => addError(error, stackTrace);
 }
 
+class _CounterBloc extends Bloc<String, int> {
+  _CounterBloc() : super(0) {
+    on<String>((event, emit) => emit(state + 1));
+  }
+}
+
+class _NoteCubit extends Cubit<String> {
+  _NoteCubit() : super('');
+}
+
 void main() {
   setUpAll(() {
     registerFallbackValue(StackTrace.current);
@@ -37,6 +47,9 @@ void main() {
           any<StackTrace?>(),
           reason: any(named: 'reason'),
         ),
+      ).thenAnswer((_) async {});
+      when(
+        () => mockCrash.setCustomKey(any(), any<dynamic>()),
       ).thenAnswer((_) async {});
       observer = DivineBlocObserver(crashReporting: mockCrash);
     });
@@ -63,11 +76,7 @@ void main() {
       final cubit = _CountCubit();
       addTearDown(cubit.close);
 
-      observer.onError(
-        cubit,
-        Reportable(StateError('x')),
-        StackTrace.current,
-      );
+      observer.onError(cubit, Reportable(StateError('x')), StackTrace.current);
 
       verify(
         () => mockCrash.recordError(
@@ -164,6 +173,164 @@ void main() {
             reason: 'Bloc.addError _CountCubit',
           ),
         ).called(1);
+      },
+    );
+
+    test(
+      'attaches last event and state as custom keys before recordError',
+      () async {
+        final bloc = _CounterBloc();
+        addTearDown(bloc.close);
+
+        observer
+          ..onEvent(bloc, 'IncrementPressed')
+          ..onChange(bloc, const Change<int>(currentState: 0, nextState: 1));
+
+        final error = Reportable(StateError('boom'), context: 'test');
+        observer.onError(bloc, error, StackTrace.current);
+
+        // _attachDiagnosticKeys runs unawaited; drain the microtask before
+        // verifying.
+        await Future<void>.delayed(Duration.zero);
+
+        verifyInOrder([
+          () => mockCrash.setCustomKey(kBlocLastEventKey, 'IncrementPressed'),
+          () => mockCrash.setCustomKey(kBlocLastStateKey, '1'),
+          () => mockCrash.setCustomKey(
+            kBlocLastTransitionAtKey,
+            any<dynamic>(
+              that: predicate<dynamic>(
+                (v) => v is String && DateTime.tryParse(v) != null,
+              ),
+            ),
+          ),
+          () => mockCrash.recordError(
+            error,
+            any<StackTrace?>(),
+            reason: any(named: 'reason'),
+          ),
+        ]);
+      },
+    );
+
+    test(
+      'overwrites missing diagnostics with sentinels before recordError',
+      () async {
+        final cubit = _CountCubit();
+        addTearDown(cubit.close);
+
+        observer.onError(
+          cubit,
+          Reportable(StateError('x')),
+          StackTrace.current,
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        verifyInOrder([
+          () => mockCrash.setCustomKey(
+            kBlocLastEventKey,
+            kBlocDiagnosticNotObserved,
+          ),
+          () => mockCrash.setCustomKey(
+            kBlocLastStateKey,
+            kBlocDiagnosticNotObserved,
+          ),
+          () => mockCrash.setCustomKey(
+            kBlocLastTransitionAtKey,
+            kBlocDiagnosticNotObserved,
+          ),
+          () => mockCrash.recordError(
+            any<dynamic>(),
+            any<StackTrace?>(),
+            reason: any(named: 'reason'),
+          ),
+        ]);
+      },
+    );
+
+    test(
+      'does not leak a previous bloc event into a later cubit error report',
+      () async {
+        final bloc = _CounterBloc();
+        final cubit = _CountCubit();
+        addTearDown(bloc.close);
+        addTearDown(cubit.close);
+
+        observer
+          ..onEvent(bloc, 'IncrementPressed')
+          ..onChange(bloc, const Change<int>(currentState: 0, nextState: 1))
+          ..onError(bloc, Reportable(StateError('first')), StackTrace.current)
+          ..onError(
+            cubit,
+            Reportable(StateError('second')),
+            StackTrace.current,
+          );
+
+        await Future<void>.delayed(Duration.zero);
+
+        verifyInOrder([
+          () => mockCrash.setCustomKey(kBlocLastEventKey, 'IncrementPressed'),
+          () => mockCrash.setCustomKey(kBlocLastStateKey, '1'),
+          () => mockCrash.setCustomKey(
+            kBlocLastTransitionAtKey,
+            any<dynamic>(
+              that: predicate<dynamic>(
+                (v) => v is String && DateTime.tryParse(v) != null,
+              ),
+            ),
+          ),
+          () => mockCrash.recordError(
+            any<dynamic>(that: isA<ReportableError>()),
+            any<StackTrace?>(),
+            reason: any(named: 'reason'),
+          ),
+          () => mockCrash.setCustomKey(
+            kBlocLastEventKey,
+            kBlocDiagnosticNotObserved,
+          ),
+          () => mockCrash.setCustomKey(
+            kBlocLastStateKey,
+            kBlocDiagnosticNotObserved,
+          ),
+          () => mockCrash.setCustomKey(
+            kBlocLastTransitionAtKey,
+            kBlocDiagnosticNotObserved,
+          ),
+          () => mockCrash.recordError(
+            any<dynamic>(that: isA<ReportableError>()),
+            any<StackTrace?>(),
+            reason: any(named: 'reason'),
+          ),
+        ]);
+      },
+    );
+
+    test(
+      'sanitizes the state snapshot before attaching it as a custom key',
+      () async {
+        final cubit = _NoteCubit();
+        addTearDown(cubit.close);
+
+        const npub =
+            'npub1abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvw';
+        observer
+          ..onChange(
+            cubit,
+            const Change<String>(
+              currentState: '',
+              nextState: 'pubkey $npub failed',
+            ),
+          )
+          ..onError(cubit, Reportable(StateError('x')), StackTrace.current);
+        await Future<void>.delayed(Duration.zero);
+
+        final captured = verify(
+          () =>
+              mockCrash.setCustomKey(kBlocLastStateKey, captureAny<dynamic>()),
+        ).captured;
+        expect(captured, hasLength(1));
+        expect(captured.single, contains('npub1<redacted>'));
+        expect(captured.single, isNot(contains(npub)));
       },
     );
   });
