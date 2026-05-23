@@ -196,12 +196,13 @@ void main() {
 
   VideoStats makeVideoStats({
     required String id,
+    String pubkey = userPubkey,
     String? thumbnail,
     String? title,
   }) {
     return VideoStats(
       id: id,
-      pubkey: 'author_pub',
+      pubkey: pubkey,
       createdAt: DateTime(2025),
       kind: 34236,
       dTag: 'd_$id',
@@ -782,7 +783,7 @@ void main() {
       });
 
       test('grouped video notifications build addressable id from '
-          'user pubkey and d-tag', () async {
+          'referenced video owner pubkey and d-tag', () async {
         stubNotifications([
           makeNotification(
             id: 'l1',
@@ -801,6 +802,10 @@ void main() {
           'pub_a': makeProfile('pub_a', displayName: 'Alice'),
           'pub_b': makeProfile('pub_b', displayName: 'Bob'),
         });
+        stubVideoStats(
+          'video_x',
+          makeVideoStats(id: 'video_x'),
+        );
 
         final page = await repository.getNotifications();
 
@@ -1051,6 +1056,22 @@ void main() {
         expect(item.type, equals(NotificationKind.like));
       });
 
+      test('reaction on a non-owned video is dropped instead of rendering '
+          'as liked your video', () async {
+        stubNotifications([
+          makeNotification(referencedEventId: 'foreign_video'),
+        ]);
+        stubProfiles({});
+        stubVideoStats(
+          'foreign_video',
+          makeVideoStats(id: 'foreign_video', pubkey: 'other_owner_pubkey'),
+        );
+
+        final page = await repository.getNotifications();
+
+        expect(page.items, isEmpty);
+      });
+
       test('reaction on a non-video target maps to likeComment '
           '($ActorNotification)', () async {
         stubNotifications([makeNotification(isReferencedVideo: false)]);
@@ -1077,11 +1098,9 @@ void main() {
       });
 
       test(
-        'likeComment carries videoAddressableId when referencedDTag is set',
+        'likeComment leaves videoAddressableId null even when referencedDTag '
+        'is set without an authoritative owner pubkey',
         () async {
-          // When the server provides the d_tag for the video the comment was
-          // on, the repository builds the stable NIP-33 addressable ID so the
-          // tap handler can skip the resolver entirely.
           stubNotifications([
             makeNotification(
               isReferencedVideo: false,
@@ -1094,7 +1113,7 @@ void main() {
           final page = await repository.getNotifications();
           final item = page.items.single as ActorNotification;
           expect(item.type, equals(NotificationKind.likeComment));
-          expect(item.videoAddressableId, equals('34236:$userPubkey:vine-abc'));
+          expect(item.videoAddressableId, isNull);
         },
       );
 
@@ -2248,12 +2267,16 @@ void main() {
         },
       );
 
-      test('builds addressable id from user pubkey and d-tag for realtime '
-          'video notifications', () async {
+      test('builds addressable id from referenced video owner pubkey and '
+          'd-tag for realtime video notifications', () async {
         stubProfiles({'pub_a': makeProfile('pub_a', displayName: 'Alice')});
         stubVideoStats(
           'video_x',
-          makeVideoStats(id: 'video_x', thumbnail: 'thumb', title: 'T'),
+          makeVideoStats(
+            id: 'video_x',
+            thumbnail: 'thumb',
+            title: 'T',
+          ),
         );
 
         final result = await repository.enrichOne(
@@ -2279,6 +2302,19 @@ void main() {
         expect(result, isA<VideoNotification>());
         final video = result! as VideoNotification;
         expect(video.videoAddressableId, isNull);
+      });
+
+      test('drops a realtime like when the referenced video is owned by '
+          'someone else', () async {
+        stubProfiles({'pub_a': makeProfile('pub_a', displayName: 'Alice')});
+        stubVideoStats(
+          'video_x',
+          makeVideoStats(id: 'video_x', pubkey: 'other_owner_pubkey'),
+        );
+
+        final result = await repository.enrichOne(raw());
+
+        expect(result, isNull);
       });
 
       test('returns null for like with null referencedEventId', () async {
@@ -2320,8 +2356,8 @@ void main() {
         expect(actor.targetEventId, equals('comment_evt_id'));
       });
 
-      test('enrichOne: likeComment carries videoAddressableId when '
-          'referencedDTag is set', () async {
+      test('enrichOne: likeComment leaves videoAddressableId null when '
+          'referencedDTag is set but owner is unknown', () async {
         stubProfiles({'pub_a': makeProfile('pub_a', displayName: 'Alice')});
 
         final result = await repository.enrichOne(
@@ -2335,7 +2371,7 @@ void main() {
         expect(result, isA<ActorNotification>());
         final actor = result! as ActorNotification;
         expect(actor.type, equals(NotificationKind.likeComment));
-        expect(actor.videoAddressableId, equals('34236:$userPubkey:vine-xyz'));
+        expect(actor.videoAddressableId, isNull);
       });
 
       test('enrichOne: likeComment videoAddressableId is null when '
@@ -2530,6 +2566,25 @@ void main() {
           expect(await repository.watchUnreadCount().first, equals(1));
         },
       );
+
+      test('acceptRealtime drops a video-anchored notification whose '
+          'referenced video is known to be owned by someone else', () async {
+        stubProfiles({
+          allowedPubkey: makeProfile(allowedPubkey, displayName: 'Allowed'),
+        });
+        stubVideoStats(
+          'video_default',
+          makeVideoStats(id: 'video_default', pubkey: 'other_owner_pubkey'),
+        );
+
+        await repository.acceptRealtime(
+          makeNotification(sourcePubkey: allowedPubkey),
+        );
+
+        final snapshot = await repository.watchSnapshot().first;
+        expect(snapshot.items, isEmpty);
+        expect(await repository.watchUnreadCount().first, equals(0));
+      });
 
       test('acceptRealtime drops a video-anchored notification from a '
           'blocked actor', () async {

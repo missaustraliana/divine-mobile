@@ -1038,6 +1038,18 @@ class NotificationRepository {
       if (!isVideoAnchored(kind)) continue;
       final eventId = _videoAnchorEventId(kind, n);
       if (eventId == null || eventId.isEmpty) continue;
+      if (_hasKnownReferencedVideoOwnerMismatch(
+        referencedVideoEventId: eventId,
+        videosById: videosById,
+      )) {
+        _logDroppedKnownOwnerMismatch(
+          notificationId: n.id,
+          sourcePubkey: n.sourcePubkey,
+          referencedVideoEventId: eventId,
+          referencedVideoOwnerPubkey: videosById[eventId]?.pubkey,
+        );
+        continue;
+      }
       final key = _VideoGroupKey(eventId, kind);
       (groups[key] ??= []).add(n);
     }
@@ -1060,7 +1072,10 @@ class NotificationRepository {
       final dTag = group
           .map((n) => n.referencedDTag)
           .firstWhere((d) => d != null, orElse: () => null);
-      final addressableId = _buildVideoAddressableId(dTag);
+      final addressableId = _buildVideoAddressableId(
+        dTag,
+        ownerPubkey: video?.pubkey,
+      );
       // Prefer thumbnail from the notification payload — it comes directly from
       // the server and is stable even after a metadata update (unlike the stats
       // lookup which uses the mutable event ID and may 404 post-edit).
@@ -1182,7 +1197,22 @@ class NotificationRepository {
     if (isVideoAnchored) {
       if (referenced == null || referenced.isEmpty) return null;
       final video = videosById[referenced];
-      final addressableId = _buildVideoAddressableId(raw.referencedDTag);
+      if (_hasKnownReferencedVideoOwnerMismatch(
+        referencedVideoEventId: referenced,
+        videosById: videosById,
+      )) {
+        _logDroppedKnownOwnerMismatch(
+          notificationId: raw.id,
+          sourcePubkey: raw.sourcePubkey,
+          referencedVideoEventId: referenced,
+          referencedVideoOwnerPubkey: video?.pubkey,
+        );
+        return null;
+      }
+      final addressableId = _buildVideoAddressableId(
+        raw.referencedDTag,
+        ownerPubkey: video?.pubkey,
+      );
       return VideoNotification(
         id: raw.dedupeKey,
         type: kind,
@@ -1261,15 +1291,16 @@ class NotificationRepository {
     _ => null,
   };
 
-  /// Builds the stable NIP-33 addressable ID for a video the current
-  /// user owns.
-  ///
-  /// All notifications surfaced here are about the current user's own
-  /// content, so [_userPubkey] is always the right author component.
+  /// Builds the stable NIP-33 addressable ID for a referenced video whose
+  /// owner is known.
   /// Returns null when the server didn't provide a usable [dTag].
-  String? _buildVideoAddressableId(String? dTag) {
+  static String? _buildVideoAddressableId(
+    String? dTag, {
+    required String? ownerPubkey,
+  }) {
     if (dTag == null || dTag.isEmpty) return null;
-    return '${NIP71VideoKinds.addressableShortVideo}:$_userPubkey:$dTag';
+    if (ownerPubkey == null || ownerPubkey.isEmpty) return null;
+    return '${NIP71VideoKinds.addressableShortVideo}:$ownerPubkey:$dTag';
   }
 
   /// Returns the stable NIP-33 addressable ID for an actor-anchored
@@ -1282,13 +1313,40 @@ class NotificationRepository {
   /// realtime path ([enrichOne]) to stay in lockstep.
   String? _actorVideoAddressableId(
     NotificationKind mapped,
-    RelayNotification n,
+    RelayNotification notification,
   ) {
-    if (mapped != NotificationKind.likeComment &&
-        mapped != NotificationKind.reply) {
-      return null;
-    }
-    return _buildVideoAddressableId(n.referencedDTag);
+    // The current payload does not include the owning pubkey for the parent
+    // video, so synthesizing a stable route here can point at the wrong
+    // creator's addressable video. Fall back to resolver-based navigation
+    // until the API includes an authoritative owner component.
+    return null;
+  }
+
+  bool _hasKnownReferencedVideoOwnerMismatch({
+    required String referencedVideoEventId,
+    required Map<String, VideoStats> videosById,
+  }) {
+    final ownerPubkey = videosById[referencedVideoEventId]?.pubkey;
+    if (ownerPubkey == null || ownerPubkey.isEmpty) return false;
+    return ownerPubkey != _userPubkey;
+  }
+
+  void _logDroppedKnownOwnerMismatch({
+    required String notificationId,
+    required String sourcePubkey,
+    required String referencedVideoEventId,
+    required String? referencedVideoOwnerPubkey,
+  }) {
+    Log.warning(
+      'Dropping misattributed video notification: '
+      'notificationId=$notificationId '
+      'sourcePubkey=$sourcePubkey '
+      'referencedVideoEventId=$referencedVideoEventId '
+      'referencedVideoOwnerPubkey=${referencedVideoOwnerPubkey ?? 'unknown'} '
+      'currentUserPubkey=$_userPubkey',
+      name: 'NotificationRepository',
+      category: LogCategory.api,
+    );
   }
 
   /// Consolidates follow notifications — keeps the earliest per pubkey.
