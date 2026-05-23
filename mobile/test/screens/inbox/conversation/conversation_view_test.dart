@@ -13,6 +13,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:models/models.dart';
 import 'package:openvine/blocs/dm/conversation/collaborator_invite_actions_cubit.dart';
 import 'package:openvine/blocs/dm/conversation/conversation_bloc.dart';
+import 'package:openvine/blocs/dm/reactions/conversation_reactions_cubit.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/models/collaborator_invite.dart';
 import 'package:openvine/providers/app_providers.dart';
@@ -33,6 +34,10 @@ class _MockConversationBloc
 class _MockCollaboratorInviteActionsCubit
     extends MockCubit<CollaboratorInviteActionsState>
     implements CollaboratorInviteActionsCubit {}
+
+class _MockConversationReactionsCubit
+    extends MockBloc<ConversationReactionsEvent, ConversationReactionsState>
+    implements ConversationReactionsCubit {}
 
 class _MockVideoEventService extends Mock implements VideoEventService {}
 
@@ -66,6 +71,7 @@ void main() {
   group(ConversationView, () {
     late _MockConversationBloc mockBloc;
     late _MockCollaboratorInviteActionsCubit mockInviteActionsCubit;
+    late _MockConversationReactionsCubit mockReactionsCubit;
     late _MockVideoEventService mockVideoEventService;
     late MockNostrClient mockNostrClient;
     late _MockAuthService mockAuthService;
@@ -88,9 +94,18 @@ void main() {
       VisibilityDetectorController.instance.updateInterval = Duration.zero;
       mockBloc = _MockConversationBloc();
       mockInviteActionsCubit = _MockCollaboratorInviteActionsCubit();
+      mockReactionsCubit = _MockConversationReactionsCubit();
       mockVideoEventService = _MockVideoEventService();
       mockNostrClient = createMockNostrService();
       mockAuthService = _MockAuthService(currentPubkey);
+
+      whenListen(
+        mockReactionsCubit,
+        Stream<ConversationReactionsState>.value(
+          const ConversationReactionsState(),
+        ),
+        initialState: const ConversationReactionsState(),
+      );
 
       when(() => mockInviteActionsCubit.state).thenReturn(
         const CollaboratorInviteActionsState(),
@@ -135,8 +150,11 @@ void main() {
           value: mockBloc,
           child: BlocProvider<CollaboratorInviteActionsCubit>.value(
             value: mockInviteActionsCubit,
-            child: const ConversationView(
-              participantPubkeys: [otherPubkey],
+            child: BlocProvider<ConversationReactionsCubit>.value(
+              value: mockReactionsCubit,
+              child: const ConversationView(
+                participantPubkeys: [otherPubkey],
+              ),
             ),
           ),
         ),

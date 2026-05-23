@@ -685,8 +685,8 @@ String _$muteServiceHash() => r'a7faf00b4fe5d420db0bff450d444db5aa5d4934';
 /// Non-nullable: the repository works without keys at construction time.
 /// Read operations return cached/empty data; write operations check keys.
 
-@ProviderFor(dmRepository)
-const dmRepositoryProvider = DmRepositoryProvider._();
+@ProviderFor(dmReactionsRepository)
+const dmReactionsRepositoryProvider = DmReactionsRepositoryProvider._();
 
 /// Provider for NIP-17 DM repository.
 ///
@@ -712,9 +712,14 @@ const dmRepositoryProvider = DmRepositoryProvider._();
 /// Non-nullable: the repository works without keys at construction time.
 /// Read operations return cached/empty data; write operations check keys.
 
-final class DmRepositoryProvider
-    extends $FunctionalProvider<DmRepository, DmRepository, DmRepository>
-    with $Provider<DmRepository> {
+final class DmReactionsRepositoryProvider
+    extends
+        $FunctionalProvider<
+          DmReactionsRepository,
+          DmReactionsRepository,
+          DmReactionsRepository
+        >
+    with $Provider<DmReactionsRepository> {
   /// Provider for NIP-17 DM repository.
   ///
   /// Creates a [DmRepository] that handles receiving, decrypting, persisting,
@@ -738,6 +743,49 @@ final class DmRepositoryProvider
   ///
   /// Non-nullable: the repository works without keys at construction time.
   /// Read operations return cached/empty data; write operations check keys.
+  const DmReactionsRepositoryProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'dmReactionsRepositoryProvider',
+        isAutoDispose: false,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$dmReactionsRepositoryHash();
+
+  @$internal
+  @override
+  $ProviderElement<DmReactionsRepository> $createElement(
+    $ProviderPointer pointer,
+  ) => $ProviderElement(pointer);
+
+  @override
+  DmReactionsRepository create(Ref ref) {
+    return dmReactionsRepository(ref);
+  }
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(DmReactionsRepository value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<DmReactionsRepository>(value),
+    );
+  }
+}
+
+String _$dmReactionsRepositoryHash() =>
+    r'ff6af5b7b6e76436e3c231882d84ad1c5aea4a12';
+
+@ProviderFor(dmRepository)
+const dmRepositoryProvider = DmRepositoryProvider._();
+
+final class DmRepositoryProvider
+    extends $FunctionalProvider<DmRepository, DmRepository, DmRepository>
+    with $Provider<DmRepository> {
   const DmRepositoryProvider._()
     : super(
         from: null,
@@ -771,7 +819,7 @@ final class DmRepositoryProvider
   }
 }
 
-String _$dmRepositoryHash() => r'8e673c2c819f25d57a801bee40d3104534bfc682';
+String _$dmRepositoryHash() => r'070777d4239684a9bd3665ea8f417b6399c9ba61';
 
 /// Provider for CommentsRepository instance
 ///

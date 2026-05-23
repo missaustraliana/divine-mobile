@@ -12,6 +12,7 @@ import 'package:crypto/crypto.dart';
 import 'package:db_client/db_client.dart';
 import 'package:dm_repository/src/collaborator_invite_recovery.dart';
 import 'package:dm_repository/src/dm_decryption_worker.dart';
+import 'package:dm_repository/src/dm_reactions_repository.dart';
 import 'package:dm_repository/src/dm_repository_reportable_sites.dart';
 import 'package:dm_repository/src/dm_sync_state.dart';
 import 'package:dm_repository/src/nip17_message_service.dart';
@@ -101,6 +102,7 @@ class DmRepository {
     RumorDecryptor? rumorDecryptor,
     Nip04Decryptor? nip04Decryptor,
     DmRepositoryErrorReporter? errorReporter,
+    DmReactionsRepository? reactionsRepository,
   }) : _nostrClient = nostrClient,
        _directMessagesDao = directMessagesDao,
        _conversationsDao = conversationsDao,
@@ -111,7 +113,8 @@ class DmRepository {
        _signer = signer,
        _rumorDecryptor = rumorDecryptor ?? GiftWrapUtil.getRumorEvent,
        _nip04Decryptor = nip04Decryptor,
-       _errorReporter = errorReporter;
+       _errorReporter = errorReporter,
+       _reactionsRepository = reactionsRepository;
 
   final NostrClient _nostrClient;
   final DirectMessagesDao _directMessagesDao;
@@ -132,6 +135,12 @@ class DmRepository {
   RumorDecryptor _rumorDecryptor;
   Nip04Decryptor? _nip04Decryptor;
   final DmRepositoryErrorReporter? _errorReporter;
+
+  /// Optional sibling repository for NIP-25 reactions on DMs. When wired,
+  /// [_handleGiftWrapEvent] routes kind-7 rumors to it instead of
+  /// persisting them as DMs. Nullable to keep existing tests working
+  /// without rewiring; production injects it via `dmRepositoryProvider`.
+  final DmReactionsRepository? _reactionsRepository;
 
   StreamSubscription<Event>? _giftWrapSubscription;
   Timer? _reconnectTimer;
@@ -500,6 +509,17 @@ class DmRepository {
         Log.debug(
           'Failed to decrypt gift wrap event ${giftWrapEvent.id}',
           category: LogCategory.system,
+        );
+        return;
+      }
+
+      // NIP-17 spec line 14 explicitly permits kind 7 reactions inside
+      // the gift-wrap envelope. Route them to the reactions repository
+      // before the DM-only kinds gate below. #4633.
+      if (rumorEvent.kind == EventKind.reaction) {
+        await _reactionsRepository?.persistIncoming(
+          rumorEvent: rumorEvent,
+          giftWrapId: giftWrapEvent.id,
         );
         return;
       }

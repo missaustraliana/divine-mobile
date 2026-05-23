@@ -9692,6 +9692,72 @@ abstract class AppLocalizations {
   /// **'Report'**
   String get dmMessageActionReport;
 
+  /// Screen-reader label for the gesture that opens the reaction picker on a DM bubble.
+  ///
+  /// In en, this message translates to:
+  /// **'Open reaction picker'**
+  String get dmReactionPickerOpenA11yLabel;
+
+  /// Screen-reader label for the '+' button at the end of the quick-row that opens the full emoji picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Add custom emoji reaction'**
+  String get dmReactionAddCustomA11yLabel;
+
+  /// Screen-reader label for a reaction chip created by the current account.
+  ///
+  /// In en, this message translates to:
+  /// **'Your reaction: {emoji}'**
+  String dmReactionChipOwnA11yLabel(String emoji);
+
+  /// Screen-reader label for a reaction chip created by another participant.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} reacted with {emoji}'**
+  String dmReactionChipOtherA11yLabel(String name, String emoji);
+
+  /// Screen-reader label for a reaction chip whose publish is in flight.
+  ///
+  /// In en, this message translates to:
+  /// **'Sending reaction: {emoji}'**
+  String dmReactionChipPendingA11yLabel(String emoji);
+
+  /// Screen-reader label for a reaction chip whose publish failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Reaction failed, double tap to retry'**
+  String get dmReactionChipFailedA11yLabel;
+
+  /// Live-region announcement on chip retry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retrying reaction'**
+  String get dmReactionChipRetryAnnouncement;
+
+  /// Live-region announcement after a reaction successfully publishes.
+  ///
+  /// In en, this message translates to:
+  /// **'Reaction sent'**
+  String get dmReactionChipSuccessAnnouncement;
+
+  /// Toast hint shown when a reaction publish fails and the user is likely offline.
+  ///
+  /// In en, this message translates to:
+  /// **'Reaction will retry when you\'re online'**
+  String get dmReactionPickerOfflineHint;
+
+  /// Title of the bottom sheet showing who reacted with which emoji. v1 only used in group conversations.
+  ///
+  /// In en, this message translates to:
+  /// **'Reactions'**
+  String get dmReactionDetailSheetTitle;
+
+  /// Row in the reaction detail sheet showing one reactor and their emoji.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} reacted with {emoji}'**
+  String dmReactionDetailSheetReactorLabel(String name, String emoji);
+
   /// Label for the Bold formatting action in the DM composer's text-selection context menu. Wraps the selected text with markdown bold markers (e.g. **text**).
   ///
   /// In en, this message translates to:

@@ -5564,6 +5564,49 @@ class AppLocalizationsBg extends AppLocalizations {
   String get dmMessageActionReport => 'Report';
 
   @override
+  String get dmReactionPickerOpenA11yLabel => 'Open reaction picker';
+
+  @override
+  String get dmReactionAddCustomA11yLabel => 'Add custom emoji reaction';
+
+  @override
+  String dmReactionChipOwnA11yLabel(String emoji) {
+    return 'Your reaction: $emoji';
+  }
+
+  @override
+  String dmReactionChipOtherA11yLabel(String name, String emoji) {
+    return '$name reacted with $emoji';
+  }
+
+  @override
+  String dmReactionChipPendingA11yLabel(String emoji) {
+    return 'Sending reaction: $emoji';
+  }
+
+  @override
+  String get dmReactionChipFailedA11yLabel =>
+      'Reaction failed, double tap to retry';
+
+  @override
+  String get dmReactionChipRetryAnnouncement => 'Retrying reaction';
+
+  @override
+  String get dmReactionChipSuccessAnnouncement => 'Reaction sent';
+
+  @override
+  String get dmReactionPickerOfflineHint =>
+      'Reaction will retry when you\'re online';
+
+  @override
+  String get dmReactionDetailSheetTitle => 'Reactions';
+
+  @override
+  String dmReactionDetailSheetReactorLabel(String name, String emoji) {
+    return '$name reacted with $emoji';
+  }
+
+  @override
   String get dmFormatBold => 'Получер';
 
   @override

@@ -1,0 +1,539 @@
+// ABOUTME: Repository for NIP-25 emoji reactions on NIP-17 DMs.
+// ABOUTME: Reactions ride the same seal+gift-wrap envelope as DM
+// ABOUTME: messages — kind 7 rumor wrapped to recipient + self. Privacy
+// ABOUTME: comes from envelope reuse, not a custom kind or scheme.
+
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:db_client/db_client.dart';
+import 'package:dm_repository/src/dm_reactions_repository_reportable_sites.dart';
+import 'package:dm_repository/src/dm_repository.dart';
+import 'package:dm_repository/src/nip17_message_service.dart';
+import 'package:meta/meta.dart';
+import 'package:models/models.dart';
+import 'package:nostr_sdk/event.dart';
+import 'package:nostr_sdk/event_kind.dart';
+import 'package:unified_logger/unified_logger.dart';
+
+/// Reporter port for forwarding DAO-layer surprises to Crashlytics.
+///
+/// Wired in the app layer to `CrashReportingService.instance.recordError`.
+/// Network/IO failures from `sendRumor` are NOT routed through this —
+/// only DAO surprises are Reportable per the error-handling matrix.
+typedef DmReactionsRepositoryErrorReporter =
+    void Function(
+      Object error,
+      StackTrace stackTrace, {
+      required String site,
+    });
+
+/// Public outcome of an outgoing reaction publish attempt.
+@immutable
+class DmReactionPublishResult {
+  /// Construct a publish result.
+  const DmReactionPublishResult({
+    required this.success,
+    required this.rumorId,
+    this.errorMessage,
+  });
+
+  /// Whether the gift-wrap publish landed for the recipient.
+  final bool success;
+
+  /// The reaction rumor id used. Stable across retries.
+  final String rumorId;
+
+  /// One-line summary for logs; never user-facing copy.
+  final String? errorMessage;
+}
+
+/// Repository for DM emoji reactions.
+///
+/// Public surface:
+/// - `publish` — optimistic insert + wrap + send.
+/// - `removeOwn` — NIP-09 kind-5 deletion of an own reaction.
+/// - `watchForConversation` — Drift stream for the chip render path.
+/// - `persistIncoming` — entry point for the receive pipeline (called
+///   from `DmRepository._handleGiftWrapEvent` when `rumor.kind == 7`).
+class DmReactionsRepository {
+  /// Construct the repository. Most fields are nullable for the legacy
+  /// dependency-injection pattern where credentials are bound after
+  /// auth via [setCredentials].
+  DmReactionsRepository({
+    required DmReactionsDao reactionsDao,
+    NIP17MessageService? messageService,
+    String? userPubkey,
+    DmReactionsRepositoryErrorReporter? errorReporter,
+  }) : _reactionsDao = reactionsDao,
+       _messageService = messageService,
+       _userPubkey = userPubkey ?? '',
+       _errorReporter = errorReporter;
+
+  final DmReactionsDao _reactionsDao;
+  NIP17MessageService? _messageService;
+  String _userPubkey;
+  final DmReactionsRepositoryErrorReporter? _errorReporter;
+
+  /// Maximum permitted reaction content length. NIP-25 has no hard cap,
+  /// but anything over ~128 chars is almost certainly malformed.
+  static const int _maxReactionContentLength = 128;
+
+  /// Hard cap on a single publish round-trip. Nostr publishes have no
+  /// inherent timeout — a stalled relay socket can leave the await
+  /// hanging until the process is restarted. Capping at 15 s lets the
+  /// UI surface a retryable failure within a tap-test attention span.
+  static const Duration _publishTimeout = Duration(seconds: 15);
+
+  /// Has the repository been wired with auth credentials?
+  bool get isInitialized => _messageService != null && _userPubkey.isNotEmpty;
+
+  /// Set the credentials needed for outgoing publishes.
+  void setCredentials({
+    required String userPubkey,
+    required NIP17MessageService messageService,
+  }) {
+    _userPubkey = userPubkey;
+    _messageService = messageService;
+  }
+
+  /// Clear credentials (sign-out path).
+  void clearCredentials() {
+    _userPubkey = '';
+    _messageService = null;
+  }
+
+  /// Reactive stream of every live reaction in [conversationId] for the
+  /// current account. Empty list when uninitialized.
+  Stream<List<DmReaction>> watchForConversation(String conversationId) {
+    if (_userPubkey.isEmpty) {
+      return Stream<List<DmReaction>>.value(const <DmReaction>[]);
+    }
+    return _reactionsDao
+        .watchForConversation(
+          conversationId: conversationId,
+          ownerPubkey: _userPubkey,
+        )
+        .map((rows) => rows.map(_rowToModel).toList());
+  }
+
+  /// Publish a new reaction. Performs cap-at-one supersede when the
+  /// reactor already has a live reaction on this target.
+  Future<DmReactionPublishResult> publish({
+    required String conversationId,
+    required String targetMessageId,
+    required String targetMessageAuthor,
+    required String emoji,
+  }) async {
+    final messageService = _messageService;
+    if (messageService == null || _userPubkey.isEmpty) {
+      return const DmReactionPublishResult(
+        success: false,
+        rumorId: '',
+        errorMessage: 'Repository not initialized',
+      );
+    }
+
+    final prior = await _reactionsDao.getOwnLiveReaction(
+      targetMessageId: targetMessageId,
+      reactorPubkey: _userPubkey,
+      ownerPubkey: _userPubkey,
+    );
+    if (prior != null) {
+      unawaited(
+        _supersedePrior(
+          priorRow: prior,
+          targetMessageAuthor: targetMessageAuthor,
+          messageService: messageService,
+        ),
+      );
+    }
+
+    final additionalTags = <List<String>>[
+      ['e', targetMessageId],
+      ['p', targetMessageAuthor],
+      ['k', EventKind.privateDirectMessage.toString()],
+    ];
+    final rumor = messageService.buildRumor(
+      recipientPubkey: targetMessageAuthor,
+      content: emoji,
+      eventKind: EventKind.reaction,
+      additionalTags: additionalTags,
+    );
+    final rumorId = rumor.id;
+
+    try {
+      await _reactionsDao.insertOptimistic(
+        placeholderId: rumorId,
+        conversationId: conversationId,
+        targetMessageId: targetMessageId,
+        targetMessageAuthor: targetMessageAuthor,
+        reactorPubkey: _userPubkey,
+        emoji: emoji,
+        createdAt: rumor.createdAt,
+        ownerPubkey: _userPubkey,
+        rumorEventJson: jsonEncode(rumor.toJson()),
+      );
+    } on Object catch (e, st) {
+      _errorReporter?.call(
+        e,
+        st,
+        site: DmReactionsRepositoryReportableSites.publishOptimisticInsert,
+      );
+      return DmReactionPublishResult(
+        success: false,
+        rumorId: rumorId,
+        errorMessage: 'Optimistic insert failed',
+      );
+    }
+
+    try {
+      final result = await _sendRumorWithTimeout(
+        messageService: messageService,
+        rumor: rumor,
+        recipientPubkey: targetMessageAuthor,
+      );
+      switch (result) {
+        case NIP17SendSuccess():
+          try {
+            await _reactionsDao.swapPlaceholderId(
+              placeholderId: rumorId,
+              realRumorId: rumorId,
+              ownerPubkey: _userPubkey,
+            );
+          } on Object catch (e, st) {
+            _errorReporter?.call(
+              e,
+              st,
+              site: DmReactionsRepositoryReportableSites.publishSwapPlaceholder,
+            );
+          }
+          return DmReactionPublishResult(
+            success: true,
+            rumorId: rumorId,
+          );
+        case NIP17SendFailure(:final error):
+          await _reactionsDao.markFailed(
+            placeholderId: rumorId,
+            ownerPubkey: _userPubkey,
+          );
+          return DmReactionPublishResult(
+            success: false,
+            rumorId: rumorId,
+            errorMessage: error,
+          );
+      }
+    } on Object catch (e) {
+      Log.warning(
+        'DM reaction publish threw: $e',
+        category: LogCategory.system,
+      );
+      await _reactionsDao.markFailed(
+        placeholderId: rumorId,
+        ownerPubkey: _userPubkey,
+      );
+      return DmReactionPublishResult(
+        success: false,
+        rumorId: rumorId,
+        errorMessage: e.toString(),
+      );
+    }
+  }
+
+  /// Retry a previously-failed reaction publish by replaying the same
+  /// rumor (read from `rumor_event_json`).
+  ///
+  /// Reliability contract:
+  /// 1. Marks the DAO row `'pending'` BEFORE the send so the chip
+  ///    reflects in-flight state in the persistent layer — survives a
+  ///    cubit rebuild / hot-restart.
+  /// 2. Wraps the underlying `sendRumor` in a 15 s timeout so a hung
+  ///    relay socket can't lock the user out of further retries.
+  /// 3. On any non-success outcome (timeout, NIP17SendFailure, throw)
+  ///    flips the DAO row back to `'failed'` so the chip is tappable
+  ///    again immediately.
+  Future<DmReactionPublishResult> retry({
+    required String rumorId,
+    required String targetMessageAuthor,
+  }) async {
+    final messageService = _messageService;
+    if (messageService == null || _userPubkey.isEmpty) {
+      return DmReactionPublishResult(
+        success: false,
+        rumorId: rumorId,
+        errorMessage: 'Repository not initialized',
+      );
+    }
+    final rumorJson = await _reactionsDao.getRumorJson(
+      id: rumorId,
+      ownerPubkey: _userPubkey,
+    );
+    if (rumorJson == null) {
+      return DmReactionPublishResult(
+        success: false,
+        rumorId: rumorId,
+        errorMessage: 'No stored rumor to retry',
+      );
+    }
+    final decoded = jsonDecode(rumorJson) as Map<String, dynamic>;
+    final rumor = Event.fromJson(decoded);
+
+    // Persist `pending` so the chip surfaces in-flight state across
+    // a cubit rebuild. If this DAO write fails, we still attempt the
+    // send — the user-visible recovery path is the chip falling back
+    // to `failed` via the next branch.
+    try {
+      await _reactionsDao.markPending(
+        id: rumorId,
+        ownerPubkey: _userPubkey,
+      );
+    } on Object {
+      // best-effort
+    }
+
+    try {
+      final result = await _sendRumorWithTimeout(
+        messageService: messageService,
+        rumor: rumor,
+        recipientPubkey: targetMessageAuthor,
+      );
+      switch (result) {
+        case NIP17SendSuccess():
+          await _reactionsDao.swapPlaceholderId(
+            placeholderId: rumorId,
+            realRumorId: rumorId,
+            ownerPubkey: _userPubkey,
+          );
+          return DmReactionPublishResult(success: true, rumorId: rumorId);
+        case NIP17SendFailure(:final error):
+          await _reactionsDao.markFailed(
+            placeholderId: rumorId,
+            ownerPubkey: _userPubkey,
+          );
+          return DmReactionPublishResult(
+            success: false,
+            rumorId: rumorId,
+            errorMessage: error,
+          );
+      }
+    } on Object catch (e) {
+      Log.warning(
+        'DM reaction retry threw: $e',
+        category: LogCategory.system,
+      );
+      await _reactionsDao.markFailed(
+        placeholderId: rumorId,
+        ownerPubkey: _userPubkey,
+      );
+      return DmReactionPublishResult(
+        success: false,
+        rumorId: rumorId,
+        errorMessage: e.toString(),
+      );
+    }
+  }
+
+  /// Soft-delete an own reaction locally and emit a NIP-09 kind-5
+  /// deletion on the wire. Returns after the local update.
+  Future<void> removeOwn({
+    required String rumorId,
+    required String targetMessageAuthor,
+  }) async {
+    final messageService = _messageService;
+    if (messageService == null || _userPubkey.isEmpty) return;
+    try {
+      await _reactionsDao.softDelete(
+        id: rumorId,
+        ownerPubkey: _userPubkey,
+      );
+    } on Object catch (e, st) {
+      _errorReporter?.call(
+        e,
+        st,
+        site: DmReactionsRepositoryReportableSites.removeOwnSoftDelete,
+      );
+      return;
+    }
+    unawaited(
+      _publishKind5Deletion(
+        reactionEventId: rumorId,
+        recipientPubkey: targetMessageAuthor,
+        messageService: messageService,
+      ),
+    );
+  }
+
+  /// Persist an incoming kind-7 reaction rumor. Called from
+  /// `DmRepository._handleGiftWrapEvent` after rumor extraction.
+  Future<void> persistIncoming({
+    required Event rumorEvent,
+    required String giftWrapId,
+  }) async {
+    if (_userPubkey.isEmpty) return;
+    if (rumorEvent.kind != EventKind.reaction) return;
+    final content = rumorEvent.content;
+    if (content.isEmpty || content.length > _maxReactionContentLength) {
+      Log.debug(
+        'Dropping invalid reaction rumor ${rumorEvent.id} '
+        '(content length: ${content.length})',
+        category: LogCategory.system,
+      );
+      return;
+    }
+    String? targetMessageId;
+    String? targetAuthor;
+    for (final tag in rumorEvent.tags) {
+      if (tag.length >= 2) {
+        if (tag[0] == 'e' && targetMessageId == null) {
+          targetMessageId = tag[1];
+        }
+        if (tag[0] == 'p' && targetAuthor == null) targetAuthor = tag[1];
+      }
+    }
+    if (targetMessageId == null ||
+        targetMessageId.isEmpty ||
+        targetMessageId.length != 64) {
+      Log.debug(
+        'Dropping reaction rumor ${rumorEvent.id} — missing/invalid e tag',
+        category: LogCategory.system,
+      );
+      return;
+    }
+    targetAuthor ??= rumorEvent.pubkey;
+    final conversationId = _resolveConversationIdForReaction(
+      reactorPubkey: rumorEvent.pubkey,
+      targetAuthor: targetAuthor,
+    );
+    if (conversationId == null) return;
+    try {
+      await _reactionsDao.upsertIncoming(
+        id: rumorEvent.id,
+        conversationId: conversationId,
+        targetMessageId: targetMessageId,
+        targetMessageAuthor: targetAuthor,
+        reactorPubkey: rumorEvent.pubkey,
+        emoji: content,
+        createdAt: rumorEvent.createdAt,
+        giftWrapId: giftWrapId,
+        ownerPubkey: _userPubkey,
+      );
+    } on Object catch (e, st) {
+      _errorReporter?.call(
+        e,
+        st,
+        site: DmReactionsRepositoryReportableSites.persistIncomingDaoUpsert,
+      );
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Internals
+  // -------------------------------------------------------------------------
+
+  /// Wrap `sendRumor` with a hard timeout. Nostr publishes have no
+  /// built-in timeout — a stalled socket can keep the await pending
+  /// indefinitely, which (under a `sequential()` event transformer)
+  /// quietly swallows every subsequent retry tap. The `_publishTimeout`
+  /// cap converts those hangs into surfaced `NIP17SendFailure` results.
+  Future<NIP17SendResult> _sendRumorWithTimeout({
+    required NIP17MessageService messageService,
+    required Event rumor,
+    required String recipientPubkey,
+  }) {
+    return messageService
+        .sendRumor(rumorEvent: rumor, recipientPubkey: recipientPubkey)
+        .timeout(
+          _publishTimeout,
+          onTimeout: () => NIP17SendResult.failure(
+            'Reaction publish timed out after '
+            '${_publishTimeout.inSeconds}s',
+          ),
+        );
+  }
+
+  Future<void> _supersedePrior({
+    required DmReactionRow priorRow,
+    required String targetMessageAuthor,
+    required NIP17MessageService messageService,
+  }) async {
+    try {
+      await _reactionsDao.softDelete(
+        id: priorRow.id,
+        ownerPubkey: _userPubkey,
+      );
+    } on Object {
+      // Best-effort; the new publish proceeds regardless.
+    }
+    unawaited(
+      _publishKind5Deletion(
+        reactionEventId: priorRow.id,
+        recipientPubkey: targetMessageAuthor,
+        messageService: messageService,
+      ),
+    );
+  }
+
+  Future<void> _publishKind5Deletion({
+    required String reactionEventId,
+    required String recipientPubkey,
+    required NIP17MessageService messageService,
+  }) async {
+    try {
+      final deletion = messageService.buildRumor(
+        recipientPubkey: recipientPubkey,
+        content: '',
+        eventKind: EventKind.eventDeletion,
+        additionalTags: [
+          ['e', reactionEventId],
+          ['k', EventKind.reaction.toString()],
+        ],
+      );
+      await messageService.sendRumor(
+        rumorEvent: deletion,
+        recipientPubkey: recipientPubkey,
+      );
+    } on Object catch (e) {
+      Log.warning(
+        'DM reaction kind-5 deletion threw: $e',
+        category: LogCategory.system,
+      );
+    }
+  }
+
+  /// Resolve conversation id for an incoming 1:1 reaction. Group
+  /// reactions (3+ participants) need a target-message lookup to recover
+  /// the full participant set — deferred from v1; group reactions drop
+  /// silently rather than mis-attribute to a phantom 1:1.
+  String? _resolveConversationIdForReaction({
+    required String reactorPubkey,
+    required String targetAuthor,
+  }) {
+    if (reactorPubkey != _userPubkey && targetAuthor != _userPubkey) {
+      return null;
+    }
+    final participants = <String>{reactorPubkey, targetAuthor}.toList();
+    if (participants.length != 2) return null;
+    return DmRepository.computeConversationId(participants);
+  }
+
+  DmReaction _rowToModel(DmReactionRow row) {
+    final publishStatus = switch (row.publishStatus) {
+      'pending' => DmReactionPublishStatus.pending,
+      'failed' => DmReactionPublishStatus.failed,
+      'sent' => DmReactionPublishStatus.sent,
+      _ => DmReactionPublishStatus.received,
+    };
+    return DmReaction(
+      id: row.id,
+      conversationId: row.conversationId,
+      targetMessageId: row.targetMessageId,
+      targetMessageAuthor: row.targetMessageAuthor,
+      reactorPubkey: row.reactorPubkey,
+      emoji: row.emoji,
+      createdAt: row.createdAt,
+      ownerPubkey: row.ownerPubkey,
+      publishStatus: publishStatus,
+      giftWrapId: row.giftWrapId,
+    );
+  }
+}
