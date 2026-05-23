@@ -5,6 +5,7 @@ import 'dart:async' show FutureOr;
 import 'dart:io';
 
 import 'package:divine_ui/divine_ui.dart';
+import 'package:dm_repository/dm_repository.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -18,6 +19,7 @@ import 'package:openvine/mixins/scroll_pagination_mixin.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/profile_feed_provider.dart';
 import 'package:openvine/screens/feed/pooled_fullscreen_video_feed_screen.dart';
+import 'package:openvine/widgets/profile/pending_collaborator_invite_banner_cubit.dart';
 import 'package:openvine/widgets/profile/profile_tab_empty_state.dart';
 import 'package:openvine/widgets/profile/profile_tab_error_state.dart';
 import 'package:openvine/widgets/profile/profile_tab_loading_more_sliver.dart';
@@ -274,9 +276,7 @@ class _ProfileVideosGridState extends ConsumerState<ProfileVideosGrid>
             // that hasn't been matched yet.
             final isDuplicate =
                 !matchedTitles.contains(video.title) &&
-                activeUploads.any(
-                  (upload) => upload.title == video.title,
-                );
+                activeUploads.any((upload) => upload.title == video.title);
 
             // Step 3: Mark the title as matched so only the first duplicate
             // per upload is filtered out. Pre-cache the network thumbnail
@@ -342,10 +342,33 @@ class _ProfileVideosGridState extends ConsumerState<ProfileVideosGrid>
             ?.value
             .isLoadingMore ??
         false;
+    final pendingInviteGroups = isOwnProfile
+        ? ref
+              .watch(pendingCollaboratorInviteGroupsProvider)
+              .maybeWhen(
+                data: (groups) => groups,
+                orElse: () => const <PendingCollaboratorInviteGroup>[],
+              )
+        : const <PendingCollaboratorInviteGroup>[];
 
     return CustomScrollView(
       physics: const ClampingScrollPhysics(),
       slivers: [
+        if (pendingInviteGroups.isNotEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Column(
+                children: [
+                  for (final group in pendingInviteGroups)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _PendingCollaboratorInviteBanner(group: group),
+                    ),
+                ],
+              ),
+            ),
+          ),
         SliverPadding(
           padding: EdgeInsets.only(
             bottom: MediaQuery.viewPaddingOf(context).bottom,
@@ -478,4 +501,162 @@ class _VideoGridTile extends StatelessWidget {
       ),
     ),
   );
+}
+
+class _PendingCollaboratorInviteBanner extends ConsumerWidget {
+  const _PendingCollaboratorInviteBanner({required this.group});
+
+  final PendingCollaboratorInviteGroup group;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final group = this.group;
+    final title = group.title?.trim();
+    return BlocProvider(
+      key: ValueKey(ref.watch(collaboratorInviteRecoveryRepositoryProvider)),
+      create: (_) => PendingCollaboratorInviteBannerCubit(
+        ref.read(collaboratorInviteRecoveryRepositoryProvider),
+      ),
+      child:
+          BlocListener<
+            PendingCollaboratorInviteBannerCubit,
+            PendingCollaboratorInviteBannerState
+          >(
+            listenWhen: (previous, current) =>
+                previous.feedback != current.feedback &&
+                current.feedback !=
+                    PendingCollaboratorInviteBannerFeedback.none,
+            listener: (context, state) {
+              final messenger = ScaffoldMessenger.maybeOf(context);
+              if (messenger == null) return;
+              final l10n = context.l10n;
+              final message = switch (state.feedback) {
+                PendingCollaboratorInviteBannerFeedback.retryUnavailable =>
+                  l10n.profileCollaboratorInviteRetryUnavailable,
+                PendingCollaboratorInviteBannerFeedback.retryCompleted =>
+                  l10n.profileCollaboratorInviteRetryResult(
+                    state.remainingInviteCount,
+                  ),
+                PendingCollaboratorInviteBannerFeedback.none => null,
+              };
+              if (message == null) return;
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text(message),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+            child:
+                BlocBuilder<
+                  PendingCollaboratorInviteBannerCubit,
+                  PendingCollaboratorInviteBannerState
+                >(
+                  builder: (context, state) {
+                    return DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: VineTheme.surfaceContainer,
+                        borderRadius: BorderRadius.circular(
+                          _PendingInviteBannerTokens.borderRadius,
+                        ),
+                        border: Border.all(
+                          color: VineTheme.outlineMuted,
+                          width: _PendingInviteBannerTokens.borderWidth,
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(
+                          _PendingInviteBannerTokens.padding,
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Padding(
+                              padding: EdgeInsets.only(
+                                top: _PendingInviteBannerTokens.iconTopPadding,
+                              ),
+                              child: ExcludeSemantics(
+                                child: DivineIcon(
+                                  icon: DivineIconName.envelopeSimple,
+                                  color: VineTheme.vineGreen,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(
+                              width: _PendingInviteBannerTokens.contentSpacing,
+                            ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    context.l10n
+                                        .profileCollaboratorInvitePendingHeadline(
+                                          group.inviteCount,
+                                        ),
+                                    style: VineTheme.titleMediumFont(
+                                      color: VineTheme.onSurface,
+                                    ),
+                                  ),
+                                  const SizedBox(
+                                    height:
+                                        _PendingInviteBannerTokens.textSpacing,
+                                  ),
+                                  Text(
+                                    title == null || title.isEmpty
+                                        ? context
+                                              .l10n
+                                              .profileCollaboratorInvitePendingDetail
+                                        : context.l10n
+                                              .profileCollaboratorInvitePendingDetailWithTitle(
+                                                title,
+                                              ),
+                                    style: VineTheme.bodySmallFont(
+                                      color: VineTheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(
+                              width: _PendingInviteBannerTokens.contentSpacing,
+                            ),
+                            DivineButton(
+                              label: state.isRetrying
+                                  ? context
+                                        .l10n
+                                        .profileCollaboratorInviteRetryingAction
+                                  : context
+                                        .l10n
+                                        .profileCollaboratorInviteRetryAction,
+                              size: DivineButtonSize.small,
+                              onPressed: state.isRetrying
+                                  ? null
+                                  : () {
+                                      context
+                                          .read<
+                                            PendingCollaboratorInviteBannerCubit
+                                          >()
+                                          .retry(group);
+                                    },
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+          ),
+    );
+  }
+}
+
+abstract final class _PendingInviteBannerTokens {
+  static const double borderRadius = 18;
+  static const double borderWidth = 1.5;
+  static const double padding = 14;
+  static const double iconTopPadding = 2;
+  static const double contentSpacing = 12;
+  static const double textSpacing = 4;
 }

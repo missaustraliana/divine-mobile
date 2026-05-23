@@ -54,6 +54,33 @@ final collaboratorInviteStateStoreProvider =
       );
     });
 
+final collaboratorInviteRecoveryRepositoryProvider = Provider<DmRepository?>((
+  ref,
+) {
+  final authService = ref.watch(authServiceProvider);
+  ref.watch(currentAuthStateProvider);
+  final readiness = ref.watch(nostrSessionProvider);
+
+  final userPubkey = authService.currentPublicKeyHex;
+  if (userPubkey == null || userPubkey.isEmpty) return null;
+  if (!readiness.isReadyForActiveClient || readiness.pubkey != userPubkey) {
+    return null;
+  }
+
+  return ref.watch(dmRepositoryProvider);
+});
+
+final pendingCollaboratorInviteGroupsProvider =
+    StreamProvider<List<PendingCollaboratorInviteGroup>>((ref) {
+      final repository = ref.watch(
+        collaboratorInviteRecoveryRepositoryProvider,
+      );
+      if (repository == null) {
+        return Stream.value(const <PendingCollaboratorInviteGroup>[]);
+      }
+      return repository.watchPendingCollaboratorInviteGroups();
+    });
+
 /// Per-video collaborator confirmation status. Returns `null` until
 /// [nostrSessionProvider] has a ready active client, so consumers render a safe
 /// fallback instead of capturing a stale Nostr client.
