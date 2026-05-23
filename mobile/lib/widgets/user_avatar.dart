@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:openvine/widgets/vine_cached_image.dart';
 import 'package:unified_logger/unified_logger.dart';
 
@@ -53,6 +54,20 @@ class UserAvatar extends StatelessWidget {
   /// instead of the size-derived default.
   final double? cornerRadius;
 
+  @visibleForTesting
+  static bool isSvgImageUrl(String? url) {
+    if (url == null || url.isEmpty) return false;
+
+    final lower = url.toLowerCase();
+    if (lower.endsWith('.svg')) return true;
+
+    try {
+      return Uri.parse(url).path.toLowerCase().endsWith('.svg');
+    } on FormatException {
+      return false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final avatar = SizedBox.square(
@@ -91,33 +106,47 @@ class UserAvatar extends StatelessWidget {
 
   double get _borderWidth => size >= 120 ? 3 : 1;
 
+  bool get _hasNetworkImage => imageUrl != null && imageUrl!.isNotEmpty;
+
+  bool get _isSvgImageUrl => isSvgImageUrl(imageUrl);
+
+  Widget _buildPlaceholder() => _Placeholder(
+    size: size,
+    placeholderTone: placeholderTone,
+    placeholderSeed: placeholderSeed,
+    semanticLabel: semanticLabel,
+    imageUrl: imageUrl,
+    name: name,
+  );
+
   Widget _buildContent() {
     if (imageProvider != null) {
       return Image(
         image: imageProvider!,
         fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => _Placeholder(
-          size: size,
-          placeholderTone: placeholderTone,
-          placeholderSeed: placeholderSeed,
-          semanticLabel: semanticLabel,
-          imageUrl: imageUrl,
-          name: name,
-        ),
+        errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
       );
     }
 
-    if (imageUrl != null && imageUrl!.isNotEmpty) {
+    if (_hasNetworkImage && _isSvgImageUrl) {
+      return SvgPicture.network(
+        imageUrl!,
+        fit: BoxFit.cover,
+        placeholderBuilder: (context) => _buildPlaceholder(),
+        errorBuilder: (context, error, stackTrace) {
+          UnifiedLogger.debug(
+            'Avatar SVG failed to load URL: $imageUrl - Error: $error',
+            name: 'UserAvatar',
+          );
+          return _buildPlaceholder();
+        },
+      );
+    }
+
+    if (_hasNetworkImage) {
       return VineCachedImage(
         imageUrl: imageUrl!,
-        placeholder: (context, url) => _Placeholder(
-          size: size,
-          placeholderTone: placeholderTone,
-          placeholderSeed: placeholderSeed,
-          semanticLabel: semanticLabel,
-          imageUrl: imageUrl,
-          name: name,
-        ),
+        placeholder: (context, url) => _buildPlaceholder(),
         errorWidget: (context, url, error) {
           if (error.toString().contains('Invalid image data') ||
               error.toString().contains('Image codec failed')) {
@@ -131,26 +160,12 @@ class UserAvatar extends StatelessWidget {
               name: 'UserAvatar',
             );
           }
-          return _Placeholder(
-            size: size,
-            placeholderTone: placeholderTone,
-            placeholderSeed: placeholderSeed,
-            semanticLabel: semanticLabel,
-            imageUrl: imageUrl,
-            name: name,
-          );
+          return _buildPlaceholder();
         },
       );
     }
 
-    return _Placeholder(
-      size: size,
-      placeholderTone: placeholderTone,
-      placeholderSeed: placeholderSeed,
-      semanticLabel: semanticLabel,
-      imageUrl: imageUrl,
-      name: name,
-    );
+    return _buildPlaceholder();
   }
 }
 
