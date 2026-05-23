@@ -4827,7 +4827,7 @@ void main() {
         controller.dispose();
       });
 
-      test('error during ready state does not retry', () async {
+      test('generic error during ready state does not retry', () async {
         final controller = VideoFeedController(
           videos: createTestVideos(count: 1),
           pool: pool,
@@ -4857,6 +4857,44 @@ void main() {
         verifyNever(
           () => setup.player.open(any(), play: any(named: 'play')),
         );
+
+        controller.dispose();
+      });
+
+      test('404 error during ready state retries with next source', () async {
+        const hash =
+            'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
+        const rawUrl = 'https://media.divine.video/$hash';
+        const hlsUrl = 'https://media.divine.video/$hash/hls/master.m3u8';
+        final controller = VideoFeedController(
+          videos: const [VideoItem(id: 'divine-video', url: rawUrl)],
+          pool: pool,
+          preloadAhead: 0,
+          preloadBehind: 0,
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        final setup = playerSetups[rawUrl]!;
+
+        setup.bufferingController.add(false);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        expect(controller.isVideoReady(0), isTrue);
+
+        clearInteractions(setup.player);
+
+        setup.errorController.add('404 Not Found');
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        verify(setup.player.pause).called(1);
+        verify(
+          () => setup.player.open(
+            any(that: isA<Media>().having((m) => m.uri, 'uri', hlsUrl)),
+            play: false,
+          ),
+        ).called(1);
+        expect(controller.getLoadState(0), equals(LoadState.ready));
 
         controller.dispose();
       });
