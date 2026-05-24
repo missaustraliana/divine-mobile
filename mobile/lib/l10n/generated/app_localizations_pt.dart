@@ -2052,6 +2052,13 @@ class AppLocalizationsPt extends AppLocalizations {
       'Exporte, faça backup e restaure suas chaves Nostr';
 
   @override
+  String get nostrSettingsClientAttribution => 'Atribuição do cliente';
+
+  @override
+  String get nostrSettingsClientAttributionSubtitle =>
+      'Inclua uma tag de cliente Divine nos eventos que você publica para que outros apps Nostr possam atribuí-los corretamente.';
+
+  @override
   String get nostrSettingsRemoveKeys => 'Remover chaves do dispositivo';
 
   @override

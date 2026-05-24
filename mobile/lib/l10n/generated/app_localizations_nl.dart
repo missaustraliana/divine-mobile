@@ -2041,6 +2041,13 @@ class AppLocalizationsNl extends AppLocalizations {
       'Exporteer, back-up en herstel je Nostr-sleutels';
 
   @override
+  String get nostrSettingsClientAttribution => 'Clienttoeschrijving';
+
+  @override
+  String get nostrSettingsClientAttributionSubtitle =>
+      'Voeg een Divine-clienttag toe aan events die je publiceert, zodat andere Nostr-apps ze correct kunnen toeschrijven.';
+
+  @override
   String get nostrSettingsRemoveKeys => 'Sleutels van apparaat verwijderen';
 
   @override

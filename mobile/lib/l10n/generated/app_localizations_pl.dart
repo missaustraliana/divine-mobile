@@ -2069,6 +2069,13 @@ class AppLocalizationsPl extends AppLocalizations {
       'Eksportuj, twórz kopie zapasowe i przywracaj swoje klucze Nostr';
 
   @override
+  String get nostrSettingsClientAttribution => 'Atrybucja klienta';
+
+  @override
+  String get nostrSettingsClientAttributionSubtitle =>
+      'Dodawaj tag klienta Divine do publikowanych zdarzeń, aby inne aplikacje Nostr mogły je poprawnie przypisać.';
+
+  @override
   String get nostrSettingsRemoveKeys => 'Usuń klucze z urządzenia';
 
   @override
