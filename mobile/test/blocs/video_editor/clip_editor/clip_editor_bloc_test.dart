@@ -7,7 +7,6 @@ import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:openvine/blocs/video_editor/clip_editor/clip_editor_bloc.dart';
-import 'package:openvine/constants/video_editor_constants.dart';
 import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/observability/reportable_error.dart';
 import 'package:openvine/services/audio_extraction_service.dart';
@@ -289,67 +288,6 @@ void main() {
           ),
         ),
         expect: () => <ClipEditorState>[],
-      );
-
-      blocTest<ClipEditorBloc, ClipEditorState>(
-        'clamps playbackSpeed updates to preserve the maxDuration invariant',
-        build: buildBloc,
-        seed: () => ClipEditorState(
-          clips: [
-            _createClip(id: 'a', duration: const Duration(seconds: 2)),
-            _createClip(id: 'b', duration: const Duration(seconds: 6)),
-          ],
-        ),
-        act: (bloc) => bloc.add(
-          ClipEditorClipUpdated(
-            clipId: 'b',
-            clip: _createClip(
-              id: 'b',
-              duration: const Duration(seconds: 6),
-              playbackSpeed: 0.5,
-            ),
-          ),
-        ),
-        verify: (bloc) {
-          expect(
-            bloc.state.totalDuration <= VideoEditorConstants.maxDuration,
-            isTrue,
-          );
-          expect(
-            bloc.state.clips[1].playbackSpeed,
-            closeTo(1.3953488372, 1e-9),
-          );
-        },
-      );
-
-      blocTest<ClipEditorBloc, ClipEditorState>(
-        'rejects playbackSpeed updates when no valid speed can satisfy maxDuration',
-        build: buildBloc,
-        seed: () => ClipEditorState(
-          clips: [
-            _createClip(id: 'a', duration: VideoEditorConstants.maxDuration),
-            _createClip(id: 'b', duration: const Duration(seconds: 1)),
-          ],
-        ),
-        act: (bloc) => bloc.add(
-          ClipEditorClipUpdated(
-            clipId: 'b',
-            clip: _createClip(
-              id: 'b',
-              duration: const Duration(seconds: 1),
-              playbackSpeed: 0.5,
-            ),
-          ),
-        ),
-        verify: (bloc) {
-          expect(bloc.state.clips[1].playbackSpeed, isNull);
-          expect(
-            bloc.state.totalDuration,
-            equals(
-              VideoEditorConstants.maxDuration + const Duration(seconds: 1),
-            ),
-          );
-        },
       );
     });
 

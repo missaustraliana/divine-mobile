@@ -1,9 +1,8 @@
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:openvine/blocs/video_editor/clip_editor/clip_editor_bloc.dart';
-import 'package:openvine/constants/video_editor_constants.dart';
+import 'package:openvine/extensions/video_editor_extensions.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/services/video_editor/video_editor_split_service.dart';
 import 'package:openvine/widgets/video_editor/main_editor/video_editor_scope.dart';
@@ -11,17 +10,16 @@ import 'package:openvine/widgets/video_editor/timeline_editor/controls/video_edi
 import 'package:openvine/widgets/video_editor/timeline_editor/controls/video_editor_timeline_controls.dart';
 
 /// Controls shown when a clip is in editing mode: Delete, Copy, Split, Done.
-class TimelineClipControls extends ConsumerStatefulWidget {
+class TimelineClipControls extends StatefulWidget {
   const TimelineClipControls({required this.playheadPosition, super.key});
 
   final ValueNotifier<Duration> playheadPosition;
 
   @override
-  ConsumerState<TimelineClipControls> createState() =>
-      _TimelineClipControlsState();
+  State<TimelineClipControls> createState() => _TimelineClipControlsState();
 }
 
-class _TimelineClipControlsState extends ConsumerState<TimelineClipControls> {
+class _TimelineClipControlsState extends State<TimelineClipControls> {
   @override
   Widget build(BuildContext context) {
     final clips = context.select((ClipEditorBloc b) => b.state.clips);
@@ -31,8 +29,8 @@ class _TimelineClipControlsState extends ConsumerState<TimelineClipControls> {
     );
 
     return VideoEditorTimelineControls(
-      onDelete: isLastClip ? null : () => _deleteClip(context, ref),
-      onDuplicated: () => _duplicateClip(context, ref),
+      onDelete: isLastClip ? null : () => _deleteClip(context),
+      onDuplicated: () => _duplicateClip(context),
       onSplit: () => _splitClip(context),
       onSpeed: () => _setPlaybackSpeed(context),
       onExtractAudio: () => _requestExtractAudio(context),
@@ -72,21 +70,11 @@ class _TimelineClipControlsState extends ConsumerState<TimelineClipControls> {
 
     if (result == null || !mounted) return;
 
-    final updated = ClipEditorBloc.normalizeClipUpdate(
-      clips: state.clips,
-      clipIndex: state.currentClipIndex,
-      currentClip: clip,
-      proposedClip: clip.copyWith(playbackSpeed: result),
-    );
+    final updated = clip.copyWith(playbackSpeed: result);
     bloc.add(ClipEditorClipUpdated(clipId: clip.id, clip: updated));
 
-    editor.addHistory(
-      meta: {
-        ...editor.stateManager.activeMeta,
-        VideoEditorConstants.clipsStateHistoryKey: state.clips
-            .map((c) => c.id == clip.id ? updated.toJson() : c.toJson())
-            .toList(),
-      },
+    editor.setClipState(
+      state.clips.map((c) => c.id == clip.id ? updated : c).toList(),
     );
   }
 
@@ -98,7 +86,7 @@ class _TimelineClipControlsState extends ConsumerState<TimelineClipControls> {
     );
   }
 
-  void _deleteClip(BuildContext context, WidgetRef ref) {
+  void _deleteClip(BuildContext context) {
     final bloc = context.read<ClipEditorBloc>();
     final state = bloc.state;
     final clipId = state.clips[state.currentClipIndex].id;
@@ -111,18 +99,12 @@ class _TimelineClipControlsState extends ConsumerState<TimelineClipControls> {
     }
     bloc.add(const ClipEditorEditingStopped());
 
-    editor.addHistory(
-      meta: {
-        ...editor.stateManager.activeMeta,
-        VideoEditorConstants.clipsStateHistoryKey: state.clips
-            .where((clip) => clip.id != clipId)
-            .map((e) => e.toJson())
-            .toList(),
-      },
+    editor.setClipState(
+      state.clips.where((clip) => clip.id != clipId).toList(),
     );
   }
 
-  void _duplicateClip(BuildContext context, WidgetRef ref) {
+  void _duplicateClip(BuildContext context) {
     final bloc = context.read<ClipEditorBloc>();
     final state = bloc.state;
     final clip = state.clips[state.currentClipIndex];
@@ -138,15 +120,7 @@ class _TimelineClipControlsState extends ConsumerState<TimelineClipControls> {
       ..add(ClipEditorClipInserted(index: state.clips.length, clip: copy))
       ..add(const ClipEditorEditingStopped());
 
-    editor.addHistory(
-      meta: {
-        ...editor.stateManager.activeMeta,
-        VideoEditorConstants.clipsStateHistoryKey: [
-          ...state.clips,
-          copy,
-        ].map((e) => e.toJson()).toList(),
-      },
-    );
+    editor.setClipState([...state.clips, copy]);
   }
 
   void _splitClip(BuildContext context) {
