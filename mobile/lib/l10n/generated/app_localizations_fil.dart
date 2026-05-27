@@ -4311,6 +4311,17 @@ class AppLocalizationsFil extends AppLocalizations {
   String get uploadPublishedMessage => 'Na-publish na ang video sa profile mo';
 
   @override
+  String uploadPublishedCountMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Na-publish na ang $count na video sa profile mo',
+      one: 'Na-publish na ang video sa profile mo',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get uploadFailedMessage => 'Hindi nag-upload - subukan ulit';
 
   @override

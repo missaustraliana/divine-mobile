@@ -24,7 +24,6 @@ import 'package:openvine/providers/user_profile_providers.dart';
 import 'package:openvine/screens/apps/apps_directory_screen.dart';
 import 'package:openvine/screens/apps/apps_permissions_screen.dart';
 import 'package:openvine/screens/auth/secure_account_screen.dart';
-import 'package:openvine/screens/auth/welcome_screen.dart';
 import 'package:openvine/screens/badges/badges_screen.dart';
 import 'package:openvine/screens/creator_analytics_screen.dart';
 import 'package:openvine/screens/notification_settings_screen.dart';
@@ -36,6 +35,7 @@ import 'package:openvine/screens/settings/nostr_settings_screen.dart';
 import 'package:openvine/screens/settings/support_center_screen.dart';
 import 'package:openvine/services/auth_service.dart' hide UserProfile;
 import 'package:openvine/services/nip05_verification_service.dart';
+import 'package:openvine/utils/deferred_login_options_navigator.dart';
 import 'package:openvine/utils/nostr_apps_platform_support.dart';
 import 'package:openvine/utils/nostr_key_utils.dart';
 import 'package:openvine/widgets/user_avatar.dart';
@@ -55,6 +55,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _appVersion = '';
   late final SettingsAccountCubit _accountCubit;
+  final _deferredLoginOptionsNavigator = DeferredLoginOptionsNavigator();
 
   @override
   void initState() {
@@ -69,6 +70,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   void dispose() {
+    _deferredLoginOptionsNavigator.dispose();
     _accountCubit.close();
     super.dispose();
   }
@@ -82,12 +84,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _handleSessionExpired() async {
     final authService = ref.read(authServiceProvider);
-    final router = GoRouter.of(context);
     final refreshed = await authService.tryRefreshExpiredSession();
     if (!mounted) return;
-    if (!refreshed) {
-      router.go(WelcomeScreen.loginOptionsPath);
-    }
+    if (refreshed) return;
+
+    _deferredLoginOptionsNavigator.goAfterUploadsComplete(
+      context: context,
+      publishBloc: context.read(),
+    );
   }
 
   Future<void> _handleSwitchAccount() async {

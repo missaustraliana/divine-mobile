@@ -4050,6 +4050,17 @@ class AppLocalizationsJa extends AppLocalizations {
   String get uploadPublishedMessage => '動画をプロフィールに公開したよ';
 
   @override
+  String uploadPublishedCountMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count本の動画をプロフィールに公開したよ',
+      one: '動画をプロフィールに公開したよ',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get uploadFailedMessage => 'アップロードがうまくいかなかった - もう一回試してみて';
 
   @override

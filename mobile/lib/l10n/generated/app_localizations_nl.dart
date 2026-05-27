@@ -4268,6 +4268,17 @@ class AppLocalizationsNl extends AppLocalizations {
   String get uploadPublishedMessage => 'Video gepubliceerd op je profiel';
 
   @override
+  String uploadPublishedCountMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count videos gepubliceerd op je profiel',
+      one: 'Video gepubliceerd op je profiel',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get uploadFailedMessage => 'Upload mislukt — probeer het opnieuw';
 
   @override

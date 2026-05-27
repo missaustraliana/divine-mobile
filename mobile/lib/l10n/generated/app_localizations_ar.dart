@@ -4208,6 +4208,17 @@ class AppLocalizationsAr extends AppLocalizations {
   String get uploadPublishedMessage => 'تم نشر الفيديو في ملفك الشخصي';
 
   @override
+  String uploadPublishedCountMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'تم نشر $count مقاطع فيديو في ملفك الشخصي',
+      one: 'تم نشر الفيديو في ملفك الشخصي',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get uploadFailedMessage => 'فشل الرفع - يُرجى المحاولة مرة أخرى';
 
   @override

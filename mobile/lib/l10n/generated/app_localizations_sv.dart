@@ -4250,6 +4250,17 @@ class AppLocalizationsSv extends AppLocalizations {
   String get uploadPublishedMessage => 'Videon publicerad till din profil';
 
   @override
+  String uploadPublishedCountMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count videor publicerade till din profil',
+      one: 'Videon publicerad till din profil',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get uploadFailedMessage => 'Uppladdning misslyckades – försök igen';
 
   @override

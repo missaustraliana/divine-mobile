@@ -2083,7 +2083,7 @@ class _DivineAppState extends ConsumerState<DivineApp> {
             }
           },
           child: UpdateDialogListener(
-            child: _UploadFailureListener(
+            child: UploadFailureListener(
               child: GeoBlockingGate(
                 child: AppLifecycleHandler(
                   child: BlocBuilder<LocaleCubit, LocaleState>(
@@ -2118,43 +2118,76 @@ class _DivineAppState extends ConsumerState<DivineApp> {
   }
 }
 
-/// Listens for background upload failures and shows a bottom sheet.
+/// Listens for background upload completions and shows the appropriate UI.
 ///
 /// Uses [NavigatorKeys.root] to obtain a [BuildContext] inside the
-/// [Navigator] tree, which [showModalBottomSheet] requires.
+/// [Navigator] tree, which [showModalBottomSheet] and [ScaffoldMessenger]
+/// require.
 ///
-/// Tracks the set of currently-failed draft IDs so that only **new**
-/// failures trigger a sheet. When a draft is retried or dismissed its ID
-/// leaves the failed set, so a subsequent failure is detected as new again.
-class _UploadFailureListener extends StatefulWidget {
-  const _UploadFailureListener({required this.child});
+/// **Failure tracking:** Tracks the set of currently-failed draft IDs so that
+/// only *new* failures trigger a sheet. When a draft is retried or dismissed
+/// its ID leaves the failed set, so a subsequent failure is detected as new.
+///
+/// **Success tracking (publish-flow continuity, #4626):** Reads
+/// [BackgroundPublishState.recentlySucceededIds] — populated by the bloc only
+/// on a true [PublishSuccess], never on [BackgroundPublishVanished] — so a
+/// vanished upload cannot produce a false "published" snackbar. If the user is
+/// not yet authenticated at the moment of success (mid re-auth redirect), the
+/// count is buffered and shown once authentication is restored.
+@visibleForTesting
+class UploadFailureListener extends StatefulWidget {
+  const UploadFailureListener({required this.child, super.key});
 
   final Widget child;
 
   @override
-  State<_UploadFailureListener> createState() => _UploadFailureListenerState();
+  State<UploadFailureListener> createState() => _UploadFailureListenerState();
 }
 
-class _UploadFailureListenerState extends State<_UploadFailureListener> {
+class _UploadFailureListenerState extends State<UploadFailureListener> {
   var _lastKnownFailedIds = <String>{};
+  var _pendingSuccessCount = 0;
 
   @override
   Widget build(BuildContext context) {
     return BlocListener<BackgroundPublishBloc, BackgroundPublishState>(
       listener: (context, state) {
-        // Don't show failure sheets while the user is not authenticated
-        // (e.g. still on the login screen after a cold start).
-        // Also don't update _lastKnownFailedIds so these failures are
-        // detected as "new" once the user eventually authenticates.
         final authService = ProviderScope.containerOf(
           context,
         ).read(authServiceProvider);
-        if (!authService.isAuthenticated) return;
+
+        // Use the bloc's own recentlySucceededIds so we never confuse a
+        // BackgroundPublishVanished removal with a true publish success.
+        final succeededCount = state.recentlySucceededIds.length;
+
+        if (succeededCount > 0) {
+          if (authService.isAuthenticated) {
+            // Show immediately — user is still in-app.
+            _showPublishSuccessSnackbar(context, succeededCount);
+          } else {
+            // Buffer for when auth is restored after re-auth redirect.
+            _pendingSuccessCount += succeededCount;
+          }
+        }
 
         final currentFailedIds = state.uploads
             .where((u) => u.result is PublishError)
             .map((u) => u.draft.id)
             .toSet();
+
+        // Don't show failure sheets while the user is not authenticated
+        // (e.g. still on the login screen after a cold start).
+        // Also don't update _lastKnownFailedIds so these failures are
+        // detected as "new" once the user eventually authenticates.
+        if (!authService.isAuthenticated) {
+          return;
+        }
+
+        // Auth is now confirmed — flush buffered successes from re-auth window.
+        if (_pendingSuccessCount > 0) {
+          _showPublishSuccessSnackbar(context, _pendingSuccessCount);
+          _pendingSuccessCount = 0;
+        }
 
         final newFailedIds = currentFailedIds.difference(_lastKnownFailedIds);
         _lastKnownFailedIds = currentFailedIds;
@@ -2173,6 +2206,29 @@ class _UploadFailureListenerState extends State<_UploadFailureListener> {
       child: widget.child,
     );
   }
+}
+
+/// Shows a snackbar confirming that [count] background uploads completed.
+///
+/// Uses [ScaffoldMessenger] via [NavigatorKeys.root] to reach the root
+/// [Scaffold] — this is required because the listener's [BuildContext] may
+/// not have a [Scaffold] ancestor when the snackbar fires during a re-auth
+/// redirect. The l10n strings are resolved from the passed-in [context]
+/// (the BlocListener's context), which always has localisation ancestors.
+void _showPublishSuccessSnackbar(BuildContext context, int count) {
+  final navContext = NavigatorKeys.root.currentContext;
+  if (navContext == null || !navContext.mounted) return;
+  final l10n = context.l10n;
+  ScaffoldMessenger.of(navContext).showSnackBar(
+    SnackBar(
+      content: Text(
+        l10n.uploadPublishedCountMessage(count),
+        style: VineTheme.bodyMediumFont(),
+      ),
+      backgroundColor: VineTheme.navGreen,
+      behavior: SnackBarBehavior.floating,
+    ),
+  );
 }
 
 /// Shows failure bottom sheets one after another for each failed upload.

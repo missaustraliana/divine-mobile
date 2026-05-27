@@ -4360,6 +4360,19 @@ class AppLocalizationsPl extends AppLocalizations {
   String get uploadPublishedMessage => 'Film opublikowany na twoim profilu';
 
   @override
+  String uploadPublishedCountMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count filmów opublikowanych na twoim profilu',
+      many: '$count filmów opublikowanych na twoim profilu',
+      few: '$count filmy opublikowane na twoim profilu',
+      one: 'Film opublikowany na twoim profilu',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get uploadFailedMessage => 'Przesyłanie nieudane - spróbuj ponownie';
 
   @override

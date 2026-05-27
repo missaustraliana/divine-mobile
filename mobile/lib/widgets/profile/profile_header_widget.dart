@@ -20,10 +20,10 @@ import 'package:openvine/providers/shared_preferences_provider.dart';
 import 'package:openvine/providers/user_profile_providers.dart';
 import 'package:openvine/router/widgets/followers_screen_router.dart';
 import 'package:openvine/router/widgets/following_screen_router.dart';
-import 'package:openvine/screens/auth/welcome_screen.dart';
 import 'package:openvine/screens/settings/settings_screen.dart';
 import 'package:openvine/services/nip05_verification_service.dart';
 import 'package:openvine/utils/clipboard_utils.dart';
+import 'package:openvine/utils/deferred_login_options_navigator.dart';
 import 'package:openvine/utils/divine_login_banner_dismissal.dart';
 import 'package:openvine/utils/nostr_key_utils.dart';
 import 'package:openvine/utils/user_profile_utils.dart';
@@ -121,10 +121,12 @@ class _ProfileHeaderWidgetState extends ConsumerState<ProfileHeaderWidget> {
   Timer? _identitySkeletonTimer;
   bool _identityTimeoutExpired = false;
   bool? _wasLoadingIdentity;
+  final _deferredLoginOptionsNavigator = DeferredLoginOptionsNavigator();
 
   @override
   void dispose() {
     _identitySkeletonTimer?.cancel();
+    _deferredLoginOptionsNavigator.dispose();
     super.dispose();
   }
 
@@ -154,21 +156,19 @@ class _ProfileHeaderWidgetState extends ConsumerState<ProfileHeaderWidget> {
           .select<
             MyProfileBloc,
             ({UserProfile? profile, bool isInitialOrLoading})
-          >(
-            (bloc) {
-              final state = bloc.state;
-              return (
-                profile: switch (state) {
-                  MyProfileUpdated(:final profile) => profile,
-                  MyProfileLoaded(:final profile) => profile,
-                  MyProfileLoading(:final profile) => profile,
-                  _ => null,
-                },
-                isInitialOrLoading:
-                    state is MyProfileInitial || state is MyProfileLoading,
-              );
-            },
-          );
+          >((bloc) {
+            final state = bloc.state;
+            return (
+              profile: switch (state) {
+                MyProfileUpdated(:final profile) => profile,
+                MyProfileLoaded(:final profile) => profile,
+                MyProfileLoading(:final profile) => profile,
+                _ => null,
+              },
+              isInitialOrLoading:
+                  state is MyProfileInitial || state is MyProfileLoading,
+            );
+          });
       effectiveProfile = selection.profile ?? widget.profile;
       // Skeleton on the user's own profile is appropriate only while we
       // genuinely have nothing to show. As soon as a cached profile is
@@ -216,20 +216,26 @@ class _ProfileHeaderWidgetState extends ConsumerState<ProfileHeaderWidget> {
     final authService = ref.watch(authServiceProvider);
 
     // Watch auth state to rebuild when auth state changes
-    // (e.g., after email verification completes)
+    // (e.g., after email verification completes, or after background RPC
+    // upgrade resolves — the auth stream emits a nudge in both cases)
     ref.watch(currentAuthStateProvider);
     final isAnonymous = authService.isAnonymous;
     final hasExpiredSession = authService.hasExpiredOAuthSession;
+    final isRpcUpgradeInProgress = authService.isRpcUpgradeInProgress;
     final prefs = ref.watch(sharedPreferencesProvider);
     final isDivineLoginBannerHidden = isDivineLoginBannerDismissed(
       prefs,
       widget.userIdHex,
     );
 
-    // Show session expired bottom sheet for non-anonymous users
+    // Show session expired bottom sheet for non-anonymous users, but only
+    // after the background RPC upgrade has definitively resolved. Showing the
+    // sheet while the silent refresh is still in flight would send the user
+    // to the login screen even when the refresh ultimately succeeds.
     if (widget.isOwnProfile &&
         !isAnonymous &&
         hasExpiredSession &&
+        !isRpcUpgradeInProgress &&
         !isDivineLoginBannerHidden) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (context.mounted) {
@@ -380,9 +386,13 @@ class _ProfileHeaderWidgetState extends ConsumerState<ProfileHeaderWidget> {
         Navigator.of(context).pop();
         final authService = ref.read(authServiceProvider);
         final refreshed = await authService.tryRefreshExpiredSession();
-        if (context.mounted && !refreshed) {
-          GoRouter.of(context).go(WelcomeScreen.loginOptionsPath);
-        }
+        if (!context.mounted) return;
+        if (refreshed) return;
+
+        _deferredLoginOptionsNavigator.goAfterUploadsComplete(
+          context: context,
+          publishBloc: context.read(),
+        );
       },
       secondaryButtonText: l10n.profileMaybeLaterLabel,
       onSecondaryPressed: () async {

@@ -4234,6 +4234,17 @@ class AppLocalizationsTr extends AppLocalizations {
   String get uploadPublishedMessage => 'Video profiline yayınlandı';
 
   @override
+  String uploadPublishedCountMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count video profiline yayınlandı',
+      one: 'Video profiline yayınlandı',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get uploadFailedMessage => 'Yükleme başarısız - lütfen tekrar dene';
 
   @override
