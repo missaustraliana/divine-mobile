@@ -1,3 +1,4 @@
+export 'home_tab_retap_provider.dart';
 export 'last_tab_position_provider.dart';
 export 'page_context_provider.dart';
 export 'redirect_provider.dart';

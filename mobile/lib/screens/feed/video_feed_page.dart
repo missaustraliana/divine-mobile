@@ -515,6 +515,15 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
       }
     });
 
+    // Refresh and scroll to top when the user taps the home tab while
+    // already on it (TikTok-style re-tap behaviour). The signal is a counter
+    // incremented by VineBottomNav; any change means "refresh and go to top".
+    ref.listen(homeTabRetapProvider, (_, next) {
+      ref.read(homeTabRefreshingProvider.notifier).state = true;
+      _resetVideoController();
+      context.read<VideoFeedBloc>().add(const VideoFeedRefreshRequested());
+    });
+
     return BlocProvider.value(
       value: _autoAdvanceCubit,
       child: NavRoundedShell(
@@ -548,6 +557,18 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
                   current.videos.isNotEmpty,
               listener: (_, state) {
                 handleVideoController(state);
+                // Signal the bottom nav that the refresh is complete.
+                ref.read(homeTabRefreshingProvider.notifier).state = false;
+                // Force _pagePosition to notify listeners after the new feed
+                // mounts at index 0. ValueNotifier skips notification when the
+                // value is unchanged, so if _pagePosition is already 0 the
+                // scroll-driven overlay opacity never rebuilds and stays
+                // invisible until the next scroll event.
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted) return;
+                  _pagePosition.value = double.minPositive;
+                  _pagePosition.value = 0;
+                });
                 if (!_hasMarkedUIReady) {
                   _hasMarkedUIReady = true;
                   StartupPerformanceService.instance.markUIReady();
