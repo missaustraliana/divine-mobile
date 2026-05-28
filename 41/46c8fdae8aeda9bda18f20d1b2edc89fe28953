@@ -1,0 +1,19 @@
+mobile/lib/screens/feed/video_feed_page.dart
+  s_19763b65f7ff37::t_408f578bd425d4 559-568
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4146c8fdae8aeda9bda18f20d1b2edc89fe28953",
+  "prompts": {},
+  "sessions": {
+    "s_19763b65f7ff37": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fdb4dbb9-6b22-43db-90b3-1ddef727f6e1",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Toby Kohlhagen <tobygkohlhagen@icloud.com>"
+    }
+  }
+}
