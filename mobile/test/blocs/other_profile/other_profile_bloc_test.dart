@@ -1,8 +1,11 @@
 // ABOUTME: Unit tests for OtherProfileBloc
 // ABOUTME: Tests cache+fresh pattern for viewing another user's profile
 
+import 'dart:async';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:content_blocklist_repository/content_blocklist_repository.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:follow_repository/follow_repository.dart';
 import 'package:mocktail/mocktail.dart';
@@ -16,6 +19,18 @@ class _MockContentBlocklistRepository extends Mock
     implements ContentBlocklistRepository {}
 
 class _MockFollowRepository extends Mock implements FollowRepository {}
+
+/// Captures errors routed through [Bloc.onError] so a test can assert that a
+/// bloc closed mid-flight records no error when its awaited work completes.
+class _ErrorCapturingObserver extends BlocObserver {
+  final List<Object> errors = <Object>[];
+
+  @override
+  void onError(BlocBase<dynamic> bloc, Object error, StackTrace stackTrace) {
+    errors.add(error);
+    super.onError(bloc, error, stackTrace);
+  }
+}
 
 void main() {
   group('OtherProfileBloc', () {
@@ -606,6 +621,123 @@ void main() {
           verify(
             () => mockBlocklistRepository.unblockUser(testPubkey),
           ).called(1);
+        },
+      );
+    });
+
+    group('after close (lifecycle, regression for #4393)', () {
+      // Installs an observer that records every error routed through
+      // [Bloc.onError] for the running test, restoring the previous observer
+      // on teardown. A closed bloc that resumes an awaited handler must not
+      // surface any error.
+      _ErrorCapturingObserver captureBlocErrors() {
+        final observer = _ErrorCapturingObserver();
+        final previousObserver = Bloc.observer;
+        Bloc.observer = observer;
+        addTearDown(() => Bloc.observer = previousObserver);
+        return observer;
+      }
+
+      test(
+        'records no error when closed before the fresh profile resolves '
+        'on load',
+        () async {
+          final observer = captureBlocErrors();
+          final freshCompleter = Completer<UserProfile?>();
+          when(
+            () => mockProfileRepository.getCachedProfile(pubkey: testPubkey),
+          ).thenAnswer((_) async => createTestProfile());
+          when(
+            () => mockProfileRepository.fetchFreshProfile(pubkey: testPubkey),
+          ).thenAnswer((_) => freshCompleter.future);
+
+          final bloc = createBloc()..add(const OtherProfileLoadRequested());
+
+          // Let the handler emit loading and park on fetchFreshProfile.
+          await pumpEventQueue();
+          // The profile screen is disposed while the fetch is in flight.
+          await bloc.close();
+          // The awaited fetch now resolves after close.
+          freshCompleter.complete(createTestProfile());
+          await pumpEventQueue();
+
+          expect(observer.errors, isEmpty);
+        },
+      );
+
+      test(
+        'records no error when closed before the fresh fetch throws on load',
+        () async {
+          final observer = captureBlocErrors();
+          final freshCompleter = Completer<UserProfile?>();
+          when(
+            () => mockProfileRepository.getCachedProfile(pubkey: testPubkey),
+          ).thenAnswer((_) async => createTestProfile());
+          when(
+            () => mockProfileRepository.fetchFreshProfile(pubkey: testPubkey),
+          ).thenAnswer((_) => freshCompleter.future);
+
+          final bloc = createBloc()..add(const OtherProfileLoadRequested());
+
+          await pumpEventQueue();
+          await bloc.close();
+          // The fetch fails after close: the catch block must not add
+          // VerifiedClaimsRequested to the now-closed bloc.
+          freshCompleter.completeError(Exception('network error'));
+          await pumpEventQueue();
+
+          expect(observer.errors, isEmpty);
+        },
+      );
+
+      test(
+        'records no error when closed before the fresh profile resolves '
+        'on refresh',
+        () async {
+          final observer = captureBlocErrors();
+          final freshCompleter = Completer<UserProfile?>();
+          when(
+            () => mockProfileRepository.fetchFreshProfile(pubkey: testPubkey),
+          ).thenAnswer((_) => freshCompleter.future);
+
+          final bloc = createBloc()..add(const OtherProfileRefreshRequested());
+
+          await pumpEventQueue();
+          await bloc.close();
+          freshCompleter.complete(createTestProfile());
+          await pumpEventQueue();
+
+          expect(observer.errors, isEmpty);
+        },
+      );
+
+      test(
+        'records no error when closed before a seeded refresh fetch throws',
+        () async {
+          // Drive the bloc to a loaded state first so the refresh catch
+          // block takes the branch that re-adds VerifiedClaimsRequested.
+          when(
+            () => mockProfileRepository.getCachedProfile(pubkey: testPubkey),
+          ).thenAnswer((_) async => createTestProfile());
+          when(
+            () => mockProfileRepository.fetchFreshProfile(pubkey: testPubkey),
+          ).thenAnswer((_) async => createTestProfile());
+          final bloc = createBloc()..add(const OtherProfileLoadRequested());
+          await pumpEventQueue();
+
+          final observer = captureBlocErrors();
+          final refreshCompleter = Completer<UserProfile?>();
+          when(
+            () => mockProfileRepository.fetchFreshProfile(pubkey: testPubkey),
+          ).thenAnswer((_) => refreshCompleter.future);
+
+          bloc.add(const OtherProfileRefreshRequested());
+          await pumpEventQueue();
+          await bloc.close();
+          refreshCompleter.completeError(Exception('network error'));
+          await pumpEventQueue();
+
+          expect(observer.errors, isEmpty);
         },
       );
     });
