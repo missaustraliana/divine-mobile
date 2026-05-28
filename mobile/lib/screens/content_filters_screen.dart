@@ -3,56 +3,77 @@
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:openvine/blocs/content_filters/content_filters_cubit.dart';
+import 'package:openvine/blocs/content_filters/content_filters_state.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/l10n/localized_content_label_name.dart';
 import 'package:openvine/models/content_label.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/services/content_filter_service.dart';
 
-class ContentFiltersScreen extends ConsumerStatefulWidget {
+/// Page: bridges the filter + age services into [ContentFiltersCubit].
+class ContentFiltersScreen extends ConsumerWidget {
+  const ContentFiltersScreen({super.key});
+
   static const routeName = 'content-filters';
   static const path = '/content-filters';
 
-  const ContentFiltersScreen({super.key});
-
   @override
-  ConsumerState<ContentFiltersScreen> createState() =>
-      _ContentFiltersScreenState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final contentFilterService = ref.watch(contentFilterServiceProvider);
+    final ageVerificationService = ref.watch(ageVerificationServiceProvider);
+    return BlocProvider(
+      // Both are moderation services that can be rebuilt; re-key so the Cubit
+      // reloads with fresh instances rather than operating on stale ones.
+      key: ValueKey((contentFilterService, ageVerificationService)),
+      create: (_) => ContentFiltersCubit(
+        contentFilterService: contentFilterService,
+        ageVerificationService: ageVerificationService,
+      )..load(),
+      child: const ContentFiltersView(),
+    );
+  }
 }
 
-class _ContentFiltersScreenState extends ConsumerState<ContentFiltersScreen> {
-  bool _isLoading = true;
-  bool _isAgeVerified = false;
+/// View: renders the per-category filter controls from the Cubit state.
+class ContentFiltersView extends StatelessWidget {
+  @visibleForTesting
+  const ContentFiltersView({super.key});
 
-  @override
-  void initState() {
-    super.initState();
-    _loadSettings();
-  }
+  static const List<ContentLabel> _adultLabels = [
+    ContentLabel.nudity,
+    ContentLabel.sexual,
+    ContentLabel.porn,
+  ];
 
-  Future<void> _loadSettings() async {
-    final contentFilterService = ref.read(contentFilterServiceProvider);
-    final ageService = ref.read(ageVerificationServiceProvider);
-    await contentFilterService.initialize();
-    await ageService.initialize();
-    if (mounted) {
-      setState(() {
-        _isAgeVerified = ageService.isAdultContentVerified;
-        _isLoading = false;
-      });
-    }
-  }
+  static const List<ContentLabel> _violenceLabels = [
+    ContentLabel.graphicMedia,
+    ContentLabel.violence,
+    ContentLabel.selfHarm,
+  ];
 
-  Future<void> _setPreference(
-    ContentLabel label,
-    ContentFilterPreference preference,
-  ) async {
-    final service = ref.read(contentFilterServiceProvider);
-    await service.setPreference(label, preference);
-    setState(() {});
-  }
+  static const List<ContentLabel> _substanceLabels = [
+    ContentLabel.drugs,
+    ContentLabel.alcohol,
+    ContentLabel.tobacco,
+    ContentLabel.gambling,
+  ];
+
+  static const List<ContentLabel> _otherLabels = [
+    ContentLabel.profanity,
+    ContentLabel.hate,
+    ContentLabel.harassment,
+    ContentLabel.flashingLights,
+    ContentLabel.aiGenerated,
+    ContentLabel.deepfake,
+    ContentLabel.spam,
+    ContentLabel.scam,
+    ContentLabel.spoiler,
+    ContentLabel.misleading,
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -67,62 +88,58 @@ class _ContentFiltersScreenState extends ConsumerState<ContentFiltersScreen> {
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 600),
-          child: _isLoading
-              ? const Center(
-                  child: CircularProgressIndicator(
-                    color: VineTheme.vineGreen,
+          child: BlocBuilder<ContentFiltersCubit, ContentFiltersState>(
+            builder: (context, state) {
+              if (state.status != ContentFiltersStatus.ready) {
+                return const Center(
+                  child: CircularProgressIndicator(color: VineTheme.vineGreen),
+                );
+              }
+              final cubit = context.read<ContentFiltersCubit>();
+              return ListView(
+                padding: const EdgeInsets.only(bottom: 32),
+                children: [
+                  if (!state.isAgeVerified) const _AgeGateBanner(),
+                  _CategoryGroup(
+                    title: context.l10n.contentFiltersAdultContent,
+                    labels: _adultLabels,
+                    state: state,
+                    locked: !state.isAgeVerified,
+                    onChanged: cubit.setPreference,
                   ),
-                )
-              : ListView(
-                  padding: const EdgeInsets.only(bottom: 32),
-                  children: [
-                    if (!_isAgeVerified) _buildAgeGateBanner(),
-                    _buildCategoryGroup(
-                      title: context.l10n.contentFiltersAdultContent,
-                      labels: [
-                        ContentLabel.nudity,
-                        ContentLabel.sexual,
-                        ContentLabel.porn,
-                      ],
-                      locked: !_isAgeVerified,
-                    ),
-                    _buildCategoryGroup(
-                      title: context.l10n.contentFiltersViolenceGore,
-                      labels: [
-                        ContentLabel.graphicMedia,
-                        ContentLabel.violence,
-                        ContentLabel.selfHarm,
-                      ],
-                    ),
-                    _buildCategoryGroup(
-                      title: context.l10n.contentFiltersSubstances,
-                      labels: [
-                        ContentLabel.drugs,
-                        ContentLabel.alcohol,
-                        ContentLabel.tobacco,
-                        ContentLabel.gambling,
-                      ],
-                    ),
-                    _buildCategoryGroup(
-                      title: context.l10n.contentFiltersOther,
-                      labels: [
-                        ContentLabel.profanity,
-                        ContentLabel.hate,
-                        ContentLabel.harassment,
-                        ContentLabel.flashingLights,
-                        ContentLabel.aiGenerated,
-                        ContentLabel.spoiler,
-                        ContentLabel.misleading,
-                      ],
-                    ),
-                  ],
-                ),
+                  _CategoryGroup(
+                    title: context.l10n.contentFiltersViolenceGore,
+                    labels: _violenceLabels,
+                    state: state,
+                    onChanged: cubit.setPreference,
+                  ),
+                  _CategoryGroup(
+                    title: context.l10n.contentFiltersSubstances,
+                    labels: _substanceLabels,
+                    state: state,
+                    onChanged: cubit.setPreference,
+                  ),
+                  _CategoryGroup(
+                    title: context.l10n.contentFiltersOther,
+                    labels: _otherLabels,
+                    state: state,
+                    onChanged: cubit.setPreference,
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildAgeGateBanner() {
+class _AgeGateBanner extends StatelessWidget {
+  const _AgeGateBanner();
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       padding: const EdgeInsets.all(12),
@@ -148,42 +165,68 @@ class _ContentFiltersScreenState extends ConsumerState<ContentFiltersScreen> {
       ),
     );
   }
+}
 
-  Widget _buildCategoryGroup({
-    required String title,
-    required List<ContentLabel> labels,
-    bool locked = false,
-  }) {
+class _CategoryGroup extends StatelessWidget {
+  const _CategoryGroup({
+    required this.title,
+    required this.labels,
+    required this.state,
+    required this.onChanged,
+    this.locked = false,
+  });
+
+  final String title;
+  final List<ContentLabel> labels;
+  final ContentFiltersState state;
+  final bool locked;
+  final Future<void> Function(
+    ContentLabel label,
+    ContentFilterPreference preference,
+  )
+  onChanged;
+
+  @override
+  Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionHeader(title),
+        _SectionHeader(title: title),
         ...labels.map(
           (label) => _ContentFilterRow(
             label: label,
-            preference: ref
-                .read(contentFilterServiceProvider)
-                .getPreference(label),
+            preference: state.preferenceFor(label),
             locked: locked,
-            onChanged: (pref) => _setPreference(label, pref),
+            onChanged: (preference) {
+              onChanged(label, preference);
+            },
           ),
         ),
       ],
     );
   }
+}
 
-  Widget _buildSectionHeader(String title) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-    child: Text(
-      title,
-      style: const TextStyle(
-        color: VineTheme.vineGreen,
-        fontSize: 12,
-        fontWeight: FontWeight.w600,
-        letterSpacing: 1.2,
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: VineTheme.vineGreen,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.2,
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _ContentFilterRow extends StatelessWidget {
@@ -249,23 +292,26 @@ class _FilterSegmentedControl extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _buildSegment(
+          _FilterSegment(
             label: context.l10n.contentFiltersShow,
             selected: value == ContentFilterPreference.show,
+            locked: locked,
             onTap: locked
                 ? null
                 : () => onChanged(ContentFilterPreference.show),
           ),
-          _buildSegment(
+          _FilterSegment(
             label: context.l10n.contentFiltersWarn,
             selected: value == ContentFilterPreference.warn,
+            locked: locked,
             onTap: locked
                 ? null
                 : () => onChanged(ContentFilterPreference.warn),
           ),
-          _buildSegment(
+          _FilterSegment(
             label: context.l10n.contentFiltersFilterOut,
             selected: value == ContentFilterPreference.hide,
+            locked: locked,
             onTap: locked
                 ? null
                 : () => onChanged(ContentFilterPreference.hide),
@@ -274,30 +320,44 @@ class _FilterSegmentedControl extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _buildSegment({
+class _FilterSegment extends StatelessWidget {
+  const _FilterSegment({
     required String label,
     required bool selected,
+    required bool locked,
     required VoidCallback? onTap,
-  }) {
+  }) : _label = label,
+       _selected = selected,
+       _locked = locked,
+       _onTap = onTap;
+
+  final String _label;
+  final bool _selected;
+  final bool _locked;
+  final VoidCallback? _onTap;
+
+  @override
+  Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: _onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? VineTheme.vineGreen : VineTheme.transparent,
+          color: _selected ? VineTheme.vineGreen : VineTheme.transparent,
           borderRadius: BorderRadius.circular(7),
         ),
         child: Text(
-          label,
+          _label,
           style: TextStyle(
-            color: locked
+            color: _locked
                 ? VineTheme.onSurfaceDisabled
-                : selected
+                : _selected
                 ? VineTheme.backgroundColor
                 : VineTheme.secondaryText,
             fontSize: 12,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            fontWeight: _selected ? FontWeight.w600 : FontWeight.w400,
           ),
         ),
       ),
