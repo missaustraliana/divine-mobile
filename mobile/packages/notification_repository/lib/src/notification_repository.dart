@@ -1072,7 +1072,10 @@ class NotificationRepository {
       final dTag = group
           .map((n) => n.referencedDTag)
           .firstWhere((d) => d != null, orElse: () => null);
-      final addressableId = _buildRecipientOwnedVideoAddressableId(dTag);
+      final addressableId = _recipientOwnedVideoAddressableId(
+        dTag: dTag,
+        video: video,
+      );
       // Prefer thumbnail from the notification payload — it comes directly from
       // the server and is stable even after a metadata update (unlike the stats
       // lookup which uses the mutable event ID and may 404 post-edit).
@@ -1206,8 +1209,9 @@ class NotificationRepository {
         );
         return null;
       }
-      final addressableId = _buildRecipientOwnedVideoAddressableId(
-        raw.referencedDTag,
+      final addressableId = _recipientOwnedVideoAddressableId(
+        dTag: raw.referencedDTag,
+        video: video,
       );
       return VideoNotification(
         id: raw.dedupeKey,
@@ -1287,16 +1291,36 @@ class NotificationRepository {
     _ => null,
   };
 
-  /// Builds the stable NIP-33 addressable ID for a video owned by the
-  /// current notification recipient.
+  /// Builds the stable NIP-33 addressable ID for a video the current
+  /// recipient *authoritatively* owns, or null when ownership is unknown.
   ///
-  /// Video-anchored notifications are already validated against the current
-  /// user when Funnelcake can resolve ownership. Using [_userPubkey] keeps
-  /// route construction stable when the referenced event ID is stale and the
-  /// metadata lookup misses.
-  String? _buildRecipientOwnedVideoAddressableId(String? dTag) {
-    if (dTag == null || dTag.isEmpty) return null;
-    return '${NIP71VideoKinds.addressableShortVideo}:$_userPubkey:$dTag';
+  /// Only safe when [video] confirms the referenced video's owner is the
+  /// recipient. On a metadata miss — a stale/edited event id, a fetch failure,
+  /// or a comment whose `referenced_event_id` is empty — ownership is unknown,
+  /// so we return null and let navigation fall back to the canonical
+  /// `referencedEventId`. The synthesized id is always scoped to [_userPubkey],
+  /// so a wrong guess would surface the recipient's *own* (or a non-existent)
+  /// video — never another creator's — and failing safe avoids that. An empty
+  /// owner pubkey is treated as unknown for the same reason.
+  ///
+  /// The d-tag comes from the authoritative [video], falling back to the
+  /// payload [dTag] only when `VideoStats` omits one, so a `referenced_video`
+  /// block that disagrees with `referenced_event_id` can't build a mismatched
+  /// route.
+  ///
+  /// Known gaps (deferred, see #4730): the stable route is lost on a metadata
+  /// miss for the recipient's own *edited* video; and the page-load path
+  /// fetches only `referenced_event_id` metadata, so `root_event_id`-anchored
+  /// comments confirm ownership on the realtime path only.
+  String? _recipientOwnedVideoAddressableId({
+    required String? dTag,
+    required VideoStats? video,
+  }) {
+    if (video == null || video.pubkey != _userPubkey) return null;
+    final resolvedDTag = _nonEmpty(video.dTag) ?? _nonEmpty(dTag);
+    if (resolvedDTag == null) return null;
+    return '${NIP71VideoKinds.addressableShortVideo}'
+        ':$_userPubkey:$resolvedDTag';
   }
 
   /// Returns the stable NIP-33 addressable ID for an actor-anchored
