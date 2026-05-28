@@ -108,16 +108,36 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:unified_logger/unified_logger.dart';
 import 'package:window_manager/window_manager.dart';
 
+/// Whether the background isolate should render a local notification for
+/// [message].
+///
+/// iOS alert pushes (the push service sets `aps.alert` + `content_available`)
+/// are presented by the OS *and* wake this handler — building our own local
+/// notification on top would double-render (#4731). FlutterFire surfaces the
+/// OS-presented alert as [RemoteMessage.notification], so we render only when
+/// the OS has not already presented it: a data-only message that carries a
+/// body. Today that is Android (the service stays data-only there); the
+/// data-only iOS branch is defensive, for a future silent push the OS would
+/// not surface.
+@visibleForTesting
+bool shouldRenderLocalPushNotification(RemoteMessage message) {
+  if (message.notification != null) return false;
+  final body = message.data['body'];
+  return body is String && body.isNotEmpty;
+}
+
 /// Top-level background message handler required by Firebase.
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
 
+  // The OS already presents iOS alert pushes (aps.alert); only render a local
+  // notification for data-only messages so we don't double-render (#4731).
+  if (!shouldRenderLocalPushNotification(message)) return;
+
   final data = message.data;
   final title = data['title'] as String? ?? 'diVine';
   final body = data['body'] as String? ?? '';
-
-  if (body.isEmpty) return;
 
   final plugin = FlutterLocalNotificationsPlugin();
   const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
