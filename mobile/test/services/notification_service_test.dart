@@ -3,8 +3,15 @@
 
 import 'dart:convert';
 
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:openvine/services/notification_helpers.dart'
+    show localNotificationTapPayload;
 import 'package:openvine/services/notification_service.dart';
+
+class _MockFlutterLocalNotificationsPlugin extends Mock
+    implements FlutterLocalNotificationsPlugin {}
 
 void main() {
   group('NotificationService Permission Tests', () {
@@ -389,6 +396,31 @@ void main() {
       expect(events.single.notificationType, equals('follow'));
     });
 
+    test('a foreground-built local payload round-trips to a routable tap '
+        'event', () async {
+      final events = <NotificationTapEvent>[];
+      final sub = service.notificationTapStream.listen(events.add);
+      addTearDown(sub.cancel);
+
+      // The exact payload the foreground path now attaches (built from FCM
+      // data via the shared helper); tapping it must yield a routable event.
+      final payload = jsonEncode(
+        localNotificationTapPayload(const {
+          'type': 'follow',
+          'eventId': 'contact_event',
+          'senderPubkey': 'follower_hex',
+        }),
+      );
+      service.handleNotificationTapPayload(payload);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events, hasLength(1));
+      expect(events.single.notificationType, equals('follow'));
+      expect(events.single.senderPubkey, equals('follower_hex'));
+      expect(events.single.eventId, equals('contact_event'));
+      expect(events.single.referencedEventId, isNull);
+    });
+
     test('no-ops gracefully when the stream has no listeners', () {
       expect(
         () => service.handleNotificationTapPayload(
@@ -399,6 +431,162 @@ void main() {
         ),
         returnsNormally,
       );
+    });
+  });
+
+  group('sendLocal payload forwarding', () {
+    late NotificationService service;
+    late _MockFlutterLocalNotificationsPlugin plugin;
+
+    setUp(() {
+      service = NotificationService();
+      plugin = _MockFlutterLocalNotificationsPlugin();
+    });
+
+    tearDown(() {
+      service.dispose();
+    });
+
+    test('forwards the tap payload to the plugin show() call', () async {
+      when(
+        () => plugin.show(
+          id: any(named: 'id'),
+          title: any(named: 'title'),
+          body: any(named: 'body'),
+          notificationDetails: any(named: 'notificationDetails'),
+          payload: any(named: 'payload'),
+        ),
+      ).thenAnswer((_) async {});
+
+      service.debugConfigurePlugin(plugin);
+
+      final payload = jsonEncode(
+        localNotificationTapPayload(const {
+          'type': 'comment',
+          'eventId': 'comment_event',
+          'referencedEventId': 'video_event',
+          'senderPubkey': 'actor_hex',
+        }),
+      );
+
+      await service.sendLocal(
+        title: 'New comment',
+        body: 'alice commented',
+        payload: payload,
+      );
+
+      // The exact payload reaches the plugin's show(payload:) — the seam this
+      // change adds. The round-trip test above proves the payload then parses
+      // back to a routable tap event.
+      final captured = verify(
+        () => plugin.show(
+          id: any(named: 'id'),
+          title: 'New comment',
+          body: 'alice commented',
+          notificationDetails: any(named: 'notificationDetails'),
+          payload: captureAny(named: 'payload'),
+        ),
+      ).captured;
+      expect(captured.single, equals(payload));
+    });
+
+    test(
+      'omits the payload (null) when sendLocal is called without one',
+      () async {
+        when(
+          () => plugin.show(
+            id: any(named: 'id'),
+            title: any(named: 'title'),
+            body: any(named: 'body'),
+            notificationDetails: any(named: 'notificationDetails'),
+            payload: any(named: 'payload'),
+          ),
+        ).thenAnswer((_) async {});
+
+        service.debugConfigurePlugin(plugin);
+
+        await service.sendLocal(title: 'Upload complete', body: 'done');
+
+        final captured = verify(
+          () => plugin.show(
+            id: any(named: 'id'),
+            title: any(named: 'title'),
+            body: any(named: 'body'),
+            notificationDetails: any(named: 'notificationDetails'),
+            payload: captureAny(named: 'payload'),
+          ),
+        ).captured;
+        expect(captured.single, isNull);
+      },
+    );
+  });
+
+  group('takeLaunchNotificationTap', () {
+    late NotificationService service;
+    late _MockFlutterLocalNotificationsPlugin plugin;
+
+    setUp(() {
+      service = NotificationService();
+      plugin = _MockFlutterLocalNotificationsPlugin();
+    });
+
+    tearDown(() {
+      service.dispose();
+    });
+
+    test(
+      'routes a local notification that launched the app (cold start)',
+      () async {
+        when(() => plugin.getNotificationAppLaunchDetails()).thenAnswer(
+          (_) async => NotificationAppLaunchDetails(
+            true,
+            notificationResponse: NotificationResponse(
+              notificationResponseType:
+                  NotificationResponseType.selectedNotification,
+              payload: jsonEncode(
+                localNotificationTapPayload(const {
+                  'type': 'follow',
+                  'eventId': 'contact_event',
+                  'senderPubkey': 'follower_hex',
+                }),
+              ),
+            ),
+          ),
+        );
+
+        service.debugConfigurePlugin(plugin);
+
+        final tap = await service.takeLaunchNotificationTap();
+
+        expect(tap, isNotNull);
+        expect(tap!.notificationType, equals('follow'));
+        expect(tap.senderPubkey, equals('follower_hex'));
+        expect(tap.eventId, equals('contact_event'));
+        expect(tap.referencedEventId, isNull);
+      },
+    );
+
+    test(
+      'returns null when the app was not launched by a notification',
+      () async {
+        when(() => plugin.getNotificationAppLaunchDetails()).thenAnswer(
+          (_) async => const NotificationAppLaunchDetails(false),
+        );
+
+        service.debugConfigurePlugin(plugin);
+
+        expect(await service.takeLaunchNotificationTap(), isNull);
+      },
+    );
+
+    test('returns null when there are no launch details', () async {
+      when(
+        () => plugin.getNotificationAppLaunchDetails(),
+      ).thenAnswer((_) async => null);
+
+      service.debugConfigurePlugin(plugin);
+
+      expect(await service.takeLaunchNotificationTap(), isNull);
     });
   });
 

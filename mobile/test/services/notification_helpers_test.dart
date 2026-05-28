@@ -549,4 +549,54 @@ void main() {
       expect(result.notificationType, equals('like'));
     });
   });
+
+  group('localNotificationTapPayload', () {
+    test('maps FCM type to notificationType and preserves routing fields', () {
+      final payload = localNotificationTapPayload(const {
+        'type': 'comment',
+        'eventId': 'comment_event',
+        'referencedEventId': 'video_event',
+        'senderPubkey': 'actor_hex',
+        'title': 'New comment',
+        'body': 'ignored for routing',
+      });
+
+      expect(payload, {
+        'referencedEventId': 'video_event',
+        'eventId': 'comment_event',
+        'notificationType': 'comment',
+        'senderPubkey': 'actor_hex',
+      });
+    });
+
+    test('preserves senderPubkey for a follow with no referencedEventId', () {
+      final payload = localNotificationTapPayload(const {
+        'type': 'follow',
+        'eventId': 'contact_event',
+        'senderPubkey': 'follower_hex',
+      });
+
+      expect(payload['notificationType'], equals('follow'));
+      expect(payload['senderPubkey'], equals('follower_hex'));
+      expect(payload['eventId'], equals('contact_event'));
+      expect(payload['referencedEventId'], isNull);
+    });
+
+    test('normalizes empty-string routing fields to null', () {
+      final payload = localNotificationTapPayload(const {
+        'type': 'like',
+        'eventId': 'like_event',
+        // An empty referencedEventId on the wire must not survive as '' on the
+        // local payload; the writer shares parseFcmPayload's normalization, so
+        // empty and absent are treated identically.
+        'referencedEventId': '',
+        'senderPubkey': 'actor_hex',
+      });
+
+      expect(payload['referencedEventId'], isNull);
+      expect(payload['eventId'], equals('like_event'));
+      expect(payload['notificationType'], equals('like'));
+      expect(payload['senderPubkey'], equals('actor_hex'));
+    });
+  });
 }
