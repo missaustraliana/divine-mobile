@@ -8,7 +8,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:openvine/notifications/bloc/notification_feed_bloc.dart';
 import 'package:openvine/notifications/providers/notification_repository_provider.dart';
 import 'package:openvine/notifications/view/notifications_view.dart';
-import 'package:openvine/notifications/widgets/mark_all_read_on_dispose.dart';
 import 'package:openvine/providers/app_providers.dart';
 
 /// Top-level page for the notifications tab.
@@ -18,7 +17,7 @@ import 'package:openvine/providers/app_providers.dart';
 /// `NotificationFeedStarted` on mount, which triggers `repository.refresh()`.
 /// The resulting snapshot flows through the repository's snapshot stream and
 /// propagates to the badge cubit automatically. Read state changes only on
-/// explicit item taps or mark-all actions.
+/// explicit per-item taps here; bulk mark-all lives in notification settings.
 class NotificationsPage extends ConsumerWidget {
   /// Creates a [NotificationsPage].
   const NotificationsPage({super.key});
@@ -56,9 +55,7 @@ class NotificationsPage extends ConsumerWidget {
     // either repository swaps (account switch, sign-out → sign-in, or
     // provider invalidation). Without this the BlocProvider element
     // persists across rebuilds and keeps the bloc bound to stale
-    // repositories, while any mark-on-leave wrapper inside the subtree
-    // would otherwise fire against whichever notification repository the
-    // rebuilt widget tree captured — i.e. the new user's notifications.
+    // repositories — i.e. the previous user's notifications.
     // See `.claude/rules/state_management.md`.
     return BlocProvider(
       key: ValueKey((notificationRepository, followRepository)),
@@ -66,10 +63,7 @@ class NotificationsPage extends ConsumerWidget {
         notificationRepository: notificationRepository,
         followRepository: followRepository,
       )..add(const NotificationFeedStarted()),
-      child: MarkAllReadOnDispose(
-        repository: notificationRepository,
-        child: const NotificationsView(),
-      ),
+      child: const NotificationsView(),
     );
   }
 }
