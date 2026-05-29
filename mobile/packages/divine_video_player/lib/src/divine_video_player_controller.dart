@@ -350,11 +350,17 @@ class DivineVideoPlayerController {
       await _linuxBackend!.setClips(clips, startPosition: startPosition);
       return;
     }
-    await _methodChannel.invokeMethod<void>('setClips', {
-      'clips': clips.map((c) => c.toMap()).toList(),
-      if (startPosition != null && startPosition > Duration.zero)
-        'startPositionMs': startPosition.inMilliseconds,
-    });
+    try {
+      await _methodChannel.invokeMethod<void>('setClips', {
+        'clips': clips.map((c) => c.toMap()).toList(),
+        if (startPosition != null && startPosition > Duration.zero)
+          'startPositionMs': startPosition.inMilliseconds,
+      });
+    } on PlatformException catch (e) {
+      // The native side cancels an in-flight setClips when a newer call
+      // supersedes it. This is benign — the newer call will succeed.
+      if (e.code != 'CANCELLED') rethrow;
+    }
   }
 
   /// Starts or resumes playback.
