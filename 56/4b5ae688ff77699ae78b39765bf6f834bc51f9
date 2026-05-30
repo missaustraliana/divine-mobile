@@ -1,0 +1,35 @@
+mobile/lib/widgets/vine_bottom_nav.dart
+  s_19763b65f7ff37::t_c75d630b2bcb89 4
+  s_522d069325cd5e::t_bce5a27c6a5021 65-71
+  s_19763b65f7ff37::t_0d85acec76ba46 139
+  s_19763b65f7ff37::t_ea3534c127d5e1 236-247,250-328,330-336,340-409
+  s_19763b65f7ff37::t_07704803517dcb 248-249
+  s_19763b65f7ff37::t_2bdb50b2e7cc74 329
+  s_19763b65f7ff37::t_896df9ba79d16e 337-339
+  s_19763b65f7ff37::t_32999bfb0e7338 606-617
+  s_19763b65f7ff37::t_ea22a3145d7d12 642,644
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "564b5ae688ff77699ae78b39765bf6f834bc51f9",
+  "prompts": {},
+  "sessions": {
+    "s_19763b65f7ff37": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fdb4dbb9-6b22-43db-90b3-1ddef727f6e1",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Toby Kohlhagen <tobygkohlhagen@icloud.com>"
+    },
+    "s_522d069325cd5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9f246f96-cf47-485a-9b8f-ef0849b6230f",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Toby Kohlhagen <tobygkohlhagen@icloud.com>"
+    }
+  }
+}

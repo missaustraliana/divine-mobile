@@ -1,0 +1,23 @@
+mobile/lib/notifications/view/inbox_notifications_page.dart
+  s_522d069325cd5e::t_83c88371b4a1ac 2
+  s_522d069325cd5e::t_6c0147ef1fb873 18-20
+  s_522d069325cd5e::t_a91d1d8b86c087 123
+mobile/test/notifications/view/inbox_notifications_page_test.dart
+  s_522d069325cd5e::t_645a8390b14e0c 51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "90262a799c277d82744eeae715f88481135c6866",
+  "prompts": {},
+  "sessions": {
+    "s_522d069325cd5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9f246f96-cf47-485a-9b8f-ef0849b6230f",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Toby Kohlhagen <tobygkohlhagen@icloud.com>"
+    }
+  }
+}
