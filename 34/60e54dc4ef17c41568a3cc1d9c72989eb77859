@@ -1,0 +1,44 @@
+mobile/lib/router/providers/providers.dart
+  s_522d069325cd5e::t_e03defc9dd9900 1
+mobile/lib/notifications/view/inbox_notifications_page.dart
+  s_522d069325cd5e::t_83c88371b4a1ac 2
+  s_522d069325cd5e::t_6c0147ef1fb873 18-20
+  s_522d069325cd5e::t_a91d1d8b86c087 123
+mobile/lib/router/providers/home_tab_retap_provider.dart
+  h_ba36c83595f570 1
+  s_522d069325cd5e::t_8931c0ec04560d 2-4,6-11
+  s_522d069325cd5e::t_db0ac3576df650 5
+  s_19763b65f7ff37::t_ad7f2b32b06b65 12-16
+mobile/lib/screens/feed/video_feed_page.dart
+  s_19763b65f7ff37::t_a0516e279537ff 518-520,525
+  s_19763b65f7ff37::t_3f7c4c73b9bfa7 521
+  s_19763b65f7ff37::t_55bcffb07e30c3 522
+  s_19763b65f7ff37::t_e3aadebb89d0a5 523
+  s_19763b65f7ff37::t_e1ca7ca44b9ba9 524
+  s_522d069325cd5e::t_ead079adac4a77 526
+  s_19763b65f7ff37::t_408f578bd425d4 559,562-571
+  s_19763b65f7ff37::t_623b1825c31177 560-561
+mobile/lib/widgets/vine_bottom_nav.dart
+  s_19763b65f7ff37::t_c75d630b2bcb89 4
+  s_522d069325cd5e::t_bce5a27c6a5021 65-72
+  s_19763b65f7ff37::t_0d85acec76ba46 138-139
+  s_19763b65f7ff37::t_ea3534c127d5e1 235-247,250-328,330-336,340-409,476,497-514,649,670-687
+  s_19763b65f7ff37::t_07704803517dcb 248-249
+  s_19763b65f7ff37::t_2bdb50b2e7cc74 329
+  s_19763b65f7ff37::t_896df9ba79d16e 337-339
+  s_19763b65f7ff37::t_32999bfb0e7338 433-437,440-444,606-617
+  s_19763b65f7ff37::t_ea22a3145d7d12 469,473,642,644,646
+mobile/test/notifications/view/inbox_notifications_page_test.dart
+  s_522d069325cd5e::t_645a8390b14e0c 51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3460e54dc4ef17c41568a3cc1d9c72989eb77859",
+  "prompts": {},
+  "humans": {
+    "h_ba36c83595f570": {
+      "author": "Toby Kohlhagen <tobygkohlhagen@icloud.com>"
+    }
+  }
+}
