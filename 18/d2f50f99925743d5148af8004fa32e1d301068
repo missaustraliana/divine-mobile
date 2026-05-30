@@ -1,0 +1,19 @@
+mobile/lib/widgets/vine_bottom_nav.dart
+  s_f078c1a3fa5ee8::t_4c0ab50d379ccc 479
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "18d2f50f99925743d5148af8004fa32e1d301068",
+  "prompts": {},
+  "sessions": {
+    "s_f078c1a3fa5ee8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dd9b3e99-10e4-4d2d-9c35-412eae1a50d2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Toby Kohlhagen <tobygkohlhagen@icloud.com>"
+    }
+  }
+}
