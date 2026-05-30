@@ -1,48 +1,60 @@
+import 'package:bloc_test/bloc_test.dart';
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:openvine/blocs/video_recorder/video_recorder_bloc.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/models/clip_manager_state.dart';
-import 'package:openvine/models/video_recorder/video_recorder_provider_state.dart';
 import 'package:openvine/models/video_recorder/video_recorder_state.dart';
 import 'package:openvine/providers/clip_manager_provider.dart';
-import 'package:openvine/providers/video_recorder_provider.dart';
 import 'package:openvine/widgets/video_recorder/modes/classic/video_recorder_classic_actions_bottom.dart';
 
-import '../../../../mocks/mock_camera_service.dart';
+class _MockVideoRecorderBloc
+    extends MockBloc<VideoRecorderEvent, VideoRecorderBlocState>
+    implements VideoRecorderBloc {}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group(VideoRecorderClassicActionsBottom, () {
-    late MockCameraService mockCamera;
+    late _MockVideoRecorderBloc recorderBloc;
 
-    setUp(() async {
-      mockCamera = MockCameraService.create(
-        onUpdateState: ({forceCameraRebuild}) {},
-        onAutoStopped: (_) {},
+    setUp(() {
+      recorderBloc = _MockVideoRecorderBloc();
+      when(() => recorderBloc.state).thenReturn(
+        const VideoRecorderBlocState(
+          isCameraInitialized: true,
+          canRecord: true,
+        ),
       );
-      await mockCamera.initialize();
     });
 
     Widget buildWidget({
       VideoRecorderState recordingState = VideoRecorderState.idle,
+      bool showLastClipOverlay = false,
     }) {
+      when(() => recorderBloc.state).thenReturn(
+        VideoRecorderBlocState(
+          recordingState: recordingState,
+          isCameraInitialized: true,
+          canRecord: true,
+          showLastClipOverlay: showLastClipOverlay,
+        ),
+      );
       return ProviderScope(
         overrides: [
-          videoRecorderProvider.overrideWith(
-            () => _TestVideoRecorderNotifier(
-              mockCamera,
-              recordingState: recordingState,
-            ),
-          ),
           clipManagerProvider.overrideWith(_TestClipManagerNotifier.new),
         ],
-        child: const MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: Scaffold(body: VideoRecorderClassicActionsBottom()),
+        child: BlocProvider<VideoRecorderBloc>.value(
+          value: recorderBloc,
+          child: const MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(body: VideoRecorderClassicActionsBottom()),
+          ),
         ),
       );
     }
@@ -112,29 +124,51 @@ void main() {
         await tester.tap(find.byType(DivineIconButton).at(2));
         await tester.pump();
 
+        // Should dispatch the ghost-frame toggle event
+        verify(
+          () => recorderBloc.add(
+            const VideoRecorderShowLastClipOverlayToggled(),
+          ),
+        ).called(1);
+
         // Should show snackbar
         expect(find.byType(SnackBar), findsOneWidget);
       });
+
+      // Guards the async-ordering fix: the bloc event is async, so the snackbar
+      // copy must be derived from the negated CURRENT state (the new value),
+      // not re-read after dispatching (which would show the stale, inverted
+      // copy). With a MockBloc the state never changes on add(), so a regression
+      // to reading state post-dispatch flips these assertions.
+      testWidgets('snackbar shows the enabled copy when the overlay was off', (
+        tester,
+      ) async {
+        final l10n = lookupAppLocalizations(const Locale('en'));
+        await tester.pumpWidget(buildWidget());
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byType(DivineIconButton).at(2));
+        await tester.pump();
+
+        expect(find.text(l10n.videoRecorderGhostFrameEnabled), findsOneWidget);
+        expect(find.text(l10n.videoRecorderGhostFrameDisabled), findsNothing);
+      });
+
+      testWidgets('snackbar shows the disabled copy when the overlay was on', (
+        tester,
+      ) async {
+        final l10n = lookupAppLocalizations(const Locale('en'));
+        await tester.pumpWidget(buildWidget(showLastClipOverlay: true));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byType(DivineIconButton).at(2));
+        await tester.pump();
+
+        expect(find.text(l10n.videoRecorderGhostFrameDisabled), findsOneWidget);
+        expect(find.text(l10n.videoRecorderGhostFrameEnabled), findsNothing);
+      });
     });
   });
-}
-
-class _TestVideoRecorderNotifier extends VideoRecorderNotifier {
-  _TestVideoRecorderNotifier(
-    super.cameraService, {
-    this.recordingState = VideoRecorderState.idle,
-  });
-
-  final VideoRecorderState recordingState;
-
-  @override
-  VideoRecorderProviderState build() {
-    return VideoRecorderProviderState(
-      recordingState: recordingState,
-      isCameraInitialized: true,
-      canRecord: true,
-    );
-  }
 }
 
 class _TestClipManagerNotifier extends ClipManagerNotifier {
