@@ -81,6 +81,7 @@ class MockCameraPermissionBloc extends Mock implements CameraPermissionBloc {
 }
 
 late VideoRecorderBloc recorderBloc;
+late SharedPreferences testPrefs;
 
 /// Stub overrides for the draft storage and clip library services so the
 /// recorder's autosave/clip checks resolve to empty during tests.
@@ -101,6 +102,7 @@ List<Override> _stubStorageOverrides() {
 Widget buildTestWidget({List<Override> overrides = const []}) {
   return ProviderScope(
     overrides: [
+      sharedPreferencesProvider.overrideWithValue(testPrefs),
       ..._stubStorageOverrides(),
       ...overrides,
     ],
@@ -190,9 +192,9 @@ void main() {
       );
 
       SharedPreferences.setMockInitialValues({});
-      final prefs = await SharedPreferences.getInstance();
+      testPrefs = await SharedPreferences.getInstance();
       container = ProviderContainer(
-        overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+        overrides: [sharedPreferencesProvider.overrideWithValue(testPrefs)],
       );
     });
 
