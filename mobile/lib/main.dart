@@ -66,10 +66,12 @@ import 'package:openvine/screens/auth/welcome_screen.dart';
 import 'package:openvine/screens/explore_screen.dart';
 import 'package:openvine/screens/feed/video_feed_page.dart';
 import 'package:openvine/screens/hashtag_screen_router.dart';
+import 'package:openvine/screens/inbox/inbox_page.dart';
 import 'package:openvine/screens/other_profile_screen.dart';
 import 'package:openvine/screens/profile_screen_router.dart';
 import 'package:openvine/screens/search_results/view/search_results_page.dart';
 import 'package:openvine/screens/video_detail_screen.dart';
+import 'package:openvine/screens/video_recorder_screen.dart';
 import 'package:openvine/services/back_button_handler.dart';
 import 'package:openvine/services/bandwidth_tracker_service.dart';
 import 'package:openvine/services/collaborator_invite_service.dart';
@@ -87,6 +89,7 @@ import 'package:openvine/services/notification_service.dart'
 import 'package:openvine/services/notification_target_resolver.dart';
 import 'package:openvine/services/openvine_media_cache.dart';
 import 'package:openvine/services/performance_monitoring_service.dart';
+import 'package:openvine/services/quick_actions_coordinator.dart';
 import 'package:openvine/services/seed_data_preload_service.dart';
 import 'package:openvine/services/seed_media_preload_service.dart';
 import 'package:openvine/services/startup_performance_service.dart';
@@ -98,6 +101,7 @@ import 'package:openvine/utils/nostr_key_utils.dart';
 import 'package:openvine/utils/platform_support.dart';
 import 'package:openvine/utils/recoverable_flutter_error.dart';
 import 'package:openvine/utils/sensitive_uri_for_logs.dart';
+import 'package:openvine/utils/video_controller_cleanup.dart';
 import 'package:openvine/widgets/app_lifecycle_handler.dart';
 import 'package:openvine/widgets/geo_blocking_gate.dart';
 import 'package:openvine/widgets/upload_failure_sheet.dart';
@@ -412,6 +416,38 @@ void _navigateToNotificationProfile(
 /// carries no resolvable target and no actor pubkey.
 void _navigateToNotificationInbox(ProviderContainer container) {
   container.read(goRouterProvider).go(NotificationsPage.pathForIndex());
+}
+
+class _AppQuickActionsNavigator implements QuickActionsNavigator {
+  const _AppQuickActionsNavigator(this.container);
+
+  final ProviderContainer container;
+
+  GoRouter get _router => container.read(goRouterProvider);
+
+  @override
+  String get currentPath => _router.routeInformationProvider.value.uri.path;
+
+  @override
+  void openCamera() {
+    disposeAllVideoControllers(container);
+    _router.go(VideoRecorderScreen.path);
+  }
+
+  @override
+  void openNotifications() {
+    _router.go(InboxPage.path);
+  }
+
+  @override
+  void suppressAuthenticatedAuthRouteRedirect() {
+    suppressNextAuthenticatedAuthRouteRedirect();
+  }
+
+  @override
+  void clearAuthRouteRedirectSuppression() {
+    clearAuthenticatedAuthRouteRedirectSuppression();
+  }
 }
 
 StartupCoordinator _createStartupCoordinator(ProviderContainer container) {
@@ -1290,6 +1326,7 @@ class _DivineAppState extends ConsumerState<DivineApp> {
   bool _backgroundInitDone = false;
   StreamSubscription<void>? _shakeSubscription;
   StreamSubscription<NotificationTapEvent>? _notificationTapSubscription;
+  QuickActionsCoordinator? _quickActionsCoordinator;
 
   @override
   void initState() {
@@ -1301,6 +1338,7 @@ class _DivineAppState extends ConsumerState<DivineApp> {
         _backgroundInitDone = true;
         _initializeDeferredStartup();
         _initializeDeepLinkServices();
+        _initializeQuickActions();
         _initializeBackgroundServices();
       }
     });
@@ -1309,6 +1347,7 @@ class _DivineAppState extends ConsumerState<DivineApp> {
   @override
   void dispose() {
     _notificationTapSubscription?.cancel();
+    unawaited(_quickActionsCoordinator?.dispose());
     _shakeSubscription?.cancel();
     super.dispose();
   }
@@ -1359,6 +1398,45 @@ class _DivineAppState extends ConsumerState<DivineApp> {
       name: 'DeepLinkHandler',
       category: LogCategory.ui,
     );
+  }
+
+  bool get _quickActionsPlatformSupported =>
+      !kIsWeb && (io.Platform.isAndroid || io.Platform.isIOS);
+
+  void _initializeQuickActions() {
+    if (!_quickActionsPlatformSupported) return;
+
+    final container = ProviderScope.containerOf(context);
+    final authService = ref.read(authServiceProvider);
+    _quickActionsCoordinator = QuickActionsCoordinator(
+      client: DivineQuickActionsClient(),
+      authStateStream: authService.authStateStream,
+      readAuthState: () => authService.authState,
+      readTitles: () {
+        final l10n = currentAppL10n(ref.read(sharedPreferencesProvider));
+        return QuickActionTitles(
+          camera: l10n.videoRecorderStartRecordingTooltip,
+          notifications: l10n.navNotifications,
+        );
+      },
+      navigator: _AppQuickActionsNavigator(container),
+      reportError: (error, stackTrace, reason) {
+        return CrashReportingService.instance.recordError(
+          error,
+          stackTrace,
+          reason: reason,
+        );
+      },
+      waitForAuthRedirectToSettle: () async {
+        await WidgetsBinding.instance.endOfFrame;
+        await WidgetsBinding.instance.endOfFrame;
+        return mounted;
+      },
+      scheduleRedirectSuppressionClear: (callback) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => callback());
+      },
+      isAndroid: !kIsWeb && io.Platform.isAndroid,
+    )..start();
   }
 
   void _initializeDeferredStartup() {
