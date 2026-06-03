@@ -37,12 +37,14 @@ class AudioSelectionBottomSheet extends ConsumerStatefulWidget {
     required this.scrollController,
     this.localAudioImportService,
     this.pickAudioFile,
+    @visibleForTesting this.audioService,
     super.key,
   });
 
   final ScrollController scrollController;
   final LocalAudioImportService? localAudioImportService;
   final Future<FilePickerResult?> Function()? pickAudioFile;
+  final AudioPlaybackService? audioService;
 
   static Future<AudioEvent?> show(BuildContext context) {
     return VineBottomSheet.show<AudioEvent>(
@@ -95,12 +97,13 @@ class AudioSelectionBottomSheet extends ConsumerStatefulWidget {
 class _AudioSelectionBottomSheetState
     extends ConsumerState<AudioSelectionBottomSheet>
     with SingleTickerProviderStateMixin {
-  final _audioService = AudioPlaybackService();
+  late final AudioPlaybackService _audioService;
   final _searchController = TextEditingController();
   String? _loadedSoundId;
   AudioEvent? _selectedItem;
   AudioCategory _category = .divine;
   String _searchQuery = '';
+  bool _isLoadingAudio = false;
 
   late final _tabController = TabController(
     length: AudioCategory.values.length,
@@ -110,6 +113,7 @@ class _AudioSelectionBottomSheetState
   @override
   void initState() {
     super.initState();
+    _audioService = widget.audioService ?? AudioPlaybackService();
     _tabController.addListener(_onTabChanged);
   }
 
@@ -187,19 +191,24 @@ class _AudioSelectionBottomSheetState
       await _audioService.seek(.zero);
       var resolvedSound = sound;
       if (shouldReload) {
+        if (mounted) setState(() => _isLoadingAudio = true);
         await _audioService.stop();
-        final loadedDuration =
-            sound.isLocalImport && sound.localFilePath != null
-            ? await _audioService.loadAudioFromFile(sound.localFilePath!)
-            : await _audioService.loadAudio(sound.url!);
-        _loadedSoundId = sound.id;
-        // Backfill missing duration so the selection overlay and list
-        // tile can show a correct timestamp for Nostr sounds that don't
-        // carry a duration tag.
-        if (sound.duration == null && loadedDuration != null) {
-          resolvedSound = sound.copyWith(
-            duration: loadedDuration.inMilliseconds / 1000.0,
-          );
+        try {
+          final loadedDuration =
+              sound.isLocalImport && sound.localFilePath != null
+              ? await _audioService.loadAudioFromFile(sound.localFilePath!)
+              : await _audioService.loadAudio(sound.url!);
+          _loadedSoundId = sound.id;
+          // Backfill missing duration so the selection overlay and list
+          // tile can show a correct timestamp for Nostr sounds that don't
+          // carry a duration tag.
+          if (sound.duration == null && loadedDuration != null) {
+            resolvedSound = sound.copyWith(
+              duration: loadedDuration.inMilliseconds / 1000.0,
+            );
+          }
+        } finally {
+          if (mounted) setState(() => _isLoadingAudio = false);
         }
       }
 
@@ -208,6 +217,7 @@ class _AudioSelectionBottomSheetState
           _selectedItem = resolvedSound;
         });
       }
+      if (!mounted) return;
       // Blocks here for the entire duration of playback — only
       // releases once the song finishes playing to the end or was paused.
       await _audioService.play();
@@ -220,7 +230,7 @@ class _AudioSelectionBottomSheetState
     } finally {
       if (_selectedItem == sound) {
         await _audioService.pause();
-        setState(() {});
+        if (mounted) setState(() {});
       }
     }
   }
@@ -479,6 +489,7 @@ class _AudioSelectionBottomSheetState
                 ? AudioEditorSelectionOverlay(
                     audio: _selectedItem!,
                     audioService: _audioService,
+                    isLoading: _isLoadingAudio,
                     onTapDone: _handleDoneSelection,
                     onTogglePlayState: _togglePlayPause,
                   )
