@@ -1,0 +1,285 @@
+// ABOUTME: Imports videos into the local clip library.
+// ABOUTME: Copies cached media into documents so saved clip paths survive app restarts.
+
+import 'dart:io';
+
+import 'package:models/models.dart' as models;
+import 'package:openvine/extensions/video_event_extensions.dart';
+import 'package:openvine/models/divine_video_clip.dart';
+import 'package:openvine/services/clip_library_service.dart';
+import 'package:path/path.dart' as p;
+import 'package:pro_video_editor/pro_video_editor.dart';
+import 'package:unified_logger/unified_logger.dart';
+
+typedef VideoClipDownloader =
+    Future<File?> Function({required String url, required String cacheKey});
+
+typedef VideoClipThumbnailExtractor =
+    Future<VideoClipThumbnail?> Function({
+      required String videoPath,
+      required Duration targetTimestamp,
+    });
+
+typedef VideoClipLastFrameExtractor =
+    Future<String?> Function({
+      required String videoPath,
+      required Duration videoDuration,
+    });
+
+typedef DocumentsPathProvider = Future<String> Function();
+typedef Clock = DateTime Function();
+
+typedef VideoMetadataReader = Future<VideoMetadata> Function(EditorVideo video);
+
+class VideoClipThumbnail {
+  const VideoClipThumbnail({required this.path, required this.timestamp});
+
+  final String path;
+  final Duration timestamp;
+}
+
+sealed class VideoClipImportResult {
+  const VideoClipImportResult();
+}
+
+final class VideoClipImportSuccess extends VideoClipImportResult {
+  const VideoClipImportSuccess(this.clip);
+
+  final DivineVideoClip clip;
+}
+
+final class VideoClipImportFailure extends VideoClipImportResult {
+  const VideoClipImportFailure(this.reason);
+
+  final VideoClipImportFailureReason reason;
+}
+
+enum VideoClipImportFailureReason {
+  missingVideoUrl,
+  unsupportedPlatform,
+  downloadFailed,
+  copyFailed,
+  saveFailed,
+}
+
+class VideoClipImportService {
+  VideoClipImportService({
+    required ClipLibraryService clipLibraryService,
+    required DocumentsPathProvider getDocumentsPath,
+    required VideoClipDownloader downloadVideo,
+    required VideoClipThumbnailExtractor extractThumbnail,
+    required VideoClipLastFrameExtractor extractLastFrame,
+    Clock? now,
+    VideoMetadataReader? readVideoMetadata,
+  }) : _clipLibraryService = clipLibraryService,
+       _getDocumentsPath = getDocumentsPath,
+       _downloadVideo = downloadVideo,
+       _extractThumbnail = extractThumbnail,
+       _extractLastFrame = extractLastFrame,
+       _now = now ?? DateTime.now,
+       _readVideoMetadata =
+           readVideoMetadata ?? ProVideoEditor.instance.getMetadata;
+
+  static const _logName = 'VideoClipImportService';
+
+  /// Aspect-ratio threshold at or above which an own video is square-cropped.
+  /// Videos meeting this threshold — including landscape videos wider than 1:1
+  /// — are intentionally mapped to [models.AspectRatio.square].
+  static const double _squareishMinAspectRatio = 0.9;
+
+  final ClipLibraryService _clipLibraryService;
+  final DocumentsPathProvider _getDocumentsPath;
+  final VideoClipDownloader _downloadVideo;
+  final VideoClipThumbnailExtractor _extractThumbnail;
+  final VideoClipLastFrameExtractor _extractLastFrame;
+  final Clock _now;
+  final VideoMetadataReader _readVideoMetadata;
+
+  Future<VideoClipImportResult> importToLibrary(
+    models.VideoEvent video,
+  ) async {
+    final playableUrl = await video.getPlayableUrl();
+    if (playableUrl == null || playableUrl.isEmpty) {
+      return const VideoClipImportFailure(
+        VideoClipImportFailureReason.missingVideoUrl,
+      );
+    }
+
+    final documentsPath = await _getDocumentsPath();
+    if (documentsPath.isEmpty) {
+      return const VideoClipImportFailure(
+        VideoClipImportFailureReason.unsupportedPlatform,
+      );
+    }
+
+    final downloaded = await _downloadVideo(
+      url: playableUrl,
+      cacheKey: video.id,
+    );
+    if (downloaded == null || !downloaded.existsSync()) {
+      return const VideoClipImportFailure(
+        VideoClipImportFailureReason.downloadFailed,
+      );
+    }
+
+    final clipId = _clipIdFor(video);
+    final duration = _durationFor(video);
+
+    try {
+      await Directory(documentsPath).create(recursive: true);
+      final copiedVideo = await _copyVideoIntoDocuments(
+        downloaded,
+        documentsPath,
+        clipId,
+      );
+
+      final thumbnail = await _extractThumbnail(
+        videoPath: copiedVideo.path,
+        targetTimestamp: _thumbnailTimestampFor(duration),
+      );
+      final ghostFramePath = await _extractLastFrame(
+        videoPath: copiedVideo.path,
+        videoDuration: duration,
+      );
+
+      final actualRatio = await _resolveAspectRatio(video, copiedVideo);
+
+      final clip = DivineVideoClip(
+        id: clipId,
+        video: EditorVideo.file(copiedVideo.path),
+        duration: duration,
+        recordedAt: _now(),
+        thumbnailPath: thumbnail?.path,
+        thumbnailTimestamp: thumbnail?.timestamp,
+        originalAspectRatio: actualRatio ?? 1,
+        targetAspectRatio: _targetAspectRatioFor(video, actualRatio),
+        ghostFramePath: ghostFramePath,
+      );
+
+      await _clipLibraryService.saveClip(clip);
+      return VideoClipImportSuccess(clip);
+    } on FileSystemException catch (e) {
+      Log.warning(
+        'Failed to copy video into documents: $e',
+        name: _logName,
+        category: LogCategory.video,
+      );
+      return const VideoClipImportFailure(
+        VideoClipImportFailureReason.copyFailed,
+      );
+    } catch (e) {
+      Log.warning(
+        'Failed to save video clip: $e',
+        name: _logName,
+        category: LogCategory.video,
+      );
+      return const VideoClipImportFailure(
+        VideoClipImportFailureReason.saveFailed,
+      );
+    }
+  }
+
+  Future<File> _copyVideoIntoDocuments(
+    File source,
+    String documentsPath,
+    String clipId,
+  ) {
+    final sourceExtension = p.extension(source.path);
+    final extension = sourceExtension.isEmpty ? '.mp4' : sourceExtension;
+    final targetPath = p.join(documentsPath, '$clipId$extension');
+    return source.copy(targetPath);
+  }
+
+  String _clipIdFor(models.VideoEvent video) {
+    final safeStableId = video.stableId.replaceAll(
+      RegExp('[^a-zA-Z0-9_-]'),
+      '_',
+    );
+    final prefix = video.isOriginalVine ? 'classic_vine' : 'own_video';
+    return '${prefix}_${safeStableId}_${_now().microsecondsSinceEpoch}';
+  }
+
+  Duration _durationFor(models.VideoEvent video) {
+    final seconds = video.duration;
+    if (seconds != null && seconds > 0) {
+      return Duration(seconds: seconds);
+    }
+    return const Duration(seconds: 6);
+  }
+
+  Duration _thumbnailTimestampFor(Duration duration) {
+    const preferred = Duration(milliseconds: 210);
+    final half = Duration(milliseconds: duration.inMilliseconds ~/ 2);
+    return half < preferred ? half : preferred;
+  }
+
+  double? _aspectRatioFor(models.VideoEvent video) {
+    final dimensions = video.dimensions;
+    if (dimensions == null || dimensions.isEmpty) return null;
+
+    final match = RegExp(r'^(\d+)x(\d+)$').firstMatch(dimensions);
+    if (match == null) return null;
+
+    final width = int.tryParse(match.group(1)!);
+    final height = int.tryParse(match.group(2)!);
+    if (width == null || height == null || height == 0) return null;
+
+    return width / height;
+  }
+
+  /// Resolves the real aspect ratio of the source video.
+  ///
+  /// Prefers the dimensions advertised in the Nostr event. Falls back to
+  /// probing the downloaded file with [ProVideoEditor.getMetadata] when the
+  /// event has no usable `dim` tag (common for own uploads that bypass the
+  /// transcoding pipeline).
+  Future<double?> _resolveAspectRatio(
+    models.VideoEvent video,
+    File copiedVideo,
+  ) async {
+    final fromEvent = _aspectRatioFor(video);
+    if (fromEvent != null) return fromEvent;
+
+    try {
+      final metadata = await _readVideoMetadata(
+        EditorVideo.file(copiedVideo.path),
+      );
+      var width = metadata.resolution.width;
+      var height = metadata.resolution.height;
+      if (width <= 0 || height <= 0) return null;
+      // Swap dimensions for portrait-rotated captures so the ratio reflects
+      // the displayed orientation rather than the raw frame.
+      if (metadata.rotation == 90 || metadata.rotation == 270) {
+        final swap = width;
+        width = height;
+        height = swap;
+      }
+      return width / height;
+    } catch (e) {
+      Log.warning(
+        'Failed to read video metadata for aspect ratio: $e',
+        name: _logName,
+        category: LogCategory.video,
+      );
+      return null;
+    }
+  }
+
+  /// Determines the target crop aspect ratio for the editor.
+  ///
+  /// Classic Vines are always 1:1 square originals.
+  /// Own videos use [actualRatio]: ratios >= [_squareishMinAspectRatio]
+  /// (including landscape videos wider than 1:1) intentionally map to square.
+  /// Everything narrower maps to 9:16. Falls back to 9:16 when the ratio is
+  /// unknown, matching the default capture orientation.
+  models.AspectRatio _targetAspectRatioFor(
+    models.VideoEvent video,
+    double? actualRatio,
+  ) {
+    if (video.isOriginalVine) return models.AspectRatio.square;
+    if (actualRatio != null && actualRatio >= _squareishMinAspectRatio) {
+      return models.AspectRatio.square;
+    }
+    return models.AspectRatio.vertical;
+  }
+}
