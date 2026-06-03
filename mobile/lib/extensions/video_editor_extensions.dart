@@ -70,6 +70,29 @@ extension VideoEditorExtensions on ProImageEditorState {
     setState(() {});
   }
 
+  /// Persists both clip and audio-track volumes in a single history entry.
+  ///
+  /// Canonical history write for volume changes. Creates one undo point that
+  /// captures both tracks, whether a single volume source changed or clips and
+  /// audio volumes were updated together (e.g. mute-all toggle).
+  void setVolumeState({
+    required List<DivineVideoClip> clips,
+    required List<AudioEvent> audioTracks,
+  }) {
+    addHistory(
+      meta: {
+        ...stateManager.activeMeta,
+        VideoEditorConstants.clipsStateHistoryKey: clips
+            .map((c) => c.toJson())
+            .toList(),
+        VideoEditorConstants.audioStateHistoryKey: audioTracks
+            .map((e) => e.toJson())
+            .toList(),
+      },
+    );
+    setState(() {});
+  }
+
   /// Persists clip trim and order state in the editor's history metadata.
   ///
   /// When [skipUpdateHistory] is `false` (default), creates a new history

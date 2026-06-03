@@ -42,7 +42,8 @@ enum DivineIconButtonSize {
 /// An icon-only button component following the Divine design system.
 ///
 /// The button's appearance is determined by [type] and [size]. The disabled
-/// state is automatically applied when [onPressed] is null.
+/// state is automatically applied when both [onPressed] and [onLongPress] are
+/// null.
 ///
 /// Both [DivineIconButtonSize.base] and [DivineIconButtonSize.small] have
 /// the same 48px tap target. The small variant appears 40px with a 4px
@@ -73,12 +74,14 @@ class DivineIconButton extends StatelessWidget {
   const DivineIconButton({
     required this.icon,
     required this.onPressed,
+    this.onLongPress,
     this.type = DivineIconButtonType.primary,
     this.size = DivineIconButtonSize.base,
     this.backgroundColor,
     this.foregroundColor,
     this.semanticLabel,
     this.semanticValue,
+    this.semanticLongPressHint,
     super.key,
   });
 
@@ -86,8 +89,13 @@ class DivineIconButton extends StatelessWidget {
   final DivineIconName icon;
 
   /// Called when the button is tapped.
-  /// If null, the button is displayed in its disabled state.
+  ///
+  /// If both [onPressed] and [onLongPress] are null, the button is displayed
+  /// in its disabled state.
   final VoidCallback? onPressed;
+
+  /// Called when the user long-presses.
+  final VoidCallback? onLongPress;
 
   /// The visual style type of the button.
   final DivineIconButtonType type;
@@ -107,17 +115,24 @@ class DivineIconButton extends StatelessWidget {
   /// Semantic value for accessibility (e.g. a count or status).
   final String? semanticValue;
 
+  /// Hint announced by screen readers to describe the long-press action.
+  ///
+  /// Only meaningful when [onLongPress] is set.
+  final String? semanticLongPressHint;
+
   @override
   Widget build(BuildContext context) {
     return _DivineIconButtonContent(
       icon: icon,
       onPressed: onPressed,
+      onLongPress: onLongPress,
       type: type,
       size: size,
       backgroundColor: backgroundColor,
       foregroundColor: foregroundColor,
       semanticLabel: semanticLabel,
       semanticValue: semanticValue,
+      semanticLongPressHint: semanticLongPressHint,
     );
   }
 }
@@ -126,26 +141,30 @@ class _DivineIconButtonContent extends StatelessWidget {
   const _DivineIconButtonContent({
     required this.icon,
     required this.onPressed,
+    required this.onLongPress,
     required this.type,
     required this.size,
     this.backgroundColor,
     this.foregroundColor,
     this.semanticLabel,
     this.semanticValue,
+    this.semanticLongPressHint,
   });
 
   final DivineIconName icon;
   final VoidCallback? onPressed;
+  final VoidCallback? onLongPress;
   final DivineIconButtonType type;
   final DivineIconButtonSize size;
   final Color? backgroundColor;
   final Color? foregroundColor;
   final String? semanticLabel;
   final String? semanticValue;
+  final String? semanticLongPressHint;
 
   static const _borderWidth = 2.0;
 
-  bool get _isEnabled => onPressed != null;
+  bool get _isEnabled => onPressed != null || onLongPress != null;
 
   /// Inner padding around the icon.
   double get _padding => switch (size) {
@@ -232,6 +251,8 @@ class _DivineIconButtonContent extends StatelessWidget {
     Widget button = Semantics(
       label: semanticLabel,
       value: semanticValue,
+      onLongPress: onLongPress,
+      onLongPressHint: semanticLongPressHint,
       button: true,
       enabled: _isEnabled,
       child: Padding(
@@ -243,6 +264,7 @@ class _DivineIconButtonContent extends StatelessWidget {
             type: .transparency,
             child: InkWell(
               onTap: onPressed,
+              onLongPress: onLongPress,
               borderRadius: BorderRadius.circular(_borderRadius),
               splashColor: _iconColor.withValues(alpha: 0.1),
               highlightColor: _iconColor.withValues(alpha: 0.05),

@@ -1,5 +1,6 @@
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -8,11 +9,13 @@ void main() {
     Widget buildTestWidget({
       DivineIconName icon = DivineIconName.x,
       VoidCallback? onPressed,
+      VoidCallback? onLongPress,
       DivineIconButtonType type = DivineIconButtonType.primary,
       DivineIconButtonSize size = DivineIconButtonSize.base,
       Color? backgroundColor,
       Color? foregroundColor,
       String? semanticLabel,
+      String? semanticLongPressHint,
     }) {
       return MaterialApp(
         home: Scaffold(
@@ -20,11 +23,13 @@ void main() {
             child: DivineIconButton(
               icon: icon,
               onPressed: onPressed,
+              onLongPress: onLongPress,
               type: type,
               size: size,
               backgroundColor: backgroundColor,
               foregroundColor: foregroundColor,
               semanticLabel: semanticLabel,
+              semanticLongPressHint: semanticLongPressHint,
             ),
           ),
         ),
@@ -55,6 +60,34 @@ void main() {
           findsOneWidget,
         );
       });
+
+      testWidgets('applies semantic long-press hint when set', (tester) async {
+        await tester.pumpWidget(
+          buildTestWidget(
+            semanticLongPressHint: 'Mute all tracks',
+            onLongPress: () {},
+          ),
+        );
+
+        final semantics = tester.getSemantics(find.byType(DivineIconButton));
+        expect(semantics.hintOverrides?.onLongPressHint, 'Mute all tracks');
+        expect(
+          semantics.getSemanticsData().hasAction(SemanticsAction.longPress),
+          isTrue,
+        );
+      });
+
+      testWidgets(
+        'has no long-press hint when semanticLongPressHint is null',
+        (tester) async {
+          await tester.pumpWidget(buildTestWidget(onPressed: () {}));
+
+          final semantics = tester.getSemantics(
+            find.byType(DivineIconButton),
+          );
+          expect(semantics.hintOverrides?.onLongPressHint, isNull);
+        },
+      );
     });
 
     group('interaction', () {
@@ -79,6 +112,36 @@ void main() {
 
         expect(pressed, isFalse);
       });
+
+      testWidgets('calls onLongPress when long-pressed', (tester) async {
+        var longPressed = false;
+        await tester.pumpWidget(
+          buildTestWidget(
+            onPressed: () {},
+            onLongPress: () => longPressed = true,
+          ),
+        );
+
+        await tester.longPress(find.byType(DivineIconButton));
+        await tester.pumpAndSettle();
+
+        expect(longPressed, isTrue);
+      });
+
+      testWidgets(
+        'is enabled and fires onLongPress when only onLongPress is set',
+        (tester) async {
+          var longPressed = false;
+          await tester.pumpWidget(
+            buildTestWidget(onLongPress: () => longPressed = true),
+          );
+
+          await tester.longPress(find.byType(DivineIconButton));
+          await tester.pumpAndSettle();
+
+          expect(longPressed, isTrue);
+        },
+      );
     });
 
     group('icon sizing', () {

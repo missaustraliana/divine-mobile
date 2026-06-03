@@ -1175,6 +1175,73 @@ void main() {
       );
     });
 
+    group('ClipEditorAllClipsVolumeChanged', () {
+      blocTest<ClipEditorBloc, ClipEditorState>(
+        'clamps below 0 to 0 on every clip, bumps revision, '
+        'keeps clips unmodifiable',
+        build: buildBloc,
+        seed: () => ClipEditorState(clips: twoClips),
+        act: (bloc) => bloc.add(
+          const ClipEditorAllClipsVolumeChanged(volume: -1.0),
+        ),
+        expect: () => [
+          isA<ClipEditorState>()
+              .having(
+                (s) => s.clips.map((c) => c.volume).toList(),
+                'clip volumes',
+                [0.0, 0.0],
+              )
+              .having((s) => s.clipsVolumeRevision, 'clipsVolumeRevision', 1),
+        ],
+        verify: (bloc) {
+          expect(
+            () => (bloc.state.clips as List).add(_createClip(id: 'extra')),
+            throwsUnsupportedError,
+          );
+        },
+      );
+
+      blocTest<ClipEditorBloc, ClipEditorState>(
+        'clamps above 1 to 1 on every clip',
+        build: buildBloc,
+        seed: () => ClipEditorState(
+          clips: twoClips
+              .map((c) => c.copyWith(volume: 0.5))
+              .toList(growable: false),
+        ),
+        act: (bloc) => bloc.add(
+          const ClipEditorAllClipsVolumeChanged(volume: 2.0),
+        ),
+        expect: () => [
+          isA<ClipEditorState>().having(
+            (s) => s.clips.map((c) => c.volume).toList(),
+            'clip volumes',
+            [1.0, 1.0],
+          ),
+        ],
+      );
+
+      blocTest<ClipEditorBloc, ClipEditorState>(
+        'is no-op when there are no clips',
+        build: buildBloc,
+        seed: () => const ClipEditorState(),
+        act: (bloc) => bloc.add(
+          const ClipEditorAllClipsVolumeChanged(volume: 0.0),
+        ),
+        expect: () => <ClipEditorState>[],
+      );
+
+      blocTest<ClipEditorBloc, ClipEditorState>(
+        'is no-op when every clip already has the clamped target volume',
+        build: buildBloc,
+        seed: () => ClipEditorState(clips: twoClips),
+        act: (bloc) => bloc.add(
+          const ClipEditorAllClipsVolumeChanged(volume: 2.0),
+        ),
+        expect: () => <ClipEditorState>[],
+      );
+    });
+
     // =========================================================
     // EVENT EQUALITY
     // =========================================================

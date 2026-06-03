@@ -48,6 +48,10 @@ class TimelineOverlayBloc
       _onAudioVolumeChanged,
       transformer: sequential(),
     );
+    on<TimelineOverlayAllAudioVolumeChanged>(
+      _onAllAudioVolumeChanged,
+      transformer: sequential(),
+    );
   }
 
   static const _markerMatchTolerance = Duration(milliseconds: 50);
@@ -567,6 +571,25 @@ class TimelineOverlayBloc
     if (state.audioTracks[index].volume == nextVolume) return;
     final updated = List<AudioEvent>.of(state.audioTracks);
     updated[index] = updated[index].copyWith(volume: nextVolume);
+    emit(
+      state.copyWith(
+        audioTracks: updated,
+        audioTracksRevision: state.audioTracksRevision + 1,
+      ),
+    );
+  }
+
+  void _onAllAudioVolumeChanged(
+    TimelineOverlayAllAudioVolumeChanged event,
+    Emitter<TimelineOverlayState> emit,
+  ) {
+    final nextVolume = event.volume.clamp(0.0, 1.0);
+    final affected = state.audioTracks.where((t) => !t.isOriginalSound);
+    if (affected.isEmpty) return;
+    if (affected.every((t) => t.volume == nextVolume)) return;
+    final updated = state.audioTracks
+        .map((t) => t.isOriginalSound ? t : t.copyWith(volume: nextVolume))
+        .toList(growable: false);
     emit(
       state.copyWith(
         audioTracks: updated,
