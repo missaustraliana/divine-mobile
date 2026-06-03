@@ -21,6 +21,7 @@ class MockUploadManager {
 
 void main() {
   group('UploadProgressDialog', () {
+    final l10n = lookupAppLocalizations(const Locale('en'));
     testWidgets('displays current upload progress percentage', (
       WidgetTester tester,
     ) async {
@@ -51,7 +52,7 @@ void main() {
 
       // Assert: Should display "50%"
       expect(find.text('50%'), findsOneWidget);
-      expect(find.text('Uploading video...'), findsOneWidget);
+      expect(find.text(l10n.uploadUploadingVideo), findsOneWidget);
     });
 
     testWidgets('dialog is non-dismissible (barrierDismissible: false)', (
@@ -98,14 +99,14 @@ void main() {
       await tester.pumpAndSettle();
 
       // Verify dialog is shown
-      expect(find.text('Uploading video...'), findsOneWidget);
+      expect(find.text(l10n.uploadUploadingVideo), findsOneWidget);
 
       // Try to dismiss by tapping outside (barrier)
       await tester.tapAt(const Offset(10, 10)); // Tap outside dialog
       await tester.pumpAndSettle();
 
       // Assert: Dialog should still be visible (not dismissed)
-      expect(find.text('Uploading video...'), findsOneWidget);
+      expect(find.text(l10n.uploadUploadingVideo), findsOneWidget);
     });
 
     testWidgets(
@@ -159,7 +160,7 @@ void main() {
         await tester.pumpAndSettle();
 
         // Verify dialog is shown
-        expect(find.text('Uploading video...'), findsOneWidget);
+        expect(find.text(l10n.uploadUploadingVideo), findsOneWidget);
         expect(dialogPopped, false);
 
         // Simulate upload completion by updating mock upload
@@ -175,6 +176,36 @@ void main() {
         verify(goRouter.pop).called(1);
       },
     );
+
+    testWidgets('dialog auto-closes when upload is already readyToPublish', (
+      WidgetTester tester,
+    ) async {
+      final goRouter = MockGoRouter();
+      final mockUpload = PendingUpload.create(
+        localVideoPath: '/test/video.mp4',
+        nostrPubkey: 'test_pubkey',
+      ).copyWith(status: UploadStatus.readyToPublish, uploadProgress: 1);
+      final mockManager = MockUploadManager(mockUpload: mockUpload);
+
+      await tester.pumpWidget(
+        MockGoRouterProvider(
+          goRouter: goRouter,
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: UploadProgressDialog(
+                uploadId: mockUpload.id,
+                uploadManager: mockManager,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      verify(goRouter.pop).called(1);
+    });
 
     testWidgets('dialog polls UploadManager every 500ms for status updates', (
       WidgetTester tester,

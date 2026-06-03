@@ -1,20 +1,22 @@
 // ABOUTME: Dialog widget that displays blocking upload progress with polling updates
 // ABOUTME: Auto-closes when upload completes, uses Timer.periodic for status polling
 
-import 'dart:async';
-
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:openvine/blocs/upload_progress/upload_progress_cubit.dart';
+import 'package:openvine/blocs/upload_progress/upload_progress_state.dart';
+import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/models/pending_upload.dart';
 
-/// Dialog that shows upload progress and blocks user interaction until complete
+/// Dialog that shows upload progress and blocks user interaction until complete.
 ///
-/// - Displays progress percentage with progress bar
-/// - Non-dismissible (barrierDismissible: false)
-/// - Polls UploadManager every 500ms for status updates
-/// - Auto-closes when upload status becomes readyToPublish
-class UploadProgressDialog extends StatefulWidget {
+/// - Displays progress percentage with progress bar.
+/// - Non-dismissible (barrierDismissible: false).
+/// - Polls the upload manager every 500ms via [UploadProgressCubit].
+/// - Auto-closes when upload status becomes `readyToPublish`.
+class UploadProgressDialog extends StatelessWidget {
   const UploadProgressDialog({
     required this.uploadId,
     required this.uploadManager,
@@ -22,96 +24,83 @@ class UploadProgressDialog extends StatefulWidget {
   });
 
   final String uploadId;
-  final dynamic uploadManager; // Accept any object with getUpload method
+  final dynamic uploadManager; // Accept any object with getUpload method.
 
   @override
-  State<UploadProgressDialog> createState() => _UploadProgressDialogState();
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) => UploadProgressCubit(
+        uploadId: uploadId,
+        lookup: (id) => uploadManager.getUpload(id) as PendingUpload?,
+      ),
+      child: const _UploadProgressView(),
+    );
+  }
 }
 
-class _UploadProgressDialogState extends State<UploadProgressDialog> {
-  Timer? _pollTimer;
-  double _progress = 0.0;
-  UploadStatus _status = UploadStatus.pending;
+class _UploadProgressView extends StatefulWidget {
+  const _UploadProgressView();
 
+  @override
+  State<_UploadProgressView> createState() => _UploadProgressViewState();
+}
+
+class _UploadProgressViewState extends State<_UploadProgressView> {
   @override
   void initState() {
     super.initState();
-    _startPolling();
-  }
-
-  @override
-  void dispose() {
-    _pollTimer?.cancel();
-    super.dispose();
-  }
-
-  void _startPolling() {
-    // Initial poll
-    _updateProgress();
-
-    // Poll every 500ms
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      _updateProgress();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<UploadProgressCubit>().start();
     });
-  }
-
-  void _updateProgress() {
-    final upload = widget.uploadManager.getUpload(widget.uploadId);
-    if (upload == null) return;
-
-    setState(() {
-      _progress = upload.uploadProgress ?? 0.0;
-      _status = upload.status;
-    });
-
-    // Auto-close when upload is ready to publish
-    if (_status == UploadStatus.readyToPublish) {
-      _pollTimer?.cancel();
-      if (mounted) {
-        context.pop();
-      }
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final percentageText = '${(_progress * 100).toInt()}%';
-
-    return Dialog(
-      backgroundColor: VineTheme.cardBackground,
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Uploading video...',
-              style: TextStyle(
-                color: VineTheme.whiteText,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
+    return BlocConsumer<UploadProgressCubit, UploadProgressState>(
+      listenWhen: (prev, curr) =>
+          prev.status != curr.status &&
+          curr.status == UploadStatus.readyToPublish,
+      listener: (context, _) => context.pop(),
+      builder: (context, state) {
+        final percentageText = '${(state.progress * 100).toInt()}%';
+        return Dialog(
+          backgroundColor: VineTheme.cardBackground,
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  context.l10n.uploadUploadingVideo,
+                  style: const TextStyle(
+                    color: VineTheme.whiteText,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                LinearProgressIndicator(
+                  value: state.progress,
+                  backgroundColor: VineTheme.cardBackground,
+                  valueColor: const AlwaysStoppedAnimation<Color>(
+                    VineTheme.vineGreen,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  percentageText,
+                  style: const TextStyle(
+                    color: VineTheme.whiteText,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 24),
-            LinearProgressIndicator(
-              value: _progress,
-              backgroundColor: VineTheme.cardBackground,
-              valueColor: const AlwaysStoppedAnimation<Color>(
-                VineTheme.vineGreen,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              percentageText,
-              style: const TextStyle(
-                color: VineTheme.whiteText,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
