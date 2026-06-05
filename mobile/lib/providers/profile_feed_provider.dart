@@ -99,6 +99,11 @@ class ProfileFeed extends _$ProfileFeed {
     ref.watch(contentFilterVersionProvider);
     ref.watch(divineHostFilterVersionProvider);
 
+    // Watch blocklist version — rebuilds when block/unblock/mute actions
+    // occur so blocked authors disappear (and unblocked authors reappear)
+    // without a relay round-trip. See #4782.
+    ref.watch(blocklistVersionProvider);
+
     Log.info(
       'ProfileFeed: BUILD START for user=$userId',
       name: 'ProfileFeedProvider',
@@ -121,6 +126,9 @@ class ProfileFeed extends _$ProfileFeed {
     _registerRetainedRealtimeListeners();
 
     if (retainedState != null && retainedState.videos.isNotEmpty) {
+      final visibleRetainedState = retainedState.copyWith(
+        videos: _applyFeedFilters(retainedState.videos),
+      );
       // Only seed REST pagination state when funnelcake is currently
       // reachable; otherwise leave _nextOffset null so loadMore falls back
       // to Nostr until a successful REST call repopulates the offset.
@@ -128,8 +136,8 @@ class ProfileFeed extends _$ProfileFeed {
         _nextOffset = estimateNextRestOffset(retainedState);
       }
       _totalVideoCount = retainedState.totalVideoCount;
-      unawaited(Future(() => refresh(retainedState: retainedState)));
-      return retainedState.copyWith(
+      unawaited(Future(() => refresh(retainedState: visibleRetainedState)));
+      return visibleRetainedState.copyWith(
         isRefreshing: true,
         isInitialLoad: false,
         isFetchingTotalCount: funnelcakeAvailable,
@@ -393,7 +401,7 @@ class ProfileFeed extends _$ProfileFeed {
         );
         _cacheVideoMetadata(authorVideos);
 
-        final filteredVideos = _videoEventService.filterVideoList(authorVideos);
+        final filteredVideos = _applyFeedFilters(authorVideos);
 
         _mergeSourceVideos(
           filteredVideos,
@@ -424,7 +432,7 @@ class ProfileFeed extends _$ProfileFeed {
           nostrService: ref.read(nostrServiceProvider),
           onEnriched: (enriched) {
             if (!ref.mounted) return;
-            final enrichedVideos = _videoEventService.filterVideoList(enriched);
+            final enrichedVideos = _applyFeedFilters(enriched);
             _mergeEnrichedRestVideos(
               enrichedVideos,
               sourceKeys: enrichmentKeys,
@@ -568,8 +576,8 @@ class ProfileFeed extends _$ProfileFeed {
             callerName: 'ProfileFeedProvider',
           );
 
-          // Apply content filter preferences
-          newVideos = _videoEventService.filterVideoList(newVideos);
+          // Apply content filter preferences and blocked/muted-author filter.
+          newVideos = _applyFeedFilters(newVideos);
 
           if (newVideos.isNotEmpty) {
             final allVideos = _mergeVideoLists(currentState.videos, newVideos);
@@ -659,7 +667,9 @@ class ProfileFeed extends _$ProfileFeed {
       // Apply cached metadata to preserve engagement stats
       updatedVideos = _applyMetadataCache(updatedVideos);
 
-      // Apply content filter preferences
+      // Apply content filter preferences. Relay-sourced videos are already
+      // blocklist-filtered by VideoEventService at reception, so no extra
+      // shouldFilterFromFeeds pass is needed here (#4782).
       updatedVideos = _videoEventService.filterVideoList(updatedVideos);
 
       // Update state with new videos
@@ -698,6 +708,8 @@ class ProfileFeed extends _$ProfileFeed {
   }
 
   Future<void> _refreshInner({VideoFeedState? retainedState}) async {
+    if (!ref.mounted) return;
+
     Log.info(
       'ProfileFeed: Refreshing feed for user=$userId',
       name: 'ProfileFeedProvider',
@@ -1032,12 +1044,31 @@ class ProfileFeed extends _$ProfileFeed {
     }
   }
 
+  /// Applies blocked/muted-author filtering on top of the content-preference
+  /// filter for videos that came from the Funnelcake REST author endpoint.
+  /// That endpoint is called anonymously and applies no per-viewer block
+  /// (kind 30000 d=block) or mute (kind 10000) filtering, so the client is the
+  /// only place these are enforced. (Relay-sourced videos are already filtered
+  /// by VideoEventService at reception, so they use [filterVideoList] directly.)
+  /// Mirrors the open-feed providers (e.g. PopularVideosFeed._filterVideos).
+  /// See #4782.
+  List<VideoEvent> _applyFeedFilters(List<VideoEvent> videos) {
+    if (videos.isEmpty) return videos;
+    final blocklistRepository = ref.read(contentBlocklistRepositoryProvider);
+    final blockFiltered = videos
+        .where((v) => !blocklistRepository.shouldFilterFromFeeds(v.pubkey))
+        .toList();
+    return _videoEventService.filterVideoList(blockFiltered);
+  }
+
   List<VideoEvent> _relayVideosSnapshot() {
     var videos = _videoEventService
         .authorVideos(userId)
         .where((v) => !v.isRepost)
         .toList();
     videos = _applyMetadataCache(videos);
+    // Relay-sourced videos are already blocklist-filtered by VideoEventService
+    // at reception; the extra REST-only filter lives in [_applyFeedFilters].
     return _withoutTombstones(_videoEventService.filterVideoList(videos));
   }
 
