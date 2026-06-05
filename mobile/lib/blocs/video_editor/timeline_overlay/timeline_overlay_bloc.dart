@@ -2,7 +2,6 @@
 // ABOUTME: video editor timeline. Handles add/remove/move/trim/select/drag
 // ABOUTME: and collapse state for all three strip types.
 
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:bloc_concurrency/bloc_concurrency.dart';
@@ -85,11 +84,9 @@ class TimelineOverlayBloc
           label: track.title ?? track.pubkey,
           maxDuration: track.duration != null
               ? Duration(
-                  milliseconds: math.min(
-                    (track.duration! * 1000).round() -
-                        track.startOffset.inMilliseconds,
-                    VideoEditorConstants.maxDuration.inMilliseconds,
-                  ),
+                  milliseconds:
+                      (track.duration! * 1000).round() -
+                      track.startOffset.inMilliseconds,
                 )
               : VideoEditorConstants.maxDuration,
           waveformLeftChannel: leftCache[track.id],
