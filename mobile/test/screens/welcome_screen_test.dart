@@ -5,6 +5,7 @@
 import 'package:db_client/db_client.dart';
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,6 +18,7 @@ import 'package:openvine/models/known_account.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/database_provider.dart';
 import 'package:openvine/screens/auth/welcome_screen.dart';
+import 'package:openvine/screens/minor_account_review_screen.dart';
 import 'package:openvine/services/auth_service.dart' hide UserProfile;
 import 'package:openvine/utils/nostr_key_utils.dart';
 import 'package:openvine/widgets/auth/auth_hero_section.dart';
@@ -134,6 +136,11 @@ void main() {
                 ),
               ],
             ),
+            GoRoute(
+              path: MinorAccountReviewScreen.welcomePath,
+              builder: (context, state) =>
+                  const Scaffold(body: Text('Family Guide Page')),
+            ),
           ],
         ),
       ),
@@ -181,6 +188,65 @@ void main() {
         expect(richTextFinder, findsOneWidget);
       });
 
+      testWidgets(
+        'renders min-age notice, under-16 link, and terms above the auth buttons',
+        (tester) async {
+          await tester.binding.setSurfaceSize(const Size(800, 1200));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          await tester.pumpWidget(createTestWidget());
+          await tester.pumpAndSettle();
+
+          final minAgeNotice = find.text(
+            'Divine accounts are for ages 16 and up.',
+          );
+          final under16Link = find.byWidgetPredicate((widget) {
+            if (widget is RichText) {
+              final text = widget.text.toPlainText();
+              return text.contains("Not 16 yet? That's OK. ") &&
+                  text.contains('Here are your choices.');
+            }
+            return false;
+          });
+          final termsNotice = find.byWidgetPredicate((widget) {
+            if (widget is RichText) {
+              final text = widget.text.toPlainText();
+              return text.contains('By selecting an option below') &&
+                  text.contains(
+                    'at least 16 years old (or have completed '
+                    'Divine age authorization) and agree',
+                  ) &&
+                  text.contains('Terms of Service');
+            }
+            return false;
+          });
+          final createButton = find.widgetWithText(
+            DivineButton,
+            'Create a new Divine account',
+          );
+          final loginButton = find.widgetWithText(
+            DivineButton,
+            'Sign in with an existing account',
+          );
+
+          expect(minAgeNotice, findsOneWidget);
+          expect(under16Link, findsOneWidget);
+          expect(termsNotice, findsOneWidget);
+          expect(createButton, findsOneWidget);
+          expect(loginButton, findsOneWidget);
+
+          final minAgeTop = tester.getTopLeft(minAgeNotice).dy;
+          final under16Top = tester.getTopLeft(under16Link).dy;
+          final termsTop = tester.getTopLeft(termsNotice).dy;
+          final createTop = tester.getTopLeft(createButton).dy;
+          final loginTop = tester.getTopLeft(loginButton).dy;
+
+          expect(under16Top, greaterThan(minAgeTop));
+          expect(termsTop, greaterThan(under16Top));
+          expect(createTop, greaterThan(termsTop));
+          expect(loginTop, greaterThan(createTop));
+        },
+      );
+
       testWidgets('tapping create account calls acceptTerms and navigates', (
         tester,
       ) async {
@@ -206,6 +272,79 @@ void main() {
         verify(() => mockAuthService.acceptTerms()).called(1);
         expect(find.text('Sign in'), findsOneWidget);
       });
+
+      testWidgets(
+        'tapping "Divine age authorization" navigates to the public family guide',
+        (
+          tester,
+        ) async {
+          await tester.pumpWidget(createTestWidget());
+          await tester.pumpAndSettle();
+
+          final termsRichText = find.byWidgetPredicate((widget) {
+            if (widget is RichText) {
+              final text = widget.text.toPlainText();
+              return text.contains('Divine age authorization') &&
+                  text.contains('Terms of Service');
+            }
+            return false;
+          });
+          expect(termsRichText, findsOneWidget);
+
+          final richText = tester.widget<RichText>(termsRichText);
+          final fullText = richText.text.toPlainText();
+          final linkStart = fullText.indexOf('Divine age authorization');
+          expect(linkStart, isNonNegative);
+          final renderParagraph = tester.renderObject<RenderParagraph>(
+            termsRichText,
+          );
+          final linkBoxes = renderParagraph.getBoxesForSelection(
+            TextSelection(
+              baseOffset: linkStart,
+              extentOffset: linkStart + 'Divine age authorization'.length,
+            ),
+          );
+          expect(linkBoxes, isNotEmpty);
+          final linkCenter = renderParagraph.localToGlobal(
+            linkBoxes.first.toRect().center,
+          );
+          await tester.tapAt(
+            linkCenter,
+          );
+          await tester.pumpAndSettle();
+
+          expect(find.text('Family Guide Page'), findsOneWidget);
+        },
+      );
+
+      testWidgets(
+        'tapping "Here are your choices." navigates to the public family guide',
+        (
+          tester,
+        ) async {
+          await tester.pumpWidget(createTestWidget());
+          await tester.pumpAndSettle();
+
+          final ctaRichText = find.byWidgetPredicate((widget) {
+            if (widget is RichText) {
+              final text = widget.text.toPlainText();
+              return text.contains("Not 16 yet? That's OK. ") &&
+                  text.contains('Here are your choices.');
+            }
+            return false;
+          });
+          expect(ctaRichText, findsOneWidget);
+
+          // Tap the right edge of the RichText, where the green CTA span sits.
+          final ctaRect = tester.getRect(ctaRichText);
+          await tester.tapAt(
+            Offset(ctaRect.right - 24, ctaRect.center.dy),
+          );
+          await tester.pumpAndSettle();
+
+          expect(find.text('Family Guide Page'), findsOneWidget);
+        },
+      );
 
       testWidgets('shows error when lastError is set', (tester) async {
         await tester.binding.setSurfaceSize(const Size(800, 1200));

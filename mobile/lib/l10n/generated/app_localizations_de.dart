@@ -199,13 +199,6 @@ class AppLocalizationsDe extends AppLocalizations {
       'Halt deinen Feed im klassischen Quadratformat';
 
   @override
-  String get generalSettingsHoldToRecord => 'Gedrückt halten zum Aufnehmen';
-
-  @override
-  String get generalSettingsHoldToRecordSubtitle =>
-      'Die Aufnahme beginnt, wenn du gedrückt hältst, und stoppt, wenn du loslässt';
-
-  @override
   String get contentPreferencesTitle => 'Inhaltseinstellungen';
 
   @override
@@ -2314,6 +2307,38 @@ class AppLocalizationsDe extends AppLocalizations {
       'Wenn jemand deine Videos repostet';
 
   @override
+  String get notificationSettingsSystem => 'System';
+
+  @override
+  String get notificationSettingsSystemSubtitle =>
+      'App updates and system messages';
+
+  @override
+  String get notificationSettingsPushNotificationsSection =>
+      'Push Notifications';
+
+  @override
+  String get notificationSettingsPushNotifications => 'Push Notifications';
+
+  @override
+  String get notificationSettingsPushNotificationsSubtitle =>
+      'Receive notifications when app is closed';
+
+  @override
+  String get notificationSettingsSound => 'Sound';
+
+  @override
+  String get notificationSettingsSoundSubtitle =>
+      'Play sound for notifications';
+
+  @override
+  String get notificationSettingsVibration => 'Vibration';
+
+  @override
+  String get notificationSettingsVibrationSubtitle =>
+      'Vibrate for notifications';
+
+  @override
   String get notificationSettingsActions => 'Aktionen';
 
   @override
@@ -2635,7 +2660,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get authCreateNewAccount => 'Neues Divine-Konto erstellen';
 
   @override
-  String get authSignInDifferentAccount => 'Mit bestehendem Konto anmelden';
+  String get authSignInDifferentAccount => 'Mit anderem Konto anmelden';
 
   @override
   String get authSignBackIn => 'Wieder anmelden';
@@ -2650,7 +2675,13 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get authTermsPrefix =>
-      'Indem du oben eine Option wählst, bestätigst du, dass du mindestens 16 Jahre alt bist und den ';
+      'By selecting an option below, you confirm you are at least 16 years old (or have completed ';
+
+  @override
+  String get authTermsAgeAuthorizationCta => 'Divine age authorization';
+
+  @override
+  String get authTermsAfterAgeAuthorization => ') and agree to the ';
 
   @override
   String get authTermsOfService => 'Nutzungsbedingungen';
@@ -3987,9 +4018,6 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String get soundsPreviewFailedGeneric => 'Vorschau-Wiedergabe fehlgeschlagen';
-
-  @override
   String get soundsFeaturedSounds => 'Featured Sounds';
 
   @override
@@ -4280,17 +4308,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get uploadPublishedMessage => 'Video in deinem Profil veröffentlicht';
-
-  @override
-  String uploadPublishedCountMessage(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count Videos in deinem Profil veröffentlicht',
-      one: 'Video in deinem Profil veröffentlicht',
-    );
-    return '$_temp0';
-  }
 
   @override
   String get uploadFailedMessage =>
@@ -4685,11 +4702,11 @@ class AppLocalizationsDe extends AppLocalizations {
       'General concerns about minors\' safety';
 
   @override
-  String get reportReasonCsam => 'Child Sexual Abuse';
+  String get reportReasonCsam => 'Verletzung der Kindersicherheit';
 
   @override
   String get reportReasonCsamSubtitle =>
-      'Content depicting sexual abuse of minors';
+      'Inhalte, die Minderjährige ausbeuten oder gefährden';
 
   @override
   String get reportReasonUnderageUser => 'User Appears Under 16';
@@ -5549,9 +5566,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get dmMessageInputHint => 'Say something…';
 
   @override
-  String get dmMessageSendLabel => 'Send message';
-
-  @override
   String get dmMessageBubbleSentHint => 'Sent message';
 
   @override
@@ -5596,36 +5610,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get dmReactionChipRetryAnnouncement => 'Retrying reaction';
-
-  @override
-  String get emojiPickerSearchHint => 'Suchen';
-
-  @override
-  String get emojiCategoryRecent => 'Zuletzt verwendet';
-
-  @override
-  String get emojiCategorySmileys => 'Smileys und Menschen';
-
-  @override
-  String get emojiCategoryAnimals => 'Tiere und Natur';
-
-  @override
-  String get emojiCategoryFood => 'Essen und Trinken';
-
-  @override
-  String get emojiCategoryActivities => 'Aktivitäten';
-
-  @override
-  String get emojiCategoryTravel => 'Reisen und Orte';
-
-  @override
-  String get emojiCategoryObjects => 'Objekte';
-
-  @override
-  String get emojiCategorySymbols => 'Symbole';
-
-  @override
-  String get emojiCategoryFlags => 'Flaggen';
 
   @override
   String get dmFormatBold => 'Fett';
@@ -7064,9 +7048,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get videoEditorAudioLabel => 'Audio';
 
   @override
-  String get videoEditorMarkerLabel => 'Markierung';
-
-  @override
   String get videoEditorAddTitle => 'Hinzufügen';
 
   @override
@@ -7163,21 +7144,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get videoEditorRedoSemanticLabel => 'Wiederholen';
-
-  @override
-  String get videoEditorAddTimelineMarkerSemanticLabel =>
-      'Timeline-Markierung hinzufügen';
-
-  @override
-  String get videoEditorRemoveTimelineMarkerSemanticLabel =>
-      'Timeline-Markierung entfernen';
-
-  @override
-  String get videoEditorDeleteTimelineMarkerTitle => 'Markierung löschen?';
-
-  @override
-  String get videoEditorDeleteTimelineMarkerSubtitle =>
-      'Das entfernt die Markierung aus der Timeline. Deine Bearbeitung bleibt erhalten.';
 
   @override
   String get videoEditorTextColorSemanticLabel => 'Textfarbe';
@@ -7308,10 +7274,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get videoEditorAudioUntitledSound => 'Unbenannter Sound';
 
   @override
-  String get videoEditorVolumeLongPressHint =>
-      'Alle Spuren stumm schalten oder aktivieren';
-
-  @override
   String get videoEditorAudioUntitled => 'Unbenannt';
 
   @override
@@ -7393,10 +7355,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get videoEditorFontUnknown => 'Unbekannt';
-
-  @override
-  String get videoEditorSplitFailed =>
-      'Teilen fehlgeschlagen. Bitte erneut versuchen.';
 
   @override
   String get videoEditorSplitPlayheadOutsideClip =>
@@ -7761,6 +7719,430 @@ class AppLocalizationsDe extends AppLocalizations {
   String get badgesRecipientWaitingStatus => 'Wartet auf Empfänger';
 
   @override
+  String get minorAccountReviewWelcomePageTitle => 'Family guide';
+
+  @override
+  String get minorAccountReviewWelcomeCta =>
+      'Not 16 yet? That\'s OK. Here\'s what you can do.';
+
+  @override
+  String get minorAccountReviewWelcomeTitle => 'Not 16 yet? That\'s OK.';
+
+  @override
+  String get minorAccountReviewWelcomeBody =>
+      'Rules for people under 16 vary depending on where you live. At Divine, we want families to talk it through together and decide what healthy social media use looks like.';
+
+  @override
+  String get minorAccountReviewModerationTitle => 'We need one more step';
+
+  @override
+  String get minorAccountReviewModerationBody =>
+      'We were asked to take a closer look at this account because it may belong to someone under 16. This flow keeps the next steps private and points you to the right path for your age.';
+
+  @override
+  String get minorAccountReviewRulesTitle =>
+      'The rules are not the same everywhere';
+
+  @override
+  String get minorAccountReviewRulesBody =>
+      'Different countries and regions treat teen social media use differently. That is why we ask families to slow down, check the facts, and choose the next step together.';
+
+  @override
+  String get minorAccountReviewApproachTitle => 'How Divine thinks about it';
+
+  @override
+  String get minorAccountReviewApproachBody =>
+      'We think healthy tech habits come from pausing, reflecting, and redirecting attention toward better things, not from spying on kids or turning parents into hall monitors. Research backs that up too.';
+
+  @override
+  String get minorAccountReviewLearnMoreTitle => 'More for families';
+
+  @override
+  String get minorAccountReviewKidsPolicyCta => 'Read Divine\'s kids policy';
+
+  @override
+  String get minorAccountReviewChooseAgeBandTitle =>
+      'Choose the path that fits';
+
+  @override
+  String get minorAccountReviewUnder13Cta => 'Under 13';
+
+  @override
+  String get minorAccountReviewTeenCta => 'Age 13-15';
+
+  @override
+  String get minorAccountReviewFamilyResourcesTitle => 'Helpful for families';
+
+  @override
+  String get minorAccountReviewFamilyResourcesBody =>
+      'Visit the Divine family guide for practical tips, conversation tools, and resources for helping teens use social media more safely.';
+
+  @override
+  String get minorAccountReviewFamilyResourcesCta =>
+      'Get family guides and tips';
+
+  @override
+  String get minorAccountReviewFooter =>
+      'If you are 16 or older and got sent here by mistake, contact Divine support so a real person can review it.';
+
+  @override
+  String get minorAccountReviewTitle => 'Account Review';
+
+  @override
+  String get minorAccountReviewCheckingStatusTitle =>
+      'Checking account status...';
+
+  @override
+  String get minorAccountReviewCheckingStatusBody =>
+      'Please wait while we confirm this account\'s current review status.';
+
+  @override
+  String get minorAccountReviewDefaultTitle => 'Account review required';
+
+  @override
+  String get minorAccountReviewDefaultBody =>
+      'We need to review this account before it can use Divine normally.';
+
+  @override
+  String minorAccountReviewCaseId(String caseId) {
+    return 'Case ID: $caseId';
+  }
+
+  @override
+  String get minorAccountReviewCaseIdShortLabel => 'Case ID';
+
+  @override
+  String get minorAccountReviewRestrictionsTitle =>
+      'What is restricted right now';
+
+  @override
+  String get minorAccountReviewRestrictionPosting =>
+      'Posting and publishing are paused';
+
+  @override
+  String get minorAccountReviewRestrictionEngagement =>
+      'Comments, likes, reposts, and follows are paused';
+
+  @override
+  String get minorAccountReviewRestrictionMessaging =>
+      'Starting or replying to regular messages is paused';
+
+  @override
+  String get minorAccountReviewRestrictionSupport =>
+      'Support and your moderation message remain available';
+
+  @override
+  String get minorAccountReviewOpenSupportCenter => 'Open Support Center';
+
+  @override
+  String get minorAccountReviewOpenModerationMessage =>
+      'Open Moderation Message';
+
+  @override
+  String get minorAccountReviewOpenReviewPage => 'Open review page';
+
+  @override
+  String get minorAccountReviewCheckAgain => 'Check Again';
+
+  @override
+  String get minorAccountReviewLogOut => 'Log out';
+
+  @override
+  String get minorAccountReviewNextStepTitle => 'Next step';
+
+  @override
+  String get minorAccountReviewNextStepBody =>
+      'Open the support center or your moderation message if you need help with this review.';
+
+  @override
+  String get minorAccountReviewInProgressTitle => 'Review in progress';
+
+  @override
+  String get minorAccountReviewInProgressBody =>
+      'We have what we need for now. Our team is reviewing this case before restoring normal account access.';
+
+  @override
+  String get minorAccountReviewUnder13Title => 'Under-13 accounts';
+
+  @override
+  String minorAccountReviewUnder13Body(String supportEmail) {
+    return 'If this account belongs to someone under 13, a parent or guardian must email $supportEmail and include the case ID.';
+  }
+
+  @override
+  String get minorAccountReviewUnder13PublicTitle =>
+      'We can\'t give you an account yet';
+
+  @override
+  String get minorAccountReviewUnder13PublicBody =>
+      'Divine isn\'t built for kids under 13 and the social media rules around the world tie our hands.\n\nA lot of things on the internet push you to lie to get what you want, and we hate that. It\'s the wrong lesson for life, and we\'re not going to teach it to you here.';
+
+  @override
+  String get minorAccountReviewUnder13FamilyTitle =>
+      'What your family can do instead';
+
+  @override
+  String get minorAccountReviewUnder13FamilyBody =>
+      'A parent or guardian can hold the account and do the posting, and you can absolutely be in the videos with them. We want families to enjoy Divine in whatever way is right for them.';
+
+  @override
+  String get minorAccountReviewUnder13ComeBackTitle => 'When you turn 13';
+
+  @override
+  String get minorAccountReviewUnder13ComeBackBody =>
+      'Depending on the rules where you live, you may be able to come back and apply for your own account. In that case, if you’re between 13 and 15, you’ll need consent from a parent or guardian.';
+
+  @override
+  String get minorAccountReviewUnder13HonestyTitle =>
+      'Why we won\'t tell you to just click back';
+
+  @override
+  String get minorAccountReviewUnder13HonestyBody =>
+      'A lot of the internet is set up to reward people for saying whatever gets them through the gate. We don\'t think that\'s great. Yes, you could go back and say you\'re older than you are, but that wouldn\'t be honest, and we\'re not going to coach you into lying to get what you want.';
+
+  @override
+  String get minorAccountReviewUnder13LegalTitle =>
+      'Why the answer is still no';
+
+  @override
+  String get minorAccountReviewUnder13LegalBody =>
+      'We\'re trying to help young people use Divine in ways that are healthy and positive for them and the people around them. We also have to follow laws that are different in different places. So, if you\'re under 13, the answer is that you can\'t have your own account today.';
+
+  @override
+  String get minorAccountReviewTeenBody =>
+      'If this account belongs to someone 13 to 15, use the moderation message or support path to follow the parental consent instructions.';
+
+  @override
+  String get minorAccountReviewParentConsentTitle =>
+      'If the account will belong to someone 13 to 15';
+
+  @override
+  String get minorAccountReviewParentConsentBody =>
+      'If parent or guardian contact is not possible or would put someone at risk, email Divine support and let us know.\n\nOtherwise, a parent or guardian should email Divine support with a short private video so our team can review the account and help with next steps.';
+
+  @override
+  String get minorAccountReviewParentConsentPauseNote =>
+      'This is a pause, not a dead end. The account is not active until Divine support reviews the video.';
+
+  @override
+  String get minorAccountReviewParentConsentHonestyTitle =>
+      'Why we ask a parent or guardian to be involved';
+
+  @override
+  String get minorAccountReviewParentConsentHonestyBody =>
+      'Divine has to follow age-related laws around the world. We also know that most technical age gates are imperfect. Rather than pretending the rules don\'t exist or that it\'s cool to lie about your age, we want teens and families to make thoughtful decisions about how best to use Divine. That\'s why, for 13-15 year olds, we ask parents to be part of the account creation process.';
+
+  @override
+  String get minorAccountReviewParentConsentLegalBody =>
+      'We also have to follow the law, and those rules are different depending on where someone lives. So instead of pretending the rules do not exist, we ask for a parent or guardian to be part of the process.';
+
+  @override
+  String get minorAccountReviewParentConsentChecklist =>
+      'What the video should show';
+
+  @override
+  String get minorAccountReviewParentConsentChecklistKid =>
+      'The teen in the video';
+
+  @override
+  String get minorAccountReviewParentConsentChecklistPermission =>
+      'A parent or guardian speaking on camera';
+
+  @override
+  String get minorAccountReviewParentConsentChecklistAgeBand =>
+      'A clear statement that the teen is 13 to 15 and has permission to use Divine';
+
+  @override
+  String get minorAccountReviewParentConsentChecklistSupervision =>
+      'A clear statement that the parent or guardian knows about the account and will supervise its use';
+
+  @override
+  String get minorAccountReviewParentConsentPrivacy => 'How to send it';
+
+  @override
+  String get minorAccountReviewParentConsentNeverPost =>
+      'Attach the video when you email Divine support';
+
+  @override
+  String get minorAccountReviewParentConsentDoNotSave =>
+      'Keep the video private and do not post it in the app';
+
+  @override
+  String get minorAccountReviewParentConsentOneMove =>
+      'Our team will review it and reply with next steps';
+
+  @override
+  String get minorAccountReviewParentConsentEmailCta => 'Email Divine support';
+
+  @override
+  String get minorAccountReviewParentConsentEmailSubject =>
+      '13-15 account review help';
+
+  @override
+  String get minorAccountReviewParentConsentEmailBody =>
+      'Hi Divine support,\n\nI am contacting Divine about an account for a teen who is 13 to 15.\n\nI have attached a short private video that shows:\n- the teen\n- a parent or guardian speaking on camera\n- that the teen has permission to use Divine\n- that the parent or guardian knows about the account and will supervise its use\n\nCountry/ies of residence:\n\nHelpful context:\n\nThanks.';
+
+  @override
+  String get minorAccountReviewParentSupportInstructions =>
+      'Parent Support Instructions';
+
+  @override
+  String get minorAccountReviewContinue => 'Continue';
+
+  @override
+  String get minorAccountReviewErrorTitle =>
+      'We could not load your account review status.';
+
+  @override
+  String get minorAccountReviewErrorBody => 'Please try again in a moment.';
+
+  @override
+  String get minorAccountReviewTryAgain => 'Try Again';
+
+  @override
+  String get minorAccountReviewParentContactTitle => 'Parent Contact';
+
+  @override
+  String get minorAccountReviewParentContactHeading =>
+      'Add a parent or guardian email';
+
+  @override
+  String minorAccountReviewParentContactBody(String caseId) {
+    return 'We will use this address for the parental consent review on case $caseId.';
+  }
+
+  @override
+  String get minorAccountReviewParentContactFieldLabel =>
+      'Parent or guardian email';
+
+  @override
+  String get minorAccountReviewSubmitting => 'Submitting...';
+
+  @override
+  String get minorAccountReviewSubmitEmail => 'Submit Email';
+
+  @override
+  String get minorAccountReviewBackToReview => 'Back to Account Review';
+
+  @override
+  String get minorAccountReviewSubmissionReceivedTitle => 'Email submitted';
+
+  @override
+  String minorAccountReviewSubmissionReceivedBody(String email) {
+    return 'We submitted $email for review. We\'ll email this address to confirm. Once your parent or guardian responds, your case will move forward. Use Check Again from the account review screen for updates.';
+  }
+
+  @override
+  String get minorAccountReviewSubmissionReceivedLocalBody =>
+      'We received the parent or guardian contact for this account. Our team will review it before restoring access.';
+
+  @override
+  String get minorAccountReviewMissingCase =>
+      'We could not find an active review case for this account.';
+
+  @override
+  String get minorAccountReviewParentContactError =>
+      'Could not submit the parent email. Please try again.';
+
+  @override
+  String get minorAccountReviewUnder13SupportTitle => 'Parent Support';
+
+  @override
+  String get minorAccountReviewUnder13Heading =>
+      'A parent or guardian must contact Divine';
+
+  @override
+  String get minorAccountReviewUnder13SupportBody =>
+      'For likely under-13 accounts, the next step is parent or guardian contact by email.';
+
+  @override
+  String get minorAccountReviewSupportEmailLabel => 'Support email';
+
+  @override
+  String get minorAccountReviewCopySupportEmail => 'Copy support email';
+
+  @override
+  String get minorAccountReviewSupportEmailCopied => 'Support email copied';
+
+  @override
+  String get minorAccountReviewCopyCaseId => 'Copy case ID';
+
+  @override
+  String get minorAccountReviewCaseIdCopied => 'Case ID copied';
+
+  @override
+  String get minorAccountReviewUnavailable => 'Unavailable';
+
+  @override
+  String get minorAccountReviewUnder13Instructions =>
+      'Ask the parent or guardian to include the case ID and explain that they are contacting Divine about this account review.';
+
+  @override
+  String minorAccountReviewUnder13EmailSubject(String caseId) {
+    return 'Under-13 account review for case $caseId';
+  }
+
+  @override
+  String minorAccountReviewUnder13EmailBody(String caseId) {
+    return 'Hi Divine support,\n\nI am the parent or guardian for a child under 13 and I am contacting Divine about account review case $caseId.\n\nThanks.';
+  }
+
+  @override
+  String get devOptionsMinorReviewSimulationTitle =>
+      'Minor Account Review Simulation';
+
+  @override
+  String get devOptionsMinorReviewCurrentStateLabel => 'Current state';
+
+  @override
+  String devOptionsMinorReviewStateRestricted(String state) {
+    return 'Restricted ($state)';
+  }
+
+  @override
+  String get devOptionsMinorReviewStateActive => 'Active';
+
+  @override
+  String get devOptionsMinorReviewStateLoading => 'Loading...';
+
+  @override
+  String get devOptionsMinorReviewStateError => 'Error loading state';
+
+  @override
+  String get devOptionsMinorReviewClearTitle => 'Clear simulation override';
+
+  @override
+  String get devOptionsMinorReviewClearSubtitle =>
+      'Use backend or default active state again';
+
+  @override
+  String get devOptionsMinorReviewTeenTitle => 'Simulate 13-15 review case';
+
+  @override
+  String get devOptionsMinorReviewTeenSubtitle =>
+      'Restricted account with parent contact path';
+
+  @override
+  String get devOptionsMinorReviewUnder13Title =>
+      'Simulate under-13 support case';
+
+  @override
+  String get devOptionsMinorReviewUnder13Subtitle =>
+      'Restricted account with parent-email-only instructions';
+
+  @override
+  String get devOptionsMinorReviewClearedToast =>
+      'Minor account review simulation cleared';
+
+  @override
+  String get devOptionsMinorReviewTeenEnabledToast =>
+      'Simulated 13-15 review case enabled';
+
+  @override
+  String get devOptionsMinorReviewUnder13EnabledToast =>
+      'Simulated under-13 support case enabled';
+
+  @override
   String get commentsRecordVideoButtonLabel => 'Videokommentar aufnehmen';
 
   @override
@@ -7832,4 +8214,96 @@ class AppLocalizationsDe extends AppLocalizations {
   String videoMetadataTagsPickerAddTag(String tag) {
     return '„#$tag\" hinzufügen';
   }
+
+  @override
+  String get authMinAgeNotice => 'Divine accounts are for ages 16 and up.';
+
+  @override
+  String get authUnder16Prefix => 'Not 16 yet? That\'s OK. ';
+
+  @override
+  String get authUnder16ChoicesCta => 'Here are your choices.';
+
+  @override
+  String get minorAccountReviewUnder13WhyTitle => 'Here\'s why';
+
+  @override
+  String get generalSettingsHoldToRecord => 'Gedrückt halten zum Aufnehmen';
+
+  @override
+  String get generalSettingsHoldToRecordSubtitle =>
+      'Die Aufnahme beginnt, wenn du gedrückt hältst, und stoppt, wenn du loslässt';
+
+  @override
+  String get soundsPreviewFailedGeneric => 'Vorschau-Wiedergabe fehlgeschlagen';
+
+  @override
+  String uploadPublishedCountMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Videos in deinem Profil veröffentlicht',
+      one: 'Video in deinem Profil veröffentlicht',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get dmMessageSendLabel => 'Send message';
+
+  @override
+  String get emojiPickerSearchHint => 'Suchen';
+
+  @override
+  String get emojiCategoryRecent => 'Zuletzt verwendet';
+
+  @override
+  String get emojiCategorySmileys => 'Smileys und Menschen';
+
+  @override
+  String get emojiCategoryAnimals => 'Tiere und Natur';
+
+  @override
+  String get emojiCategoryFood => 'Essen und Trinken';
+
+  @override
+  String get emojiCategoryActivities => 'Aktivitäten';
+
+  @override
+  String get emojiCategoryTravel => 'Reisen und Orte';
+
+  @override
+  String get emojiCategoryObjects => 'Objekte';
+
+  @override
+  String get emojiCategorySymbols => 'Symbole';
+
+  @override
+  String get emojiCategoryFlags => 'Flaggen';
+
+  @override
+  String get videoEditorMarkerLabel => 'Markierung';
+
+  @override
+  String get videoEditorAddTimelineMarkerSemanticLabel =>
+      'Timeline-Markierung hinzufügen';
+
+  @override
+  String get videoEditorRemoveTimelineMarkerSemanticLabel =>
+      'Timeline-Markierung entfernen';
+
+  @override
+  String get videoEditorDeleteTimelineMarkerTitle => 'Markierung löschen?';
+
+  @override
+  String get videoEditorDeleteTimelineMarkerSubtitle =>
+      'Das entfernt die Markierung aus der Timeline. Deine Bearbeitung bleibt erhalten.';
+
+  @override
+  String get videoEditorVolumeLongPressHint =>
+      'Alle Spuren stumm schalten oder aktivieren';
+
+  @override
+  String get videoEditorSplitFailed =>
+      'Teilen fehlgeschlagen. Bitte erneut versuchen.';
 }

@@ -93,8 +93,6 @@
   "generalSettingsVideoShapeSquareAndPortrait": "Square and portrait",
   "generalSettingsVideoShapeSquareAndPortraitSubtitle": "Show the full mix of Divine videos",
   "generalSettingsVideoShapeSquareOnlySubtitle": "Keep feeds in the classic square format",
-  "generalSettingsHoldToRecord": "Hold to record",
-  "generalSettingsHoldToRecordSubtitle": "Start recording when you press and hold, then stop when you release",
   "contentPreferencesTitle": "Content Preferences",
   "@contentPreferencesTitle": {
     "description": "Content preferences screen app bar title"
@@ -1288,6 +1286,15 @@
   "notificationSettingsMentionsSubtitle": "When you are mentioned",
   "notificationSettingsReposts": "Reposts",
   "notificationSettingsRepostsSubtitle": "When someone reposts your videos",
+  "notificationSettingsSystem": "System",
+  "notificationSettingsSystemSubtitle": "App updates and system messages",
+  "notificationSettingsPushNotificationsSection": "Push Notifications",
+  "notificationSettingsPushNotifications": "Push Notifications",
+  "notificationSettingsPushNotificationsSubtitle": "Receive notifications when app is closed",
+  "notificationSettingsSound": "Sound",
+  "notificationSettingsSoundSubtitle": "Play sound for notifications",
+  "notificationSettingsVibration": "Vibration",
+  "notificationSettingsVibrationSubtitle": "Vibrate for notifications",
   "notificationSettingsActions": "Actions",
   "notificationSettingsMarkAllAsRead": "Mark All as Read",
   "notificationSettingsMarkAllAsReadSubtitle": "Mark all notifications as read",
@@ -1479,7 +1486,15 @@
   "authSignBackIn": "Sign back in",
   "authRecoveryDraftsOwner": "Your drafts and clips are saved for this account",
   "authRecoveryOtherAccountWarning": "Signing in here will hide those drafts and clips",
-  "authTermsPrefix": "By selecting an option above, you confirm you are at least 16 years old and agree to the ",
+  "authTermsPrefix": "By selecting an option below, you confirm you are at least 16 years old (or have completed ",
+  "authTermsAgeAuthorizationCta": "Divine age authorization",
+  "@authTermsAgeAuthorizationCta": {
+    "description": "Inline link in the welcome-screen terms notice that opens the public family-guidance / age-authorization flow."
+  },
+  "authTermsAfterAgeAuthorization": ") and agree to the ",
+  "@authTermsAfterAgeAuthorization": {
+    "description": "Text after the Divine age authorization link in the welcome-screen terms notice."
+  },
   "authTermsOfService": "Terms of Service",
   "authPrivacyPolicy": "Privacy Policy",
   "authTermsAnd": ", and ",
@@ -2127,7 +2142,6 @@
       }
     }
   },
-  "soundsPreviewFailedGeneric": "Failed to play preview",
   "soundsFeaturedSounds": "Featured Sounds",
   "soundsTrendingSounds": "Trending Sounds",
   "soundsAllSounds": "All Sounds",
@@ -2326,16 +2340,6 @@
   "uploadProcessingMessage": "Processing video - this may take a few minutes",
   "uploadReadyToPublishMessage": "Video processed successfully and ready to publish",
   "uploadPublishedMessage": "Video published to your profile",
-  "uploadPublishedCountMessage": "{count, plural, =1{Video published to your profile} other{{count} videos published to your profile}}",
-  "@uploadPublishedCountMessage": {
-    "description": "Snackbar shown after one or more background uploads succeed, e.g. after a re-auth redirect during which uploads completed.",
-    "placeholders": {
-      "count": {
-        "type": "int",
-        "example": "2"
-      }
-    }
-  },
   "uploadFailedMessage": "Upload failed - please try again",
   "uploadRetryingMessage": "Retrying upload...",
   "uploadPausedMessage": "Upload paused by user",
@@ -3023,10 +3027,6 @@
   "@dmMessageInputHint": {
     "description": "Placeholder text shown inside the compose field at the bottom of a DM conversation when the user hasn't typed anything yet."
   },
-  "dmMessageSendLabel": "Send message",
-  "@dmMessageSendLabel": {
-    "description": "Screen-reader label for the send button at the bottom of a DM conversation."
-  },
   "dmMessageBubbleSentHint": "Sent message",
   "@dmMessageBubbleSentHint": {
     "description": "Accessibility hint announcing that a direct message bubble was sent by the current user"
@@ -3062,20 +3062,32 @@
   "dmReactionChipOwnA11yLabel": "Your reaction: {emoji}",
   "@dmReactionChipOwnA11yLabel": {
     "description": "Screen-reader label for a reaction chip created by the current account.",
-    "placeholders": { "emoji": { "type": "String" } }
+    "placeholders": {
+      "emoji": {
+        "type": "String"
+      }
+    }
   },
   "dmReactionChipOtherA11yLabel": "{name} reacted with {emoji}",
   "@dmReactionChipOtherA11yLabel": {
     "description": "Screen-reader label for a reaction chip created by another participant.",
     "placeholders": {
-      "name": { "type": "String" },
-      "emoji": { "type": "String" }
+      "name": {
+        "type": "String"
+      },
+      "emoji": {
+        "type": "String"
+      }
     }
   },
   "dmReactionChipPendingA11yLabel": "Sending reaction: {emoji}",
   "@dmReactionChipPendingA11yLabel": {
     "description": "Screen-reader label for a reaction chip whose publish is in flight.",
-    "placeholders": { "emoji": { "type": "String" } }
+    "placeholders": {
+      "emoji": {
+        "type": "String"
+      }
+    }
   },
   "dmReactionChipFailedA11yLabel": "Reaction failed, double tap to retry",
   "@dmReactionChipFailedA11yLabel": {
@@ -3084,46 +3096,6 @@
   "dmReactionChipRetryAnnouncement": "Retrying reaction",
   "@dmReactionChipRetryAnnouncement": {
     "description": "Live-region announcement on chip retry."
-  },
-  "emojiPickerSearchHint": "Search",
-  "@emojiPickerSearchHint": {
-    "description": "Hint text in the search field of the full emoji picker opened from the DM reaction '+' button."
-  },
-  "emojiCategoryRecent": "Recent",
-  "@emojiCategoryRecent": {
-    "description": "Title for the 'Recent' category in the full emoji picker."
-  },
-  "emojiCategorySmileys": "Smileys & People",
-  "@emojiCategorySmileys": {
-    "description": "Title for the 'Smileys & People' category in the full emoji picker."
-  },
-  "emojiCategoryAnimals": "Animals & Nature",
-  "@emojiCategoryAnimals": {
-    "description": "Title for the 'Animals & Nature' category in the full emoji picker."
-  },
-  "emojiCategoryFood": "Food & Drink",
-  "@emojiCategoryFood": {
-    "description": "Title for the 'Food & Drink' category in the full emoji picker."
-  },
-  "emojiCategoryActivities": "Activities",
-  "@emojiCategoryActivities": {
-    "description": "Title for the 'Activities' category in the full emoji picker."
-  },
-  "emojiCategoryTravel": "Travel & Places",
-  "@emojiCategoryTravel": {
-    "description": "Title for the 'Travel & Places' category in the full emoji picker."
-  },
-  "emojiCategoryObjects": "Objects",
-  "@emojiCategoryObjects": {
-    "description": "Title for the 'Objects' category in the full emoji picker."
-  },
-  "emojiCategorySymbols": "Symbols",
-  "@emojiCategorySymbols": {
-    "description": "Title for the 'Symbols' category in the full emoji picker."
-  },
-  "emojiCategoryFlags": "Flags",
-  "@emojiCategoryFlags": {
-    "description": "Title for the 'Flags' category in the full emoji picker."
   },
   "dmFormatBold": "Bold",
   "@dmFormatBold": {
@@ -3918,7 +3890,9 @@
   "@commentsHeaderCount": {
     "description": "Header above the comments list showing the total comment count.",
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "commentsSortNew": "New",
@@ -4119,7 +4093,6 @@
   "videoEditorDrawLabel": "Draw",
   "videoEditorFilterLabel": "Filter",
   "videoEditorAudioLabel": "Audio",
-  "videoEditorMarkerLabel": "Marker",
   "videoEditorAddTitle": "Add",
   "videoEditorOpenLibrarySemanticLabel": "Open Library",
   "videoEditorOpenAudioSemanticLabel": "Open audio editor",
@@ -4157,10 +4130,6 @@
   "videoEditorColorPickerSemanticLabel": "Color picker",
   "videoEditorUndoSemanticLabel": "Undo",
   "videoEditorRedoSemanticLabel": "Redo",
-  "videoEditorAddTimelineMarkerSemanticLabel": "Add timeline marker",
-  "videoEditorRemoveTimelineMarkerSemanticLabel": "Remove timeline marker",
-  "videoEditorDeleteTimelineMarkerTitle": "Delete marker?",
-  "videoEditorDeleteTimelineMarkerSubtitle": "This removes the marker from the timeline. Your edit stays intact.",
   "videoEditorTextColorSemanticLabel": "Text color",
   "videoEditorTextAlignmentSemanticLabel": "Text alignment",
   "videoEditorTextBackgroundSemanticLabel": "Text background",
@@ -4177,13 +4146,21 @@
   "videoEditorVolumeSemanticLabel": "Adjust volume",
   "videoEditorTimelineVolumePreview": "Volume {percent}%",
   "@videoEditorTimelineVolumePreview": {
-    "placeholders": { "percent": { "type": "int" } }
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
   },
   "videoEditorTimelineSlideToAdjust": "Slide to adjust",
   "videoEditorOriginalAudioLabel": "Original audio",
   "videoEditorClipVolumeLabel": "Clip {index}",
   "@videoEditorClipVolumeLabel": {
-    "placeholders": { "index": { "type": "int" } }
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
   },
   "videoEditorDeleteLabel": "Delete",
   "videoEditorDeleteSelectedItemSemanticLabel": "Delete selected item",
@@ -4214,10 +4191,6 @@
   "videoEditorAudioPlayPreviewSemanticLabel": "Play preview",
   "videoEditorAudioPausePreviewSemanticLabel": "Pause preview",
   "videoEditorAudioUntitledSound": "Untitled sound",
-  "videoEditorVolumeLongPressHint": "Mute or unmute all tracks",
-  "@videoEditorVolumeLongPressHint": {
-    "description": "Semantic long-press hint for a volume arc control. Screen readers announce this as the long-press affordance, which mutes or unmutes all timeline tracks at once."
-  },
   "videoEditorAudioUntitled": "Untitled",
   "videoEditorAudioAddAudio": "Add audio",
   "videoEditorAudioNoSoundsAvailableTitle": "No sounds available",
@@ -4250,7 +4223,6 @@
   "videoEditorStickerSearchHint": "Search stickers...",
   "videoEditorSelectFontSemanticLabel": "Select font",
   "videoEditorFontUnknown": "Unknown",
-  "videoEditorSplitFailed": "Split failed. Please try again.",
   "videoEditorSplitPlayheadOutsideClip": "Playhead must be within the selected clip to split.",
   "videoEditorTimelineTrimStartSemanticLabel": "Trim start",
   "videoEditorTimelineTrimEndSemanticLabel": "Trim end",
@@ -4441,6 +4413,170 @@
   "badgesIssuedNoRecipients": "No recipients found for this award.",
   "badgesRecipientAcceptedStatus": "Accepted by recipient",
   "badgesRecipientWaitingStatus": "Waiting for recipient",
+  "minorAccountReviewWelcomePageTitle": "Family guide",
+  "minorAccountReviewWelcomeCta": "Not 16 yet? That's OK. Here's what you can do.",
+  "minorAccountReviewWelcomeTitle": "Not 16 yet? That's OK.",
+  "minorAccountReviewWelcomeBody": "If you clicked through to this page instead of just picking the answer that got you in, that matters. It shows honesty, backbone, and real care for the people around you.\n\nRules for people under 16 vary depending on where you live. At Divine, we want families to talk it through together and decide what healthy social media use looks like.",
+  "minorAccountReviewModerationTitle": "We need one more step",
+  "minorAccountReviewModerationBody": "We were asked to take a closer look at this account because it may belong to someone under 16. This flow keeps the next steps private and points you to the right path for your age.",
+  "minorAccountReviewRulesTitle": "The rules are not the same everywhere",
+  "minorAccountReviewRulesBody": "Different countries and regions treat teen social media use differently. That is why we ask families to slow down, check the facts, and choose the next step together.",
+  "minorAccountReviewApproachTitle": "How Divine thinks about it",
+  "minorAccountReviewApproachBody": "We think healthy tech habits come from pausing, reflecting, and redirecting attention toward better things, not from spying on kids or turning parents into hall monitors. Research backs that up too.",
+  "minorAccountReviewLearnMoreTitle": "More for families",
+  "minorAccountReviewKidsPolicyCta": "Read Divine's kids policy",
+  "minorAccountReviewChooseAgeBandTitle": "Choose the path that fits",
+  "minorAccountReviewUnder13Cta": "Under 13",
+  "minorAccountReviewTeenCta": "Age 13-15",
+  "minorAccountReviewFamilyResourcesTitle": "Helpful for families",
+  "minorAccountReviewFamilyResourcesBody": "Visit the Divine family guide for practical tips, conversation tools, and resources for helping teens use social media more safely.",
+  "minorAccountReviewFamilyResourcesCta": "Get family guides and tips",
+  "minorAccountReviewFooter": "If you are 16 or older and got sent here by mistake, contact Divine support so a real person can review it.",
+  "minorAccountReviewTitle": "Account Review",
+  "minorAccountReviewCheckingStatusTitle": "Checking account status...",
+  "minorAccountReviewCheckingStatusBody": "Please wait while we confirm this account's current review status.",
+  "minorAccountReviewDefaultTitle": "Account review required",
+  "minorAccountReviewDefaultBody": "We need to review this account before it can use Divine normally.",
+  "minorAccountReviewCaseId": "Case ID: {caseId}",
+  "@minorAccountReviewCaseId": {
+    "placeholders": {
+      "caseId": {
+        "type": "String"
+      }
+    }
+  },
+  "minorAccountReviewCaseIdShortLabel": "Case ID",
+  "minorAccountReviewRestrictionsTitle": "What is restricted right now",
+  "minorAccountReviewRestrictionPosting": "Posting and publishing are paused",
+  "minorAccountReviewRestrictionEngagement": "Comments, likes, reposts, and follows are paused",
+  "minorAccountReviewRestrictionMessaging": "Starting or replying to regular messages is paused",
+  "minorAccountReviewRestrictionSupport": "Support and your moderation message remain available",
+  "minorAccountReviewOpenSupportCenter": "Open Support Center",
+  "minorAccountReviewOpenModerationMessage": "Open Moderation Message",
+  "minorAccountReviewOpenReviewPage": "Open review page",
+  "minorAccountReviewCheckAgain": "Check Again",
+  "minorAccountReviewLogOut": "Log out",
+  "minorAccountReviewNextStepTitle": "Next step",
+  "minorAccountReviewNextStepBody": "Open the support center or your moderation message if you need help with this review.",
+  "minorAccountReviewInProgressTitle": "Review in progress",
+  "minorAccountReviewInProgressBody": "We have what we need for now. Our team is reviewing this case before restoring normal account access.",
+  "minorAccountReviewUnder13Title": "Under-13 accounts",
+  "minorAccountReviewUnder13Body": "If this account belongs to someone under 13, a parent or guardian must email {supportEmail} and include the case ID.",
+  "@minorAccountReviewUnder13Body": {
+    "placeholders": {
+      "supportEmail": {
+        "type": "String"
+      }
+    }
+  },
+  "minorAccountReviewUnder13PublicTitle": "We can't give you an account yet",
+  "minorAccountReviewUnder13PublicBody": "Divine isn't built for kids under 13 and the social media rules around the world tie our hands.\n\nA lot of things on the internet push you to lie to get what you want, and we hate that. It's the wrong lesson for life, and we're not going to teach it to you here.",
+  "minorAccountReviewUnder13FamilyTitle": "What your family can do instead",
+  "minorAccountReviewUnder13FamilyBody": "A parent or guardian can hold the account and do the posting, and you can absolutely be in the videos with them. We want families to enjoy Divine in whatever way is right for them.",
+  "minorAccountReviewUnder13ComeBackTitle": "When you turn 13",
+  "minorAccountReviewUnder13ComeBackBody": "Depending on the rules where you live, you may be able to come back and apply for your own account. In that case, if you’re between 13 and 15, you’ll need consent from a parent or guardian.",
+  "minorAccountReviewUnder13HonestyTitle": "Why we won't tell you to just click back",
+  "minorAccountReviewUnder13HonestyBody": "A lot of the internet is set up to reward people for saying whatever gets them through the gate. We don't think that's great. Yes, you could go back and say you're older than you are, but that wouldn't be honest, and we're not going to coach you into lying to get what you want.",
+  "minorAccountReviewUnder13LegalTitle": "Why the answer is still no",
+  "minorAccountReviewUnder13LegalBody": "We're trying to help young people use Divine in ways that are healthy and positive for them and the people around them. We also have to follow laws that are different in different places. So, if you're under 13, the answer is that you can't have your own account today.",
+  "minorAccountReviewTeenBody": "If this account belongs to someone 13 to 15, use the moderation message or support path to follow the parental consent instructions.",
+  "minorAccountReviewParentConsentTitle": "If the account will belong to someone 13 to 15",
+  "minorAccountReviewParentConsentBody": "A parent or guardian should email Divine support with a short private video. Our team will review it and help with next steps.\n\nIf parent or guardian contact is not possible or would put someone at risk, email Divine support and let us know.",
+  "minorAccountReviewParentConsentPauseNote": "This is a pause while the Divine support team reviews the video. If it is approved, they will guide you through setting up the new account.",
+  "minorAccountReviewParentConsentHonestyTitle": "Why we ask a parent or guardian to be involved",
+  "minorAccountReviewParentConsentHonestyBody": "Divine has to follow age-related laws around the world. We also know that most technical age gates are imperfect. Rather than pretending the rules don't exist or that it's cool to lie about your age, we want teens and families to make thoughtful decisions about how best to use Divine. That's why, for 13-15 year olds, we ask parents to be part of the account creation process.",
+  "minorAccountReviewParentConsentLegalBody": "We also have to follow the law, and those rules are different depending on where someone lives. So instead of pretending the rules do not exist, we ask for a parent or guardian to be part of the process.",
+  "minorAccountReviewParentConsentChecklist": "What the video should show",
+  "minorAccountReviewParentConsentChecklistKid": "The teen in the video",
+  "minorAccountReviewParentConsentChecklistPermission": "A parent or guardian speaking on camera",
+  "minorAccountReviewParentConsentChecklistAgeBand": "A clear statement that the teen is 13 to 15 and has permission to use Divine",
+  "minorAccountReviewParentConsentChecklistSupervision": "A clear statement that the parent or guardian knows about the account and will supervise its use",
+  "minorAccountReviewParentConsentPrivacy": "How to send it",
+  "minorAccountReviewParentConsentNeverPost": "Attach the video when you email Divine support",
+  "minorAccountReviewParentConsentDoNotSave": "Keep the video private and do not post it in the app",
+  "minorAccountReviewParentConsentOneMove": "Our team will review it and reply with next steps",
+  "minorAccountReviewParentConsentEmailCta": "Email Divine support",
+  "minorAccountReviewParentConsentEmailSubject": "13-15 account review help",
+  "minorAccountReviewParentConsentEmailBody": "Hi Divine support,\n\nI am contacting Divine about an account for a teen who is 13 to 15.\n\nI have attached a short private video that shows:\n- the teen\n- a parent or guardian speaking on camera\n- that the teen has permission to use Divine\n- that the parent or guardian knows about the account and will supervise its use\n\nCountry/ies of residence:\n\nHelpful context:\n\nThanks.",
+  "minorAccountReviewParentSupportInstructions": "Parent Support Instructions",
+  "minorAccountReviewContinue": "Continue",
+  "minorAccountReviewErrorTitle": "We could not load your account review status.",
+  "minorAccountReviewErrorBody": "Please try again in a moment.",
+  "minorAccountReviewTryAgain": "Try Again",
+  "minorAccountReviewParentContactTitle": "Parent Contact",
+  "minorAccountReviewParentContactHeading": "Add a parent or guardian email",
+  "minorAccountReviewParentContactBody": "We will use this address for the parental consent review on case {caseId}.",
+  "@minorAccountReviewParentContactBody": {
+    "placeholders": {
+      "caseId": {
+        "type": "String"
+      }
+    }
+  },
+  "minorAccountReviewParentContactFieldLabel": "Parent or guardian email",
+  "minorAccountReviewSubmitting": "Submitting...",
+  "minorAccountReviewSubmitEmail": "Submit Email",
+  "minorAccountReviewBackToReview": "Back to Account Review",
+  "minorAccountReviewSubmissionReceivedTitle": "Email submitted",
+  "minorAccountReviewSubmissionReceivedBody": "We submitted {email} for review. We'll email this address to confirm. Once your parent or guardian responds, your case will move forward. Use Check Again from the account review screen for updates.",
+  "@minorAccountReviewSubmissionReceivedBody": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "minorAccountReviewSubmissionReceivedLocalBody": "We received the parent or guardian contact for this account. Our team will review it before restoring access.",
+  "minorAccountReviewMissingCase": "We could not find an active review case for this account.",
+  "minorAccountReviewParentContactError": "Could not submit the parent email. Please try again.",
+  "minorAccountReviewUnder13SupportTitle": "Parent Support",
+  "minorAccountReviewUnder13Heading": "A parent or guardian must contact Divine",
+  "minorAccountReviewUnder13SupportBody": "For likely under-13 accounts, the next step is parent or guardian contact by email.",
+  "minorAccountReviewSupportEmailLabel": "Support email",
+  "minorAccountReviewCopySupportEmail": "Copy support email",
+  "minorAccountReviewSupportEmailCopied": "Support email copied",
+  "minorAccountReviewCopyCaseId": "Copy case ID",
+  "minorAccountReviewCaseIdCopied": "Case ID copied",
+  "minorAccountReviewUnavailable": "Unavailable",
+  "minorAccountReviewUnder13Instructions": "Ask the parent or guardian to include the case ID and explain that they are contacting Divine about this account review.",
+  "minorAccountReviewUnder13EmailSubject": "Under-13 account review for case {caseId}",
+  "@minorAccountReviewUnder13EmailSubject": {
+    "placeholders": {
+      "caseId": {
+        "type": "String"
+      }
+    }
+  },
+  "minorAccountReviewUnder13EmailBody": "Hi Divine support,\n\nI am the parent or guardian for a child under 13 and I am contacting Divine about account review case {caseId}.\n\nThanks.",
+  "@minorAccountReviewUnder13EmailBody": {
+    "placeholders": {
+      "caseId": {
+        "type": "String"
+      }
+    }
+  },
+  "devOptionsMinorReviewSimulationTitle": "Minor Account Review Simulation",
+  "devOptionsMinorReviewCurrentStateLabel": "Current state",
+  "devOptionsMinorReviewStateRestricted": "Restricted ({state})",
+  "@devOptionsMinorReviewStateRestricted": {
+    "placeholders": {
+      "state": {
+        "type": "String"
+      }
+    }
+  },
+  "devOptionsMinorReviewStateActive": "Active",
+  "devOptionsMinorReviewStateLoading": "Loading...",
+  "devOptionsMinorReviewStateError": "Error loading state",
+  "devOptionsMinorReviewClearTitle": "Clear simulation override",
+  "devOptionsMinorReviewClearSubtitle": "Use backend or default active state again",
+  "devOptionsMinorReviewTeenTitle": "Simulate 13-15 review case",
+  "devOptionsMinorReviewTeenSubtitle": "Restricted account with parent contact path",
+  "devOptionsMinorReviewUnder13Title": "Simulate under-13 support case",
+  "devOptionsMinorReviewUnder13Subtitle": "Restricted account with parent-email-only instructions",
+  "devOptionsMinorReviewClearedToast": "Minor account review simulation cleared",
+  "devOptionsMinorReviewTeenEnabledToast": "Simulated 13-15 review case enabled",
+  "devOptionsMinorReviewUnder13EnabledToast": "Simulated under-13 support case enabled",
   "commentsRecordVideoButtonLabel": "Record video comment",
   "@commentsRecordVideoButtonLabel": {
     "description": "Semantics label for the button that opens the recorder to create a video reply in comments."
@@ -4516,5 +4652,85 @@
         "type": "String"
       }
     }
-  }
+  },
+  "authMinAgeNotice": "Divine accounts are for ages 16 and up.",
+  "@authMinAgeNotice": {
+    "description": "Welcome-screen notice above the sign-in / create-account buttons explaining the minimum age for self-signup."
+  },
+  "authUnder16Prefix": "Not 16 yet? That's OK. ",
+  "@authUnder16Prefix": {
+    "description": "Lead-in white text rendered on the welcome screen immediately before the green 'Here are your choices.' link."
+  },
+  "authUnder16ChoicesCta": "Here are your choices.",
+  "@authUnder16ChoicesCta": {
+    "description": "Inline green call-to-action on the welcome screen that opens the family-guidance flow for under-16 users."
+  },
+  "minorAccountReviewUnder13WhyTitle": "Here's why",
+    "generalSettingsHoldToRecord": "Hold to record",
+    "generalSettingsHoldToRecordSubtitle": "Start recording when you press and hold, then stop when you release",
+    "soundsPreviewFailedGeneric": "Failed to play preview",
+    "uploadPublishedCountMessage": "{count, plural, =1{Video published to your profile} other{{count} videos published to your profile}}",
+    "@uploadPublishedCountMessage": {
+        "description": "Snackbar shown after one or more background uploads succeed, e.g. after a re-auth redirect during which uploads completed.",
+        "placeholders": {
+            "count": {
+                "type": "int",
+                "example": "2"
+            }
+        }
+    },
+    "dmMessageSendLabel": "Send message",
+    "@dmMessageSendLabel": {
+        "description": "Screen-reader label for the send button at the bottom of a DM conversation."
+    },
+    "emojiPickerSearchHint": "Search",
+    "@emojiPickerSearchHint": {
+        "description": "Hint text in the search field of the full emoji picker opened from the DM reaction '+' button."
+    },
+    "emojiCategoryRecent": "Recent",
+    "@emojiCategoryRecent": {
+        "description": "Title for the 'Recent' category in the full emoji picker."
+    },
+    "emojiCategorySmileys": "Smileys & People",
+    "@emojiCategorySmileys": {
+        "description": "Title for the 'Smileys & People' category in the full emoji picker."
+    },
+    "emojiCategoryAnimals": "Animals & Nature",
+    "@emojiCategoryAnimals": {
+        "description": "Title for the 'Animals & Nature' category in the full emoji picker."
+    },
+    "emojiCategoryFood": "Food & Drink",
+    "@emojiCategoryFood": {
+        "description": "Title for the 'Food & Drink' category in the full emoji picker."
+    },
+    "emojiCategoryActivities": "Activities",
+    "@emojiCategoryActivities": {
+        "description": "Title for the 'Activities' category in the full emoji picker."
+    },
+    "emojiCategoryTravel": "Travel & Places",
+    "@emojiCategoryTravel": {
+        "description": "Title for the 'Travel & Places' category in the full emoji picker."
+    },
+    "emojiCategoryObjects": "Objects",
+    "@emojiCategoryObjects": {
+        "description": "Title for the 'Objects' category in the full emoji picker."
+    },
+    "emojiCategorySymbols": "Symbols",
+    "@emojiCategorySymbols": {
+        "description": "Title for the 'Symbols' category in the full emoji picker."
+    },
+    "emojiCategoryFlags": "Flags",
+    "@emojiCategoryFlags": {
+        "description": "Title for the 'Flags' category in the full emoji picker."
+    },
+    "videoEditorMarkerLabel": "Marker",
+    "videoEditorAddTimelineMarkerSemanticLabel": "Add timeline marker",
+    "videoEditorRemoveTimelineMarkerSemanticLabel": "Remove timeline marker",
+    "videoEditorDeleteTimelineMarkerTitle": "Delete marker?",
+    "videoEditorDeleteTimelineMarkerSubtitle": "This removes the marker from the timeline. Your edit stays intact.",
+    "videoEditorVolumeLongPressHint": "Mute or unmute all tracks",
+    "@videoEditorVolumeLongPressHint": {
+        "description": "Semantic long-press hint for a volume arc control. Screen readers announce this as the long-press affordance, which mutes or unmutes all timeline tracks at once."
+    },
+    "videoEditorSplitFailed": "Split failed. Please try again."
 }

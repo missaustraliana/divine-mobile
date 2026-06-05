@@ -3,6 +3,7 @@
 
 import 'dart:async';
 
+import 'package:dm_repository/dm_repository.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ import 'package:openvine/features/feature_flags/providers/feature_flag_providers
 import 'package:openvine/features/people_lists/view/add_people_to_list_screen.dart';
 import 'package:openvine/features/people_lists/view/create_people_list_page.dart';
 import 'package:openvine/l10n/l10n.dart';
+import 'package:openvine/models/minor_account_review_status.dart';
 import 'package:openvine/notifications/view/notifications_page.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/router/router.dart';
@@ -55,6 +57,11 @@ import 'package:openvine/screens/key_import_screen.dart';
 import 'package:openvine/screens/key_management_screen.dart';
 import 'package:openvine/screens/library_screen.dart';
 import 'package:openvine/screens/liked_videos_screen_router.dart';
+import 'package:openvine/screens/minor_account_review_parent_consent_screen.dart';
+import 'package:openvine/screens/minor_account_review_parent_contact_screen.dart';
+import 'package:openvine/screens/minor_account_review_screen.dart';
+import 'package:openvine/screens/minor_account_review_under13_screen.dart';
+import 'package:openvine/screens/minor_account_review_under13_support_screen.dart';
 import 'package:openvine/screens/notification_settings_screen.dart';
 import 'package:openvine/screens/original_sound_detail_screen.dart';
 import 'package:openvine/screens/other_profile_screen.dart';
@@ -158,28 +165,67 @@ String? _peopleListsRedirectIfDisabled(Ref ref, GoRouterState state) {
   return VideoFeedPage.pathForIndex(0);
 }
 
+String _minorAccountReviewLoadingPath(String fromLocation) {
+  return Uri(
+    path: MinorAccountReviewLoadingScreen.path,
+    queryParameters: <String, String>{'from': fromLocation},
+  ).toString();
+}
+
+String _minorAccountReviewReturnLocation(GoRouterState state) {
+  final from = state.uri.queryParameters['from'];
+  if (from == null || from.isEmpty) {
+    return VideoFeedPage.pathForIndex(0);
+  }
+  return from;
+}
+
+String? _moderationConversationId(
+  AuthService authService,
+  MinorReviewCase? reviewCase,
+) {
+  if (reviewCase == null) return null;
+  if (reviewCase.moderationConversationId != null &&
+      reviewCase.moderationConversationId!.isNotEmpty) {
+    return reviewCase.moderationConversationId;
+  }
+
+  final currentPubkey = authService.currentPublicKeyHex;
+  final moderationPubkey = reviewCase.moderationConversationPubkey;
+  if (currentPubkey == null ||
+      currentPubkey.isEmpty ||
+      moderationPubkey == null ||
+      moderationPubkey.isEmpty) {
+    return null;
+  }
+
+  return DmRepository.computeConversationId([currentPubkey, moderationPubkey]);
+}
+
 final goRouterProvider = Provider<GoRouter>((ref) {
   // Use ref.read to avoid recreating the router on auth state changes
   final authService = ref.read(authServiceProvider);
 
-  // Convert auth state stream to a Listenable for GoRouter
-  final authListenable = _StreamListenable(authService.authStateStream);
+  // Keep one router instance alive; drive redirect reevaluation through a
+  // dedicated listenable instead of rebuilding GoRouter when app state changes.
+  final refreshListenable = _RouterRefreshListenable(
+    authService.authStateStream,
+  );
+  ref.listen(currentMinorAccountReviewStatusProvider, (previous, next) {
+    refreshListenable.refresh();
+  });
+  ref.onDispose(refreshListenable.dispose);
 
   final router = GoRouter(
     navigatorKey: NavigatorKeys.root,
     // Start at /welcome - redirect logic will navigate to appropriate route
     initialLocation: WelcomeScreen.path,
-    observers: [
-      routeObserver,
-      PageLoadObserver(),
-      VideoStopNavigatorObserver(),
-      if (Firebase.apps.isNotEmpty)
-        FirebaseAnalyticsObserver(analytics: FirebaseAnalytics.instance),
-    ],
-    // Refresh router when auth state changes
-    refreshListenable: authListenable,
-    errorBuilder: (context, state) =>
-        RouteErrorScreen(message: context.l10n.routeUnknownPath),
+    observers: _buildRouterObservers(),
+    // Refresh router when auth or account-review state changes
+    refreshListenable: refreshListenable,
+    errorBuilder: (context, state) => RouteErrorScreen(
+      message: context.l10n.routeUnknownPath,
+    ),
     redirect: (context, state) {
       // Rewrite divine.video universal-link URLs to internal paths before the
       // auth/match logic runs. Android delivers the full intent URL (scheme +
@@ -200,6 +246,32 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       final location = state.matchedLocation;
       final authService = ref.read(authServiceProvider);
       final authState = authService.authState;
+      final reviewStatusAsync = ref.read(
+        currentMinorAccountReviewStatusProvider,
+      );
+      final reviewStatus = reviewStatusAsync.asData?.value;
+      final moderationConversationId = _moderationConversationId(
+        authService,
+        reviewStatus?.currentCase,
+      );
+
+      final isReviewRoute = location == MinorAccountReviewScreen.path;
+      final isPublicReviewRoute =
+          location == MinorAccountReviewScreen.welcomePath;
+      final isReviewLoadingRoute =
+          location == MinorAccountReviewLoadingScreen.path;
+      final isPublicParentConsentRoute =
+          location == MinorAccountReviewParentConsentScreen.path;
+      final isParentContactRoute =
+          location == MinorAccountReviewParentContactScreen.path;
+      final isPublicUnder13Route =
+          location == MinorAccountReviewUnder13Screen.path;
+      final isUnder13SupportRoute =
+          location == MinorAccountReviewUnder13SupportScreen.path;
+      final isSupportRoute = location == SupportCenterScreen.path;
+      final isModerationConversationRoute =
+          moderationConversationId != null &&
+          location == ConversationPage.pathForId(moderationConversationId);
 
       Log.debug(
         'Router redirect: location=$location, '
@@ -207,6 +279,70 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         name: 'AppRouter',
         category: LogCategory.auth,
       );
+
+      // Auth routes don't require authentication — user is in the
+      // process of logging in.
+      final isAuthRoute =
+          location.startsWith(WelcomeScreen.path) ||
+          location.startsWith(KeyImportScreen.path) ||
+          location.startsWith(NostrConnectScreen.path) ||
+          location.startsWith(WelcomeScreen.inviteGatePath) ||
+          location.startsWith(WelcomeScreen.resetPasswordPath) ||
+          location.startsWith(ResetPasswordScreen.path) ||
+          location.startsWith(EmailVerificationScreen.path) ||
+          isPublicReviewRoute ||
+          isPublicParentConsentRoute ||
+          isPublicUnder13Route;
+
+      if (authState == AuthState.authenticated && reviewStatusAsync.isLoading) {
+        if (!isReviewLoadingRoute) {
+          return _minorAccountReviewLoadingPath(state.uri.toString());
+        }
+        return null;
+      }
+
+      if (authState == AuthState.authenticated && isReviewLoadingRoute) {
+        if (reviewStatusAsync.hasError || reviewStatus?.isRestricted == true) {
+          return MinorAccountReviewScreen.path;
+        }
+        return _minorAccountReviewReturnLocation(state);
+      }
+
+      if (authState == AuthState.authenticated &&
+          reviewStatus?.isRestricted != true &&
+          (isReviewRoute || isParentContactRoute || isUnder13SupportRoute)) {
+        return VideoFeedPage.pathForIndex(0);
+      }
+
+      if (authState == AuthState.authenticated &&
+          reviewStatus?.isRestricted == true) {
+        final reviewCase = reviewStatus?.currentCase;
+        if (isParentContactRoute) {
+          if (reviewCase == null) {
+            return MinorAccountReviewScreen.path;
+          }
+          if (!reviewCase.allowsParentVideoOrEmail) {
+            return MinorAccountReviewUnder13SupportScreen.path;
+          }
+        }
+
+        if (!isReviewRoute &&
+            !isParentContactRoute &&
+            !isUnder13SupportRoute &&
+            !isSupportRoute &&
+            !isModerationConversationRoute &&
+            !isPublicReviewRoute &&
+            !isPublicParentConsentRoute &&
+            !isPublicUnder13Route) {
+          Log.info(
+            'Router redirect: restricted account on $location — '
+            'redirecting to ${MinorAccountReviewScreen.path}',
+            name: 'AppRouter',
+            category: LogCategory.auth,
+          );
+          return MinorAccountReviewScreen.path;
+        }
+      }
 
       // Handle authenticated users on auth routes
       // Note: resetPasswordPath and EmailVerificationScreen are intentionally
@@ -252,17 +388,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         }
         return VideoFeedPage.pathForIndex(0);
       }
-
-      // Auth routes don't require authentication — user is in the
-      // process of logging in.
-      final isAuthRoute =
-          location.startsWith(WelcomeScreen.path) ||
-          location.startsWith(KeyImportScreen.path) ||
-          location.startsWith(NostrConnectScreen.path) ||
-          location.startsWith(WelcomeScreen.inviteGatePath) ||
-          location.startsWith(WelcomeScreen.resetPasswordPath) ||
-          location.startsWith(ResetPasswordScreen.path) ||
-          location.startsWith(EmailVerificationScreen.path);
 
       // Non-authenticated users on protected routes → welcome.
       // awaitingTosAcceptance has no dedicated screen, so treat it like unauthenticated.
@@ -574,6 +699,50 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         name: CreatorAnalyticsScreen.routeName,
         parentNavigatorKey: NavigatorKeys.root,
         builder: (ctx, st) => const CreatorAnalyticsScreen(),
+      ),
+      GoRoute(
+        path: MinorAccountReviewScreen.welcomePath,
+        name: '${MinorAccountReviewScreen.routeName}-welcome',
+        parentNavigatorKey: NavigatorKeys.root,
+        builder: (ctx, st) => const MinorAccountReviewScreen(
+          entryPoint: MinorAccountReviewEntryPoint.welcome,
+        ),
+      ),
+      GoRoute(
+        path: MinorAccountReviewScreen.path,
+        name: MinorAccountReviewScreen.routeName,
+        parentNavigatorKey: NavigatorKeys.root,
+        builder: (ctx, st) => const MinorAccountReviewScreen(),
+      ),
+      GoRoute(
+        path: MinorAccountReviewLoadingScreen.path,
+        name: MinorAccountReviewLoadingScreen.routeName,
+        parentNavigatorKey: NavigatorKeys.root,
+        builder: (ctx, st) => const MinorAccountReviewLoadingScreen(),
+      ),
+      GoRoute(
+        path: MinorAccountReviewParentConsentScreen.path,
+        name: MinorAccountReviewParentConsentScreen.routeName,
+        parentNavigatorKey: NavigatorKeys.root,
+        builder: (ctx, st) => const MinorAccountReviewParentConsentScreen(),
+      ),
+      GoRoute(
+        path: MinorAccountReviewParentContactScreen.path,
+        name: MinorAccountReviewParentContactScreen.routeName,
+        parentNavigatorKey: NavigatorKeys.root,
+        builder: (ctx, st) => const MinorAccountReviewParentContactScreen(),
+      ),
+      GoRoute(
+        path: MinorAccountReviewUnder13Screen.path,
+        name: MinorAccountReviewUnder13Screen.routeName,
+        parentNavigatorKey: NavigatorKeys.root,
+        builder: (ctx, st) => const MinorAccountReviewUnder13Screen(),
+      ),
+      GoRoute(
+        path: MinorAccountReviewUnder13SupportScreen.path,
+        name: MinorAccountReviewUnder13SupportScreen.routeName,
+        parentNavigatorKey: NavigatorKeys.root,
+        builder: (ctx, st) => const MinorAccountReviewUnder13SupportScreen(),
       ),
 
       // CURATED LIST route (NIP-51 kind 30005 video lists)
@@ -1242,13 +1411,26 @@ final goRouterProvider = Provider<GoRouter>((ref) {
     ],
   );
 
-  ref.onDispose(() {
-    router.dispose();
-    authListenable.dispose();
-  });
+  ref.onDispose(router.dispose);
 
   return router;
 });
+
+List<NavigatorObserver> _buildRouterObservers() {
+  final observers = <NavigatorObserver>[
+    routeObserver,
+    PageLoadObserver(),
+    VideoStopNavigatorObserver(),
+  ];
+
+  if (Firebase.apps.isNotEmpty) {
+    observers.add(
+      FirebaseAnalyticsObserver(analytics: FirebaseAnalytics.instance),
+    );
+  }
+
+  return observers;
+}
 
 /// Maps URL location to bottom nav tab index.
 ///
@@ -1325,12 +1507,14 @@ int tabIndexFromLocation(String loc) {
 
 /// Adapts a [Stream] to a [ChangeNotifier] for use with GoRouter's
 /// `refreshListenable`.
-class _StreamListenable extends ChangeNotifier {
-  _StreamListenable(Stream<dynamic> stream) {
+class _RouterRefreshListenable extends ChangeNotifier {
+  _RouterRefreshListenable(Stream<dynamic> stream) {
     _subscription = stream.listen((_) => notifyListeners());
   }
 
   late final StreamSubscription<dynamic> _subscription;
+
+  void refresh() => notifyListeners();
 
   @override
   void dispose() {

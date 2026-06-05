@@ -14,6 +14,7 @@ import 'package:openvine/blocs/welcome/welcome_bloc.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/database_provider.dart';
+import 'package:openvine/screens/minor_account_review_screen.dart';
 import 'package:openvine/services/auth_service.dart' hide UserProfile;
 import 'package:openvine/services/startup_performance_service.dart';
 import 'package:openvine/utils/nostr_key_utils.dart';
@@ -228,6 +229,16 @@ class _NewUserLayout extends StatelessWidget {
         ],
 
         if (!isLoading) ...[
+          Text(
+            context.l10n.authMinAgeNotice,
+            textAlign: TextAlign.center,
+            style: VineTheme.bodyMediumFont(),
+          ),
+          const SizedBox(height: 8),
+          const _Under16Choices(),
+          const SizedBox(height: 16),
+          const _TermsNotice(),
+          const SizedBox(height: 20),
           DivineButton(
             label: context.l10n.authCreateNewAccount,
             expanded: true,
@@ -235,9 +246,7 @@ class _NewUserLayout extends StatelessWidget {
               const WelcomeCreateAccountRequested(),
             ),
           ),
-
           const SizedBox(height: 12),
-
           DivineButton(
             label: context.l10n.authSignInDifferentAccount,
             expanded: true,
@@ -246,10 +255,7 @@ class _NewUserLayout extends StatelessWidget {
               const WelcomeLoginOptionsRequested(),
             ),
           ),
-
-          const SizedBox(height: 20),
         ],
-        const _TermsNotice(),
 
         const SizedBox(height: 32),
       ],
@@ -508,6 +514,7 @@ class _TermsNoticeState extends State<_TermsNotice> {
   late final TapGestureRecognizer _termsRecognizer;
   late final TapGestureRecognizer _privacyRecognizer;
   late final TapGestureRecognizer _safetyRecognizer;
+  late final TapGestureRecognizer _ageAuthorizationRecognizer;
 
   Future<void> _openUrl(String urlString) async {
     final uri = Uri.parse(urlString);
@@ -525,6 +532,8 @@ class _TermsNoticeState extends State<_TermsNotice> {
       ..onTap = () => _openUrl('https://divine.video/privacy');
     _safetyRecognizer = TapGestureRecognizer()
       ..onTap = () => _openUrl('https://divine.video/safety');
+    _ageAuthorizationRecognizer = TapGestureRecognizer()
+      ..onTap = () => context.push(MinorAccountReviewScreen.pathFor());
   }
 
   @override
@@ -532,6 +541,7 @@ class _TermsNoticeState extends State<_TermsNotice> {
     _termsRecognizer.dispose();
     _privacyRecognizer.dispose();
     _safetyRecognizer.dispose();
+    _ageAuthorizationRecognizer.dispose();
     super.dispose();
   }
 
@@ -551,6 +561,12 @@ class _TermsNoticeState extends State<_TermsNotice> {
         children: [
           TextSpan(text: context.l10n.authTermsPrefix),
           TextSpan(
+            text: context.l10n.authTermsAgeAuthorizationCta,
+            style: linkStyle,
+            recognizer: _ageAuthorizationRecognizer,
+          ),
+          TextSpan(text: context.l10n.authTermsAfterAgeAuthorization),
+          TextSpan(
             text: context.l10n.authTermsOfService,
             style: linkStyle,
             recognizer: _termsRecognizer,
@@ -569,6 +585,58 @@ class _TermsNoticeState extends State<_TermsNotice> {
           ),
           const TextSpan(text: '.'),
         ],
+      ),
+    );
+  }
+}
+
+/// Inline link that lets under-16 users discover the family-guidance flow.
+///
+/// Renders "Not 16 yet? That's OK." in white, followed by the tappable
+/// "Here are your choices." call-to-action in [VineTheme.vineGreen].
+class _Under16Choices extends StatefulWidget {
+  const _Under16Choices();
+
+  @override
+  State<_Under16Choices> createState() => _Under16ChoicesState();
+}
+
+class _Under16ChoicesState extends State<_Under16Choices> {
+  late final TapGestureRecognizer _ctaRecognizer;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctaRecognizer = TapGestureRecognizer()
+      ..onTap = () => context.push(MinorAccountReviewScreen.pathFor());
+  }
+
+  @override
+  void dispose() {
+    _ctaRecognizer.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label:
+          context.l10n.authUnder16Prefix + context.l10n.authUnder16ChoicesCta,
+      child: RichText(
+        textAlign: TextAlign.center,
+        textScaler: MediaQuery.textScalerOf(context),
+        text: TextSpan(
+          style: VineTheme.bodyMediumFont(),
+          children: [
+            TextSpan(text: context.l10n.authUnder16Prefix),
+            TextSpan(
+              text: context.l10n.authUnder16ChoicesCta,
+              style: VineTheme.bodyMediumFont(color: VineTheme.vineGreen),
+              recognizer: _ctaRecognizer,
+            ),
+          ],
+        ),
       ),
     );
   }

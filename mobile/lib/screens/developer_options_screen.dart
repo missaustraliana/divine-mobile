@@ -4,11 +4,15 @@
 // ABOUTME: Includes video format selector for A/B testing server-side formats
 
 import 'package:divine_ui/divine_ui.dart';
+import 'package:dm_repository/dm_repository.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:openvine/constants/app_constants.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/models/environment_config.dart';
+import 'package:openvine/models/minor_account_review_status.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/environment_provider.dart';
 import 'package:openvine/services/openvine_media_cache.dart';
@@ -102,6 +106,9 @@ class _DeveloperOptionsScreenState
   @override
   Widget build(BuildContext context) {
     final currentConfig = ref.watch(currentEnvironmentProvider);
+    final reviewStatusAsync = ref.watch(
+      currentMinorAccountReviewStatusProvider,
+    );
 
     // All available environment configurations
     final environments = [
@@ -319,6 +326,105 @@ class _DeveloperOptionsScreenState
                   onTap: () => _switchFormat(option.format),
                 );
               }),
+
+              if (kDebugMode) ...[
+                const Divider(color: VineTheme.outlineVariant, height: 32),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    context.l10n.devOptionsMinorReviewSimulationTitle,
+                    style: const TextStyle(
+                      color: VineTheme.vineGreen,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                ListTile(
+                  title: Text(
+                    context.l10n.devOptionsMinorReviewCurrentStateLabel,
+                    style: const TextStyle(
+                      color: VineTheme.primaryText,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  subtitle: Text(
+                    reviewStatusAsync.when(
+                      data: (status) => status.isRestricted
+                          ? context.l10n.devOptionsMinorReviewStateRestricted(
+                              status.currentCase?.state.name ?? 'unknown',
+                            )
+                          : context.l10n.devOptionsMinorReviewStateActive,
+                      loading: () =>
+                          context.l10n.devOptionsMinorReviewStateLoading,
+                      error: (error, stackTrace) =>
+                          context.l10n.devOptionsMinorReviewStateError,
+                    ),
+                    style: const TextStyle(
+                      color: VineTheme.secondaryText,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+                ListTile(
+                  title: Text(
+                    context.l10n.devOptionsMinorReviewClearTitle,
+                    style: const TextStyle(
+                      color: VineTheme.primaryText,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  subtitle: Text(
+                    context.l10n.devOptionsMinorReviewClearSubtitle,
+                    style: const TextStyle(
+                      color: VineTheme.secondaryText,
+                      fontSize: 14,
+                    ),
+                  ),
+                  onTap: _clearMinorReviewOverride,
+                ),
+                ListTile(
+                  title: Text(
+                    context.l10n.devOptionsMinorReviewTeenTitle,
+                    style: const TextStyle(
+                      color: VineTheme.primaryText,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  subtitle: Text(
+                    context.l10n.devOptionsMinorReviewTeenSubtitle,
+                    style: const TextStyle(
+                      color: VineTheme.secondaryText,
+                      fontSize: 14,
+                    ),
+                  ),
+                  onTap: _simulateTeenMinorReview,
+                ),
+                ListTile(
+                  title: Text(
+                    context.l10n.devOptionsMinorReviewUnder13Title,
+                    style: const TextStyle(
+                      color: VineTheme.primaryText,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  subtitle: Text(
+                    context.l10n.devOptionsMinorReviewUnder13Subtitle,
+                    style: const TextStyle(
+                      color: VineTheme.secondaryText,
+                      fontSize: 14,
+                    ),
+                  ),
+                  onTap: _simulateUnder13MinorReview,
+                ),
+              ],
             ],
           ),
         ),
@@ -426,5 +532,107 @@ class _DeveloperOptionsScreenState
         backgroundColor: VineTheme.vineGreen,
       ),
     );
+  }
+
+  Future<void> _clearMinorReviewOverride() async {
+    final service = ref.read(minorAccountReviewOverrideServiceProvider);
+    await service.clearOverride();
+    ref.invalidate(currentMinorAccountReviewStatusProvider);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.l10n.devOptionsMinorReviewClearedToast),
+        backgroundColor: VineTheme.vineGreen,
+      ),
+    );
+    setState(() {});
+  }
+
+  Future<void> _simulateTeenMinorReview() async {
+    final l10n = context.l10n;
+    final authService = ref.read(authServiceProvider);
+    final currentPubkey = authService.currentPublicKeyHex;
+    final moderationPubkey = ref
+        .read(moderationLabelServiceProvider)
+        .divineModerationPubkeyHex;
+
+    final override = MinorAccountReviewStatus(
+      restrictionStatus: AccountRestrictionStatus.restrictedMinorReview,
+      currentCase: MinorReviewCase(
+        id: 'sim-teen-review',
+        state: MinorReviewCaseState.restrictedPendingUserResponse,
+        suspectedAgeBand: SuspectedAgeBand.age13To15,
+        allowedResolution: MinorReviewResolutionType.parentVideoOrEmail,
+        instructions: MinorReviewInstructions(
+          title: l10n.minorAccountReviewDefaultTitle,
+          body: l10n.minorAccountReviewDefaultBody,
+        ),
+        supportEmail: AppConstants.supportEmail,
+        moderationConversationPubkey: moderationPubkey,
+        moderationConversationId: currentPubkey == null
+            ? null
+            : DmRepository.computeConversationId([
+                currentPubkey,
+                moderationPubkey,
+              ]),
+      ),
+    );
+
+    await ref
+        .read(minorAccountReviewOverrideServiceProvider)
+        .setOverride(override);
+    ref.invalidate(currentMinorAccountReviewStatusProvider);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.l10n.devOptionsMinorReviewTeenEnabledToast),
+        backgroundColor: VineTheme.vineGreen,
+      ),
+    );
+    setState(() {});
+  }
+
+  Future<void> _simulateUnder13MinorReview() async {
+    final l10n = context.l10n;
+    final authService = ref.read(authServiceProvider);
+    final currentPubkey = authService.currentPublicKeyHex;
+    final moderationPubkey = ref
+        .read(moderationLabelServiceProvider)
+        .divineModerationPubkeyHex;
+
+    final override = MinorAccountReviewStatus(
+      restrictionStatus: AccountRestrictionStatus.restrictedMinorReview,
+      currentCase: MinorReviewCase(
+        id: 'sim-under13-review',
+        state: MinorReviewCaseState.restrictedPendingSupportEmail,
+        suspectedAgeBand: SuspectedAgeBand.under13,
+        allowedResolution: MinorReviewResolutionType.supportEmailOnly,
+        instructions: MinorReviewInstructions(
+          title: l10n.minorAccountReviewUnder13SupportTitle,
+          body: l10n.minorAccountReviewUnder13Heading,
+        ),
+        supportEmail: AppConstants.supportEmail,
+        moderationConversationPubkey: moderationPubkey,
+        moderationConversationId: currentPubkey == null
+            ? null
+            : DmRepository.computeConversationId([
+                currentPubkey,
+                moderationPubkey,
+              ]),
+      ),
+    );
+
+    await ref
+        .read(minorAccountReviewOverrideServiceProvider)
+        .setOverride(override);
+    ref.invalidate(currentMinorAccountReviewStatusProvider);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.l10n.devOptionsMinorReviewUnder13EnabledToast),
+        backgroundColor: VineTheme.vineGreen,
+      ),
+    );
+    setState(() {});
   }
 }

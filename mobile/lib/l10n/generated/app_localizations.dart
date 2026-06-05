@@ -436,18 +436,6 @@ abstract class AppLocalizations {
   /// **'Keep feeds in the classic square format'**
   String get generalSettingsVideoShapeSquareOnlySubtitle;
 
-  /// No description provided for @generalSettingsHoldToRecord.
-  ///
-  /// In en, this message translates to:
-  /// **'Hold to record'**
-  String get generalSettingsHoldToRecord;
-
-  /// No description provided for @generalSettingsHoldToRecordSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Start recording when you press and hold, then stop when you release'**
-  String get generalSettingsHoldToRecordSubtitle;
-
   /// Content preferences screen app bar title
   ///
   /// In en, this message translates to:
@@ -4028,6 +4016,60 @@ abstract class AppLocalizations {
   /// **'When someone reposts your videos'**
   String get notificationSettingsRepostsSubtitle;
 
+  /// No description provided for @notificationSettingsSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'System'**
+  String get notificationSettingsSystem;
+
+  /// No description provided for @notificationSettingsSystemSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'App updates and system messages'**
+  String get notificationSettingsSystemSubtitle;
+
+  /// No description provided for @notificationSettingsPushNotificationsSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Push Notifications'**
+  String get notificationSettingsPushNotificationsSection;
+
+  /// No description provided for @notificationSettingsPushNotifications.
+  ///
+  /// In en, this message translates to:
+  /// **'Push Notifications'**
+  String get notificationSettingsPushNotifications;
+
+  /// No description provided for @notificationSettingsPushNotificationsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Receive notifications when app is closed'**
+  String get notificationSettingsPushNotificationsSubtitle;
+
+  /// No description provided for @notificationSettingsSound.
+  ///
+  /// In en, this message translates to:
+  /// **'Sound'**
+  String get notificationSettingsSound;
+
+  /// No description provided for @notificationSettingsSoundSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Play sound for notifications'**
+  String get notificationSettingsSoundSubtitle;
+
+  /// No description provided for @notificationSettingsVibration.
+  ///
+  /// In en, this message translates to:
+  /// **'Vibration'**
+  String get notificationSettingsVibration;
+
+  /// No description provided for @notificationSettingsVibrationSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Vibrate for notifications'**
+  String get notificationSettingsVibrationSubtitle;
+
   /// No description provided for @notificationSettingsActions.
   ///
   /// In en, this message translates to:
@@ -4595,8 +4637,20 @@ abstract class AppLocalizations {
   /// No description provided for @authTermsPrefix.
   ///
   /// In en, this message translates to:
-  /// **'By selecting an option above, you confirm you are at least 16 years old and agree to the '**
+  /// **'By selecting an option below, you confirm you are at least 16 years old (or have completed '**
   String get authTermsPrefix;
+
+  /// Inline link in the welcome-screen terms notice that opens the public family-guidance / age-authorization flow.
+  ///
+  /// In en, this message translates to:
+  /// **'Divine age authorization'**
+  String get authTermsAgeAuthorizationCta;
+
+  /// Text after the Divine age authorization link in the welcome-screen terms notice.
+  ///
+  /// In en, this message translates to:
+  /// **') and agree to the '**
+  String get authTermsAfterAgeAuthorization;
 
   /// No description provided for @authTermsOfService.
   ///
@@ -6872,12 +6926,6 @@ abstract class AppLocalizations {
   /// **'Failed to play preview: {error}'**
   String soundsPreviewFailed(String error);
 
-  /// No description provided for @soundsPreviewFailedGeneric.
-  ///
-  /// In en, this message translates to:
-  /// **'Failed to play preview'**
-  String get soundsPreviewFailedGeneric;
-
   /// No description provided for @soundsFeaturedSounds.
   ///
   /// In en, this message translates to:
@@ -7369,12 +7417,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Video published to your profile'**
   String get uploadPublishedMessage;
-
-  /// Snackbar shown after one or more background uploads succeed, e.g. after a re-auth redirect during which uploads completed.
-  ///
-  /// In en, this message translates to:
-  /// **'{count, plural, =1{Video published to your profile} other{{count} videos published to your profile}}'**
-  String uploadPublishedCountMessage(int count);
 
   /// No description provided for @uploadFailedMessage.
   ///
@@ -9626,12 +9668,6 @@ abstract class AppLocalizations {
   /// **'Say something…'**
   String get dmMessageInputHint;
 
-  /// Screen-reader label for the send button at the bottom of a DM conversation.
-  ///
-  /// In en, this message translates to:
-  /// **'Send message'**
-  String get dmMessageSendLabel;
-
   /// Accessibility hint announcing that a direct message bubble was sent by the current user
   ///
   /// In en, this message translates to:
@@ -9709,66 +9745,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Retrying reaction'**
   String get dmReactionChipRetryAnnouncement;
-
-  /// Hint text in the search field of the full emoji picker opened from the DM reaction '+' button.
-  ///
-  /// In en, this message translates to:
-  /// **'Search'**
-  String get emojiPickerSearchHint;
-
-  /// Title for the 'Recent' category in the full emoji picker.
-  ///
-  /// In en, this message translates to:
-  /// **'Recent'**
-  String get emojiCategoryRecent;
-
-  /// Title for the 'Smileys & People' category in the full emoji picker.
-  ///
-  /// In en, this message translates to:
-  /// **'Smileys & People'**
-  String get emojiCategorySmileys;
-
-  /// Title for the 'Animals & Nature' category in the full emoji picker.
-  ///
-  /// In en, this message translates to:
-  /// **'Animals & Nature'**
-  String get emojiCategoryAnimals;
-
-  /// Title for the 'Food & Drink' category in the full emoji picker.
-  ///
-  /// In en, this message translates to:
-  /// **'Food & Drink'**
-  String get emojiCategoryFood;
-
-  /// Title for the 'Activities' category in the full emoji picker.
-  ///
-  /// In en, this message translates to:
-  /// **'Activities'**
-  String get emojiCategoryActivities;
-
-  /// Title for the 'Travel & Places' category in the full emoji picker.
-  ///
-  /// In en, this message translates to:
-  /// **'Travel & Places'**
-  String get emojiCategoryTravel;
-
-  /// Title for the 'Objects' category in the full emoji picker.
-  ///
-  /// In en, this message translates to:
-  /// **'Objects'**
-  String get emojiCategoryObjects;
-
-  /// Title for the 'Symbols' category in the full emoji picker.
-  ///
-  /// In en, this message translates to:
-  /// **'Symbols'**
-  String get emojiCategorySymbols;
-
-  /// Title for the 'Flags' category in the full emoji picker.
-  ///
-  /// In en, this message translates to:
-  /// **'Flags'**
-  String get emojiCategoryFlags;
 
   /// Label for the Bold formatting action in the DM composer's text-selection context menu. Wraps the selected text with markdown bold markers (e.g. **text**).
   ///
@@ -12188,12 +12164,6 @@ abstract class AppLocalizations {
   /// **'Audio'**
   String get videoEditorAudioLabel;
 
-  /// No description provided for @videoEditorMarkerLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Marker'**
-  String get videoEditorMarkerLabel;
-
   /// No description provided for @videoEditorAddTitle.
   ///
   /// In en, this message translates to:
@@ -12373,30 +12343,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Redo'**
   String get videoEditorRedoSemanticLabel;
-
-  /// No description provided for @videoEditorAddTimelineMarkerSemanticLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Add timeline marker'**
-  String get videoEditorAddTimelineMarkerSemanticLabel;
-
-  /// No description provided for @videoEditorRemoveTimelineMarkerSemanticLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Remove timeline marker'**
-  String get videoEditorRemoveTimelineMarkerSemanticLabel;
-
-  /// No description provided for @videoEditorDeleteTimelineMarkerTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Delete marker?'**
-  String get videoEditorDeleteTimelineMarkerTitle;
-
-  /// No description provided for @videoEditorDeleteTimelineMarkerSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'This removes the marker from the timeline. Your edit stays intact.'**
-  String get videoEditorDeleteTimelineMarkerSubtitle;
 
   /// No description provided for @videoEditorTextColorSemanticLabel.
   ///
@@ -12626,12 +12572,6 @@ abstract class AppLocalizations {
   /// **'Untitled sound'**
   String get videoEditorAudioUntitledSound;
 
-  /// Semantic long-press hint for a volume arc control. Screen readers announce this as the long-press affordance, which mutes or unmutes all timeline tracks at once.
-  ///
-  /// In en, this message translates to:
-  /// **'Mute or unmute all tracks'**
-  String get videoEditorVolumeLongPressHint;
-
   /// No description provided for @videoEditorAudioUntitled.
   ///
   /// In en, this message translates to:
@@ -12781,12 +12721,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Unknown'**
   String get videoEditorFontUnknown;
-
-  /// No description provided for @videoEditorSplitFailed.
-  ///
-  /// In en, this message translates to:
-  /// **'Split failed. Please try again.'**
-  String get videoEditorSplitFailed;
 
   /// No description provided for @videoEditorSplitPlayheadOutsideClip.
   ///
@@ -13410,6 +13344,696 @@ abstract class AppLocalizations {
   /// **'Waiting for recipient'**
   String get badgesRecipientWaitingStatus;
 
+  /// No description provided for @minorAccountReviewWelcomePageTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Family guide'**
+  String get minorAccountReviewWelcomePageTitle;
+
+  /// No description provided for @minorAccountReviewWelcomeCta.
+  ///
+  /// In en, this message translates to:
+  /// **'Not 16 yet? That\'s OK. Here\'s what you can do.'**
+  String get minorAccountReviewWelcomeCta;
+
+  /// No description provided for @minorAccountReviewWelcomeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Not 16 yet? That\'s OK.'**
+  String get minorAccountReviewWelcomeTitle;
+
+  /// No description provided for @minorAccountReviewWelcomeBody.
+  ///
+  /// In en, this message translates to:
+  /// **'If you clicked through to this page instead of just picking the answer that got you in, that matters. It shows honesty, backbone, and real care for the people around you.\n\nRules for people under 16 vary depending on where you live. At Divine, we want families to talk it through together and decide what healthy social media use looks like.'**
+  String get minorAccountReviewWelcomeBody;
+
+  /// No description provided for @minorAccountReviewModerationTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'We need one more step'**
+  String get minorAccountReviewModerationTitle;
+
+  /// No description provided for @minorAccountReviewModerationBody.
+  ///
+  /// In en, this message translates to:
+  /// **'We were asked to take a closer look at this account because it may belong to someone under 16. This flow keeps the next steps private and points you to the right path for your age.'**
+  String get minorAccountReviewModerationBody;
+
+  /// No description provided for @minorAccountReviewRulesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'The rules are not the same everywhere'**
+  String get minorAccountReviewRulesTitle;
+
+  /// No description provided for @minorAccountReviewRulesBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Different countries and regions treat teen social media use differently. That is why we ask families to slow down, check the facts, and choose the next step together.'**
+  String get minorAccountReviewRulesBody;
+
+  /// No description provided for @minorAccountReviewApproachTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'How Divine thinks about it'**
+  String get minorAccountReviewApproachTitle;
+
+  /// No description provided for @minorAccountReviewApproachBody.
+  ///
+  /// In en, this message translates to:
+  /// **'We think healthy tech habits come from pausing, reflecting, and redirecting attention toward better things, not from spying on kids or turning parents into hall monitors. Research backs that up too.'**
+  String get minorAccountReviewApproachBody;
+
+  /// No description provided for @minorAccountReviewLearnMoreTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'More for families'**
+  String get minorAccountReviewLearnMoreTitle;
+
+  /// No description provided for @minorAccountReviewKidsPolicyCta.
+  ///
+  /// In en, this message translates to:
+  /// **'Read Divine\'s kids policy'**
+  String get minorAccountReviewKidsPolicyCta;
+
+  /// No description provided for @minorAccountReviewChooseAgeBandTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the path that fits'**
+  String get minorAccountReviewChooseAgeBandTitle;
+
+  /// No description provided for @minorAccountReviewUnder13Cta.
+  ///
+  /// In en, this message translates to:
+  /// **'Under 13'**
+  String get minorAccountReviewUnder13Cta;
+
+  /// No description provided for @minorAccountReviewTeenCta.
+  ///
+  /// In en, this message translates to:
+  /// **'Age 13-15'**
+  String get minorAccountReviewTeenCta;
+
+  /// No description provided for @minorAccountReviewFamilyResourcesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Helpful for families'**
+  String get minorAccountReviewFamilyResourcesTitle;
+
+  /// No description provided for @minorAccountReviewFamilyResourcesBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Visit the Divine family guide for practical tips, conversation tools, and resources for helping teens use social media more safely.'**
+  String get minorAccountReviewFamilyResourcesBody;
+
+  /// No description provided for @minorAccountReviewFamilyResourcesCta.
+  ///
+  /// In en, this message translates to:
+  /// **'Get family guides and tips'**
+  String get minorAccountReviewFamilyResourcesCta;
+
+  /// No description provided for @minorAccountReviewFooter.
+  ///
+  /// In en, this message translates to:
+  /// **'If you are 16 or older and got sent here by mistake, contact Divine support so a real person can review it.'**
+  String get minorAccountReviewFooter;
+
+  /// No description provided for @minorAccountReviewTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Account Review'**
+  String get minorAccountReviewTitle;
+
+  /// No description provided for @minorAccountReviewCheckingStatusTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking account status...'**
+  String get minorAccountReviewCheckingStatusTitle;
+
+  /// No description provided for @minorAccountReviewCheckingStatusBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Please wait while we confirm this account\'s current review status.'**
+  String get minorAccountReviewCheckingStatusBody;
+
+  /// No description provided for @minorAccountReviewDefaultTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Account review required'**
+  String get minorAccountReviewDefaultTitle;
+
+  /// No description provided for @minorAccountReviewDefaultBody.
+  ///
+  /// In en, this message translates to:
+  /// **'We need to review this account before it can use Divine normally.'**
+  String get minorAccountReviewDefaultBody;
+
+  /// No description provided for @minorAccountReviewCaseId.
+  ///
+  /// In en, this message translates to:
+  /// **'Case ID: {caseId}'**
+  String minorAccountReviewCaseId(String caseId);
+
+  /// No description provided for @minorAccountReviewCaseIdShortLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Case ID'**
+  String get minorAccountReviewCaseIdShortLabel;
+
+  /// No description provided for @minorAccountReviewRestrictionsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'What is restricted right now'**
+  String get minorAccountReviewRestrictionsTitle;
+
+  /// No description provided for @minorAccountReviewRestrictionPosting.
+  ///
+  /// In en, this message translates to:
+  /// **'Posting and publishing are paused'**
+  String get minorAccountReviewRestrictionPosting;
+
+  /// No description provided for @minorAccountReviewRestrictionEngagement.
+  ///
+  /// In en, this message translates to:
+  /// **'Comments, likes, reposts, and follows are paused'**
+  String get minorAccountReviewRestrictionEngagement;
+
+  /// No description provided for @minorAccountReviewRestrictionMessaging.
+  ///
+  /// In en, this message translates to:
+  /// **'Starting or replying to regular messages is paused'**
+  String get minorAccountReviewRestrictionMessaging;
+
+  /// No description provided for @minorAccountReviewRestrictionSupport.
+  ///
+  /// In en, this message translates to:
+  /// **'Support and your moderation message remain available'**
+  String get minorAccountReviewRestrictionSupport;
+
+  /// No description provided for @minorAccountReviewOpenSupportCenter.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Support Center'**
+  String get minorAccountReviewOpenSupportCenter;
+
+  /// No description provided for @minorAccountReviewOpenModerationMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Moderation Message'**
+  String get minorAccountReviewOpenModerationMessage;
+
+  /// No description provided for @minorAccountReviewOpenReviewPage.
+  ///
+  /// In en, this message translates to:
+  /// **'Open review page'**
+  String get minorAccountReviewOpenReviewPage;
+
+  /// No description provided for @minorAccountReviewCheckAgain.
+  ///
+  /// In en, this message translates to:
+  /// **'Check Again'**
+  String get minorAccountReviewCheckAgain;
+
+  /// No description provided for @minorAccountReviewLogOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Log out'**
+  String get minorAccountReviewLogOut;
+
+  /// No description provided for @minorAccountReviewNextStepTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Next step'**
+  String get minorAccountReviewNextStepTitle;
+
+  /// No description provided for @minorAccountReviewNextStepBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Open the support center or your moderation message if you need help with this review.'**
+  String get minorAccountReviewNextStepBody;
+
+  /// No description provided for @minorAccountReviewInProgressTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Review in progress'**
+  String get minorAccountReviewInProgressTitle;
+
+  /// No description provided for @minorAccountReviewInProgressBody.
+  ///
+  /// In en, this message translates to:
+  /// **'We have what we need for now. Our team is reviewing this case before restoring normal account access.'**
+  String get minorAccountReviewInProgressBody;
+
+  /// No description provided for @minorAccountReviewUnder13Title.
+  ///
+  /// In en, this message translates to:
+  /// **'Under-13 accounts'**
+  String get minorAccountReviewUnder13Title;
+
+  /// No description provided for @minorAccountReviewUnder13Body.
+  ///
+  /// In en, this message translates to:
+  /// **'If this account belongs to someone under 13, a parent or guardian must email {supportEmail} and include the case ID.'**
+  String minorAccountReviewUnder13Body(String supportEmail);
+
+  /// No description provided for @minorAccountReviewUnder13PublicTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'We can\'t give you an account yet'**
+  String get minorAccountReviewUnder13PublicTitle;
+
+  /// No description provided for @minorAccountReviewUnder13PublicBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Divine isn\'t built for kids under 13 and the social media rules around the world tie our hands.\n\nA lot of things on the internet push you to lie to get what you want, and we hate that. It\'s the wrong lesson for life, and we\'re not going to teach it to you here.'**
+  String get minorAccountReviewUnder13PublicBody;
+
+  /// No description provided for @minorAccountReviewUnder13FamilyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'What your family can do instead'**
+  String get minorAccountReviewUnder13FamilyTitle;
+
+  /// No description provided for @minorAccountReviewUnder13FamilyBody.
+  ///
+  /// In en, this message translates to:
+  /// **'A parent or guardian can hold the account and do the posting, and you can absolutely be in the videos with them. We want families to enjoy Divine in whatever way is right for them.'**
+  String get minorAccountReviewUnder13FamilyBody;
+
+  /// No description provided for @minorAccountReviewUnder13ComeBackTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'When you turn 13'**
+  String get minorAccountReviewUnder13ComeBackTitle;
+
+  /// No description provided for @minorAccountReviewUnder13ComeBackBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Depending on the rules where you live, you may be able to come back and apply for your own account. In that case, if you’re between 13 and 15, you’ll need consent from a parent or guardian.'**
+  String get minorAccountReviewUnder13ComeBackBody;
+
+  /// No description provided for @minorAccountReviewUnder13HonestyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Why we won\'t tell you to just click back'**
+  String get minorAccountReviewUnder13HonestyTitle;
+
+  /// No description provided for @minorAccountReviewUnder13HonestyBody.
+  ///
+  /// In en, this message translates to:
+  /// **'A lot of the internet is set up to reward people for saying whatever gets them through the gate. We don\'t think that\'s great. Yes, you could go back and say you\'re older than you are, but that wouldn\'t be honest, and we\'re not going to coach you into lying to get what you want.'**
+  String get minorAccountReviewUnder13HonestyBody;
+
+  /// No description provided for @minorAccountReviewUnder13LegalTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Why the answer is still no'**
+  String get minorAccountReviewUnder13LegalTitle;
+
+  /// No description provided for @minorAccountReviewUnder13LegalBody.
+  ///
+  /// In en, this message translates to:
+  /// **'We\'re trying to help young people use Divine in ways that are healthy and positive for them and the people around them. We also have to follow laws that are different in different places. So, if you\'re under 13, the answer is that you can\'t have your own account today.'**
+  String get minorAccountReviewUnder13LegalBody;
+
+  /// No description provided for @minorAccountReviewTeenBody.
+  ///
+  /// In en, this message translates to:
+  /// **'If this account belongs to someone 13 to 15, use the moderation message or support path to follow the parental consent instructions.'**
+  String get minorAccountReviewTeenBody;
+
+  /// No description provided for @minorAccountReviewParentConsentTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'If the account will belong to someone 13 to 15'**
+  String get minorAccountReviewParentConsentTitle;
+
+  /// No description provided for @minorAccountReviewParentConsentBody.
+  ///
+  /// In en, this message translates to:
+  /// **'A parent or guardian should email Divine support with a short private video. Our team will review it and help with next steps.\n\nIf parent or guardian contact is not possible or would put someone at risk, email Divine support and let us know.'**
+  String get minorAccountReviewParentConsentBody;
+
+  /// No description provided for @minorAccountReviewParentConsentPauseNote.
+  ///
+  /// In en, this message translates to:
+  /// **'This is a pause while the Divine support team reviews the video. If it is approved, they will guide you through setting up the new account.'**
+  String get minorAccountReviewParentConsentPauseNote;
+
+  /// No description provided for @minorAccountReviewParentConsentHonestyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Why we ask a parent or guardian to be involved'**
+  String get minorAccountReviewParentConsentHonestyTitle;
+
+  /// No description provided for @minorAccountReviewParentConsentHonestyBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Divine has to follow age-related laws around the world. We also know that most technical age gates are imperfect. Rather than pretending the rules don\'t exist or that it\'s cool to lie about your age, we want teens and families to make thoughtful decisions about how best to use Divine. That\'s why, for 13-15 year olds, we ask parents to be part of the account creation process.'**
+  String get minorAccountReviewParentConsentHonestyBody;
+
+  /// No description provided for @minorAccountReviewParentConsentLegalBody.
+  ///
+  /// In en, this message translates to:
+  /// **'We also have to follow the law, and those rules are different depending on where someone lives. So instead of pretending the rules do not exist, we ask for a parent or guardian to be part of the process.'**
+  String get minorAccountReviewParentConsentLegalBody;
+
+  /// No description provided for @minorAccountReviewParentConsentChecklist.
+  ///
+  /// In en, this message translates to:
+  /// **'What the video should show'**
+  String get minorAccountReviewParentConsentChecklist;
+
+  /// No description provided for @minorAccountReviewParentConsentChecklistKid.
+  ///
+  /// In en, this message translates to:
+  /// **'The teen in the video'**
+  String get minorAccountReviewParentConsentChecklistKid;
+
+  /// No description provided for @minorAccountReviewParentConsentChecklistPermission.
+  ///
+  /// In en, this message translates to:
+  /// **'A parent or guardian speaking on camera'**
+  String get minorAccountReviewParentConsentChecklistPermission;
+
+  /// No description provided for @minorAccountReviewParentConsentChecklistAgeBand.
+  ///
+  /// In en, this message translates to:
+  /// **'A clear statement that the teen is 13 to 15 and has permission to use Divine'**
+  String get minorAccountReviewParentConsentChecklistAgeBand;
+
+  /// No description provided for @minorAccountReviewParentConsentChecklistSupervision.
+  ///
+  /// In en, this message translates to:
+  /// **'A clear statement that the parent or guardian knows about the account and will supervise its use'**
+  String get minorAccountReviewParentConsentChecklistSupervision;
+
+  /// No description provided for @minorAccountReviewParentConsentPrivacy.
+  ///
+  /// In en, this message translates to:
+  /// **'How to send it'**
+  String get minorAccountReviewParentConsentPrivacy;
+
+  /// No description provided for @minorAccountReviewParentConsentNeverPost.
+  ///
+  /// In en, this message translates to:
+  /// **'Attach the video when you email Divine support'**
+  String get minorAccountReviewParentConsentNeverPost;
+
+  /// No description provided for @minorAccountReviewParentConsentDoNotSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep the video private and do not post it in the app'**
+  String get minorAccountReviewParentConsentDoNotSave;
+
+  /// No description provided for @minorAccountReviewParentConsentOneMove.
+  ///
+  /// In en, this message translates to:
+  /// **'Our team will review it and reply with next steps'**
+  String get minorAccountReviewParentConsentOneMove;
+
+  /// No description provided for @minorAccountReviewParentConsentEmailCta.
+  ///
+  /// In en, this message translates to:
+  /// **'Email Divine support'**
+  String get minorAccountReviewParentConsentEmailCta;
+
+  /// No description provided for @minorAccountReviewParentConsentEmailSubject.
+  ///
+  /// In en, this message translates to:
+  /// **'13-15 account review help'**
+  String get minorAccountReviewParentConsentEmailSubject;
+
+  /// No description provided for @minorAccountReviewParentConsentEmailBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Hi Divine support,\n\nI am contacting Divine about an account for a teen who is 13 to 15.\n\nI have attached a short private video that shows:\n- the teen\n- a parent or guardian speaking on camera\n- that the teen has permission to use Divine\n- that the parent or guardian knows about the account and will supervise its use\n\nCountry/ies of residence:\n\nHelpful context:\n\nThanks.'**
+  String get minorAccountReviewParentConsentEmailBody;
+
+  /// No description provided for @minorAccountReviewParentSupportInstructions.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent Support Instructions'**
+  String get minorAccountReviewParentSupportInstructions;
+
+  /// No description provided for @minorAccountReviewContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get minorAccountReviewContinue;
+
+  /// No description provided for @minorAccountReviewErrorTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'We could not load your account review status.'**
+  String get minorAccountReviewErrorTitle;
+
+  /// No description provided for @minorAccountReviewErrorBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Please try again in a moment.'**
+  String get minorAccountReviewErrorBody;
+
+  /// No description provided for @minorAccountReviewTryAgain.
+  ///
+  /// In en, this message translates to:
+  /// **'Try Again'**
+  String get minorAccountReviewTryAgain;
+
+  /// No description provided for @minorAccountReviewParentContactTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent Contact'**
+  String get minorAccountReviewParentContactTitle;
+
+  /// No description provided for @minorAccountReviewParentContactHeading.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a parent or guardian email'**
+  String get minorAccountReviewParentContactHeading;
+
+  /// No description provided for @minorAccountReviewParentContactBody.
+  ///
+  /// In en, this message translates to:
+  /// **'We will use this address for the parental consent review on case {caseId}.'**
+  String minorAccountReviewParentContactBody(String caseId);
+
+  /// No description provided for @minorAccountReviewParentContactFieldLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent or guardian email'**
+  String get minorAccountReviewParentContactFieldLabel;
+
+  /// No description provided for @minorAccountReviewSubmitting.
+  ///
+  /// In en, this message translates to:
+  /// **'Submitting...'**
+  String get minorAccountReviewSubmitting;
+
+  /// No description provided for @minorAccountReviewSubmitEmail.
+  ///
+  /// In en, this message translates to:
+  /// **'Submit Email'**
+  String get minorAccountReviewSubmitEmail;
+
+  /// No description provided for @minorAccountReviewBackToReview.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to Account Review'**
+  String get minorAccountReviewBackToReview;
+
+  /// No description provided for @minorAccountReviewSubmissionReceivedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Email submitted'**
+  String get minorAccountReviewSubmissionReceivedTitle;
+
+  /// No description provided for @minorAccountReviewSubmissionReceivedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'We submitted {email} for review. We\'ll email this address to confirm. Once your parent or guardian responds, your case will move forward. Use Check Again from the account review screen for updates.'**
+  String minorAccountReviewSubmissionReceivedBody(String email);
+
+  /// No description provided for @minorAccountReviewSubmissionReceivedLocalBody.
+  ///
+  /// In en, this message translates to:
+  /// **'We received the parent or guardian contact for this account. Our team will review it before restoring access.'**
+  String get minorAccountReviewSubmissionReceivedLocalBody;
+
+  /// No description provided for @minorAccountReviewMissingCase.
+  ///
+  /// In en, this message translates to:
+  /// **'We could not find an active review case for this account.'**
+  String get minorAccountReviewMissingCase;
+
+  /// No description provided for @minorAccountReviewParentContactError.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not submit the parent email. Please try again.'**
+  String get minorAccountReviewParentContactError;
+
+  /// No description provided for @minorAccountReviewUnder13SupportTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent Support'**
+  String get minorAccountReviewUnder13SupportTitle;
+
+  /// No description provided for @minorAccountReviewUnder13Heading.
+  ///
+  /// In en, this message translates to:
+  /// **'A parent or guardian must contact Divine'**
+  String get minorAccountReviewUnder13Heading;
+
+  /// No description provided for @minorAccountReviewUnder13SupportBody.
+  ///
+  /// In en, this message translates to:
+  /// **'For likely under-13 accounts, the next step is parent or guardian contact by email.'**
+  String get minorAccountReviewUnder13SupportBody;
+
+  /// No description provided for @minorAccountReviewSupportEmailLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Support email'**
+  String get minorAccountReviewSupportEmailLabel;
+
+  /// No description provided for @minorAccountReviewCopySupportEmail.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy support email'**
+  String get minorAccountReviewCopySupportEmail;
+
+  /// No description provided for @minorAccountReviewSupportEmailCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Support email copied'**
+  String get minorAccountReviewSupportEmailCopied;
+
+  /// No description provided for @minorAccountReviewCopyCaseId.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy case ID'**
+  String get minorAccountReviewCopyCaseId;
+
+  /// No description provided for @minorAccountReviewCaseIdCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Case ID copied'**
+  String get minorAccountReviewCaseIdCopied;
+
+  /// No description provided for @minorAccountReviewUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Unavailable'**
+  String get minorAccountReviewUnavailable;
+
+  /// No description provided for @minorAccountReviewUnder13Instructions.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask the parent or guardian to include the case ID and explain that they are contacting Divine about this account review.'**
+  String get minorAccountReviewUnder13Instructions;
+
+  /// No description provided for @minorAccountReviewUnder13EmailSubject.
+  ///
+  /// In en, this message translates to:
+  /// **'Under-13 account review for case {caseId}'**
+  String minorAccountReviewUnder13EmailSubject(String caseId);
+
+  /// No description provided for @minorAccountReviewUnder13EmailBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Hi Divine support,\n\nI am the parent or guardian for a child under 13 and I am contacting Divine about account review case {caseId}.\n\nThanks.'**
+  String minorAccountReviewUnder13EmailBody(String caseId);
+
+  /// No description provided for @devOptionsMinorReviewSimulationTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Minor Account Review Simulation'**
+  String get devOptionsMinorReviewSimulationTitle;
+
+  /// No description provided for @devOptionsMinorReviewCurrentStateLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Current state'**
+  String get devOptionsMinorReviewCurrentStateLabel;
+
+  /// No description provided for @devOptionsMinorReviewStateRestricted.
+  ///
+  /// In en, this message translates to:
+  /// **'Restricted ({state})'**
+  String devOptionsMinorReviewStateRestricted(String state);
+
+  /// No description provided for @devOptionsMinorReviewStateActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get devOptionsMinorReviewStateActive;
+
+  /// No description provided for @devOptionsMinorReviewStateLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading...'**
+  String get devOptionsMinorReviewStateLoading;
+
+  /// No description provided for @devOptionsMinorReviewStateError.
+  ///
+  /// In en, this message translates to:
+  /// **'Error loading state'**
+  String get devOptionsMinorReviewStateError;
+
+  /// No description provided for @devOptionsMinorReviewClearTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear simulation override'**
+  String get devOptionsMinorReviewClearTitle;
+
+  /// No description provided for @devOptionsMinorReviewClearSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Use backend or default active state again'**
+  String get devOptionsMinorReviewClearSubtitle;
+
+  /// No description provided for @devOptionsMinorReviewTeenTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Simulate 13-15 review case'**
+  String get devOptionsMinorReviewTeenTitle;
+
+  /// No description provided for @devOptionsMinorReviewTeenSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Restricted account with parent contact path'**
+  String get devOptionsMinorReviewTeenSubtitle;
+
+  /// No description provided for @devOptionsMinorReviewUnder13Title.
+  ///
+  /// In en, this message translates to:
+  /// **'Simulate under-13 support case'**
+  String get devOptionsMinorReviewUnder13Title;
+
+  /// No description provided for @devOptionsMinorReviewUnder13Subtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Restricted account with parent-email-only instructions'**
+  String get devOptionsMinorReviewUnder13Subtitle;
+
+  /// No description provided for @devOptionsMinorReviewClearedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Minor account review simulation cleared'**
+  String get devOptionsMinorReviewClearedToast;
+
+  /// No description provided for @devOptionsMinorReviewTeenEnabledToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Simulated 13-15 review case enabled'**
+  String get devOptionsMinorReviewTeenEnabledToast;
+
+  /// No description provided for @devOptionsMinorReviewUnder13EnabledToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Simulated under-13 support case enabled'**
+  String get devOptionsMinorReviewUnder13EnabledToast;
+
   /// Semantics label for the button that opens the recorder to create a video reply in comments.
   ///
   /// In en, this message translates to:
@@ -13529,6 +14153,162 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Add \"#{tag}\"'**
   String videoMetadataTagsPickerAddTag(String tag);
+
+  /// Welcome-screen notice above the sign-in / create-account buttons explaining the minimum age for self-signup.
+  ///
+  /// In en, this message translates to:
+  /// **'Divine accounts are for ages 16 and up.'**
+  String get authMinAgeNotice;
+
+  /// Lead-in white text rendered on the welcome screen immediately before the green 'Here are your choices.' link.
+  ///
+  /// In en, this message translates to:
+  /// **'Not 16 yet? That\'s OK. '**
+  String get authUnder16Prefix;
+
+  /// Inline green call-to-action on the welcome screen that opens the family-guidance flow for under-16 users.
+  ///
+  /// In en, this message translates to:
+  /// **'Here are your choices.'**
+  String get authUnder16ChoicesCta;
+
+  /// No description provided for @minorAccountReviewUnder13WhyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Here\'s why'**
+  String get minorAccountReviewUnder13WhyTitle;
+
+  /// No description provided for @generalSettingsHoldToRecord.
+  ///
+  /// In en, this message translates to:
+  /// **'Hold to record'**
+  String get generalSettingsHoldToRecord;
+
+  /// No description provided for @generalSettingsHoldToRecordSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Start recording when you press and hold, then stop when you release'**
+  String get generalSettingsHoldToRecordSubtitle;
+
+  /// No description provided for @soundsPreviewFailedGeneric.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to play preview'**
+  String get soundsPreviewFailedGeneric;
+
+  /// Snackbar shown after one or more background uploads succeed, e.g. after a re-auth redirect during which uploads completed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Video published to your profile} other{{count} videos published to your profile}}'**
+  String uploadPublishedCountMessage(int count);
+
+  /// Screen-reader label for the send button at the bottom of a DM conversation.
+  ///
+  /// In en, this message translates to:
+  /// **'Send message'**
+  String get dmMessageSendLabel;
+
+  /// Hint text in the search field of the full emoji picker opened from the DM reaction '+' button.
+  ///
+  /// In en, this message translates to:
+  /// **'Search'**
+  String get emojiPickerSearchHint;
+
+  /// Title for the 'Recent' category in the full emoji picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent'**
+  String get emojiCategoryRecent;
+
+  /// Title for the 'Smileys & People' category in the full emoji picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Smileys & People'**
+  String get emojiCategorySmileys;
+
+  /// Title for the 'Animals & Nature' category in the full emoji picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Animals & Nature'**
+  String get emojiCategoryAnimals;
+
+  /// Title for the 'Food & Drink' category in the full emoji picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Food & Drink'**
+  String get emojiCategoryFood;
+
+  /// Title for the 'Activities' category in the full emoji picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Activities'**
+  String get emojiCategoryActivities;
+
+  /// Title for the 'Travel & Places' category in the full emoji picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Travel & Places'**
+  String get emojiCategoryTravel;
+
+  /// Title for the 'Objects' category in the full emoji picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Objects'**
+  String get emojiCategoryObjects;
+
+  /// Title for the 'Symbols' category in the full emoji picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Symbols'**
+  String get emojiCategorySymbols;
+
+  /// Title for the 'Flags' category in the full emoji picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Flags'**
+  String get emojiCategoryFlags;
+
+  /// No description provided for @videoEditorMarkerLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Marker'**
+  String get videoEditorMarkerLabel;
+
+  /// No description provided for @videoEditorAddTimelineMarkerSemanticLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Add timeline marker'**
+  String get videoEditorAddTimelineMarkerSemanticLabel;
+
+  /// No description provided for @videoEditorRemoveTimelineMarkerSemanticLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove timeline marker'**
+  String get videoEditorRemoveTimelineMarkerSemanticLabel;
+
+  /// No description provided for @videoEditorDeleteTimelineMarkerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete marker?'**
+  String get videoEditorDeleteTimelineMarkerTitle;
+
+  /// No description provided for @videoEditorDeleteTimelineMarkerSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This removes the marker from the timeline. Your edit stays intact.'**
+  String get videoEditorDeleteTimelineMarkerSubtitle;
+
+  /// Semantic long-press hint for a volume arc control. Screen readers announce this as the long-press affordance, which mutes or unmutes all timeline tracks at once.
+  ///
+  /// In en, this message translates to:
+  /// **'Mute or unmute all tracks'**
+  String get videoEditorVolumeLongPressHint;
+
+  /// No description provided for @videoEditorSplitFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Split failed. Please try again.'**
+  String get videoEditorSplitFailed;
 }
 
 class _AppLocalizationsDelegate
