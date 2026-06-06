@@ -959,10 +959,17 @@ class NotificationRepository {
     final (profiles, videosById) = await (profilesFuture, videosFuture).wait;
 
     final consolidated = _consolidateFollows(raw);
-    final videos = _groupVideoAnchored(consolidated, profiles, videosById);
+    final misattributed = <RelayNotification>[];
+    final videos = _groupVideoAnchored(
+      consolidated,
+      profiles,
+      videosById,
+      misattributed: misattributed,
+    );
     final actors = _mapActorAnchored(consolidated, profiles);
+    final reclassified = _reclassifyMisattributed(misattributed, profiles);
 
-    final items = <NotificationItem>[...videos, ...actors]
+    final items = <NotificationItem>[...videos, ...actors, ...reclassified]
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     return _applyBlockFilter(items);
   }
@@ -1025,11 +1032,17 @@ class NotificationRepository {
   /// `referencedEventId` becomes a [VideoNotification], even if only one
   /// actor interacted. Notifications missing `referencedEventId` are
   /// dropped.
+  ///
+  /// Notifications whose referenced video is confirmed to belong to a
+  /// different user are collected in [misattributed] for reclassification
+  /// as actor-anchored notifications (e.g. "liked your comment" instead of
+  /// "liked your video"). This fixes #4813.
   List<VideoNotification> _groupVideoAnchored(
     List<RelayNotification> raw,
     Map<String, UserProfile> profiles,
-    Map<String, VideoStats> videosById,
-  ) {
+    Map<String, VideoStats> videosById, {
+    List<RelayNotification>? misattributed,
+  }) {
     bool isVideoAnchored(NotificationKind k) =>
         k == NotificationKind.like ||
         k == NotificationKind.comment ||
@@ -1045,12 +1058,13 @@ class NotificationRepository {
         referencedVideoEventId: eventId,
         videosById: videosById,
       )) {
-        _logDroppedKnownOwnerMismatch(
+        _logReclassifiedOwnerMismatch(
           notificationId: n.id,
           sourcePubkey: n.sourcePubkey,
           referencedVideoEventId: eventId,
           referencedVideoOwnerPubkey: videosById[eventId]?.pubkey,
         );
+        misattributed?.add(n);
         continue;
       }
       final key = _VideoGroupKey(eventId, kind);
@@ -1153,19 +1167,50 @@ class NotificationRepository {
           ? kind
           : NotificationKind.system;
       result.add(
-        ActorNotification(
-          id: n.dedupeKey,
+        _buildActorNotification(
+          n,
           type: mapped,
-          actor: _buildActor(n.sourcePubkey, profiles),
-          timestamp: n.createdAt,
-          isRead: n.read,
-          commentText: _truncateComment(n.content, kind),
-          targetEventId: _actorTargetEventId(mapped, n),
-          sourceEventIds: n.sourceEventId.isNotEmpty
-              ? [n.sourceEventId]
-              : const [],
-          notificationIds: n.dedupeKey.isNotEmpty ? [n.dedupeKey] : const [],
-          videoAddressableId: _actorVideoAddressableId(mapped, n),
+          profiles: profiles,
+          commentKind: kind,
+        ),
+      );
+    }
+    return result;
+  }
+
+  /// Reclassifies video-anchored notifications that were dropped because
+  /// the referenced video is owned by a different user.
+  ///
+  /// Instead of silently dropping these, they are surfaced as
+  /// [ActorNotification]s with the correct kind:
+  /// - `like` (reaction on someone else's video) → `likeComment`
+  ///   ("liked your comment")
+  /// - `comment` (reply on someone else's video) → `reply`
+  ///   ("replied to your comment")
+  /// - `repost` remains dropped — a repost of someone else's video should
+  ///   not notify the commenter.
+  ///
+  /// Fixes #4813: user sees "liked your video" / "commented on your video"
+  /// for interactions that are actually on their comments on other users'
+  /// videos.
+  List<ActorNotification> _reclassifyMisattributed(
+    List<RelayNotification> misattributed,
+    Map<String, UserProfile> profiles,
+  ) {
+    final result = <ActorNotification>[];
+    for (final n in misattributed) {
+      final originalKind = _mapNotificationKind(n);
+      final reclassifiedKind = _reclassifiedMisattributedKind(originalKind);
+      if (reclassifiedKind == null) continue;
+      result.add(
+        _buildActorNotification(
+          n,
+          type: reclassifiedKind,
+          profiles: profiles,
+          targetEventId: _reclassifiedMisattributedTargetEventId(
+            reclassifiedKind,
+            n,
+          ),
         ),
       );
     }
@@ -1204,13 +1249,24 @@ class NotificationRepository {
         referencedVideoEventId: referenced,
         videosById: videosById,
       )) {
-        _logDroppedKnownOwnerMismatch(
+        _logReclassifiedOwnerMismatch(
           notificationId: raw.id,
           sourcePubkey: raw.sourcePubkey,
           referencedVideoEventId: referenced,
           referencedVideoOwnerPubkey: video?.pubkey,
         );
-        return null;
+        // Reclassify as actor-anchored instead of dropping (#4813).
+        final reclassifiedKind = _reclassifiedMisattributedKind(kind);
+        if (reclassifiedKind == null) return null;
+        return _buildActorNotification(
+          raw,
+          type: reclassifiedKind,
+          profiles: profiles,
+          targetEventId: _reclassifiedMisattributedTargetEventId(
+            reclassifiedKind,
+            raw,
+          ),
+        );
       }
       final addressableId = _recipientOwnedVideoAddressableId(
         dTag: raw.referencedDTag,
@@ -1248,20 +1304,60 @@ class NotificationRepository {
             kind == NotificationKind.reply)
         ? kind
         : NotificationKind.system;
-    return ActorNotification(
-      id: raw.dedupeKey,
+    return _buildActorNotification(
+      raw,
       type: mapped,
-      actor: actor,
-      timestamp: raw.createdAt,
-      isRead: raw.read,
-      commentText: _truncateComment(raw.content, kind),
-      targetEventId: _actorTargetEventId(mapped, raw),
-      sourceEventIds: raw.sourceEventId.isNotEmpty
-          ? [raw.sourceEventId]
-          : const [],
-      notificationIds: raw.dedupeKey.isNotEmpty ? [raw.dedupeKey] : const [],
-      videoAddressableId: _actorVideoAddressableId(mapped, raw),
+      profiles: profiles,
+      commentKind: kind,
     );
+  }
+
+  ActorNotification _buildActorNotification(
+    RelayNotification notification, {
+    required NotificationKind type,
+    required Map<String, UserProfile> profiles,
+    NotificationKind? commentKind,
+    String? targetEventId,
+  }) {
+    return ActorNotification(
+      id: notification.dedupeKey,
+      type: type,
+      actor: _buildActor(notification.sourcePubkey, profiles),
+      timestamp: notification.createdAt,
+      isRead: notification.read,
+      commentText: _truncateComment(notification.content, commentKind ?? type),
+      targetEventId: targetEventId ?? _actorTargetEventId(type, notification),
+      sourceEventIds: notification.sourceEventId.isNotEmpty
+          ? [notification.sourceEventId]
+          : const [],
+      notificationIds: notification.dedupeKey.isNotEmpty
+          ? [notification.dedupeKey]
+          : const [],
+      videoAddressableId: _actorVideoAddressableId(type, notification),
+    );
+  }
+
+  static NotificationKind? _reclassifiedMisattributedKind(
+    NotificationKind originalKind,
+  ) => switch (originalKind) {
+    NotificationKind.like => NotificationKind.likeComment,
+    NotificationKind.comment => NotificationKind.reply,
+    // Reposts on foreign videos are not meaningful for the commenter.
+    _ => null,
+  };
+
+  static String? _reclassifiedMisattributedTargetEventId(
+    NotificationKind reclassifiedKind,
+    RelayNotification notification,
+  ) {
+    final targetCommentId = _nonEmpty(notification.targetCommentId);
+    if (targetCommentId != null) return targetCommentId;
+
+    // Misattributed rows often carry the foreign video as referencedEventId
+    // because FunnelCake included it for navigation context. Without the
+    // comment id, keep the standard actor target fallback so taps can still
+    // resolve or degrade through the existing navigation path.
+    return _actorTargetEventId(reclassifiedKind, notification);
   }
 
   /// Returns null if [s] is null or empty, otherwise [s].
@@ -1354,14 +1450,14 @@ class NotificationRepository {
     return ownerPubkey != _userPubkey;
   }
 
-  void _logDroppedKnownOwnerMismatch({
+  void _logReclassifiedOwnerMismatch({
     required String notificationId,
     required String sourcePubkey,
     required String referencedVideoEventId,
     required String? referencedVideoOwnerPubkey,
   }) {
-    Log.warning(
-      'Dropping misattributed video notification: '
+    Log.info(
+      'Reclassifying misattributed video notification as actor-anchored: '
       'notificationId=$notificationId '
       'sourcePubkey=$sourcePubkey '
       'referencedVideoEventId=$referencedVideoEventId '
