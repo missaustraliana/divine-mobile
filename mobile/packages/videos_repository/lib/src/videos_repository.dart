@@ -64,6 +64,23 @@ int? _decodePopularLegacyBeforeCursor(String? cursor) {
   );
 }
 
+String _popularPreferenceCacheSuffix({
+  List<String> preferredLanguages = const [],
+  String? viewerCountry,
+}) {
+  final languages = preferredLanguages
+      .map((language) => language.trim())
+      .where((language) => language.isNotEmpty)
+      .join(',');
+  final country = viewerCountry?.trim() ?? '';
+
+  if (languages.isEmpty && country.isEmpty) {
+    return '';
+  }
+
+  return ':lang=$languages:country=$country';
+}
+
 /// {@template videos_repository}
 /// Repository for video operations with Nostr.
 ///
@@ -712,8 +729,14 @@ class VideosRepository {
     int? until,
     String? cursor,
     bool skipCache = false,
+    List<String> preferredLanguages = const [],
+    String? viewerCountry,
   }) async {
-    final cacheKey = 'popular:v2:${variant.name}';
+    final cacheKey =
+        'popular:v2:${variant.name}${_popularPreferenceCacheSuffix(
+          preferredLanguages: preferredLanguages,
+          viewerCountry: viewerCountry,
+        )}';
     if (!skipCache && until == null && cursor == null) {
       final cached = _inMemoryFeedCache?.get(cacheKey);
       if (cached != null) {
@@ -747,6 +770,8 @@ class VideosRepository {
           limit: limit,
           cursor: pageCursor,
           before: before,
+          preferredLanguages: preferredLanguages,
+          viewerCountry: viewerCountry,
         );
         final stats = response.videos;
         if (stats.isEmpty) {
@@ -866,9 +891,14 @@ class VideosRepository {
     PopularVideosVariant? variant,
     int fetchMultiplier = 4,
     bool skipCache = false,
+    List<String> preferredLanguages = const [],
+    String? viewerCountry,
   }) async {
     final cacheKey = variant != null
-        ? 'popular:v2:${variant.name}'
+        ? 'popular:v2:${variant.name}${_popularPreferenceCacheSuffix(
+            preferredLanguages: preferredLanguages,
+            viewerCountry: viewerCountry,
+          )}'
         : period == null
         ? _popularCacheKey
         : 'popular:${period.wireValue}';
@@ -887,6 +917,8 @@ class VideosRepository {
         limit: limit,
         until: until,
         skipCache: skipCache,
+        preferredLanguages: preferredLanguages,
+        viewerCountry: viewerCountry,
       );
       return page.videos;
     }
@@ -2015,6 +2047,8 @@ class VideosRepository {
     int limit = _defaultLimit,
     int? until,
     bool skipCache = false,
+    List<String> preferredLanguages = const [],
+    String? viewerCountry,
   }) async {
     if (until != null) {
       return HomeFeedResult(
@@ -2022,6 +2056,8 @@ class VideosRepository {
           limit: limit,
           until: until,
           skipCache: skipCache,
+          preferredLanguages: preferredLanguages,
+          viewerCountry: viewerCountry,
         ),
       );
     }
@@ -2037,6 +2073,8 @@ class VideosRepository {
           limit: limit,
           until: until,
           skipCache: skipCache,
+          preferredLanguages: preferredLanguages,
+          viewerCountry: viewerCountry,
         ),
       );
     }
@@ -2044,6 +2082,8 @@ class VideosRepository {
     final response = await _funnelcakeApiClient.getRecommendations(
       pubkey: effectiveUserPubkey,
       limit: limit,
+      preferredLanguages: preferredLanguages,
+      viewerCountry: viewerCountry,
     );
     final videos = _transformVideoStats(response.videos);
     if (videos.isEmpty) {
@@ -2052,6 +2092,8 @@ class VideosRepository {
           limit: limit,
           until: until,
           skipCache: skipCache,
+          preferredLanguages: preferredLanguages,
+          viewerCountry: viewerCountry,
         ),
       );
     }
@@ -2069,6 +2111,8 @@ class VideosRepository {
     int limit = 20,
     String fallback = 'popular',
     String? category,
+    List<String> preferredLanguages = const [],
+    String? viewerCountry,
   }) async {
     if (_funnelcakeApiClient == null || !_funnelcakeApiClient.isAvailable) {
       return null;
@@ -2078,6 +2122,8 @@ class VideosRepository {
       limit: limit,
       fallback: fallback,
       category: category,
+      preferredLanguages: preferredLanguages,
+      viewerCountry: viewerCountry,
     );
   }
 
