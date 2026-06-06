@@ -65,6 +65,9 @@ linter:
     parameter_assignments: false
     prefer_constructors_over_static_methods: false
     prefer_foreach: false
+    # The repo convention is named-parameter constructor injection into private
+    # fields (~385 app sites), so this conflicts with prescribed DI style.
+    prefer_initializing_formals: false
     public_member_api_docs: false
     sort_pub_dependencies: false
     unintended_html_in_doc_comment: false
@@ -72,4 +75,3 @@ linter:
     use_named_constants: false
     omit_local_variable_types: false
     use_setters_to_change_properties: false
-
