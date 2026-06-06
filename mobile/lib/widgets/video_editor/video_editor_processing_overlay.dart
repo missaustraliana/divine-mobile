@@ -6,10 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/providers/video_editor_provider.dart';
-import 'package:pro_video_editor/core/models/video/progress_model.dart';
-import 'package:pro_video_editor/core/platform/platform_interface.dart';
+import 'package:openvine/widgets/branded_loading_indicator.dart';
 
-class VideoEditorProcessingOverlay extends ConsumerWidget {
+class VideoEditorProcessingOverlay extends StatelessWidget {
   const VideoEditorProcessingOverlay({
     required this.clip,
     super.key,
@@ -25,10 +24,7 @@ class VideoEditorProcessingOverlay extends ConsumerWidget {
   final Widget? inactivePlaceholder;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // draftId is set once during initialization and does not change within a
-    // session, so a one-time read is sufficient.
-    final draftId = ref.read(videoEditorProvider.notifier).draftId;
+  Widget build(BuildContext context) {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 220),
       child: isProcessing || clip.isProcessing
@@ -38,16 +34,32 @@ class VideoEditorProcessingOverlay extends ConsumerWidget {
               ),
               color: const Color.fromARGB(180, 0, 0, 0),
               child: Center(
-                // Without RepaintBoundary, the progress indicator repaints
-                // the entire screen while it's running.
-                child: RepaintBoundary(
-                  child: StreamBuilder<ProgressModel>(
-                    stream: ProVideoEditor.instance.progressStreamById(draftId),
-                    builder: (context, snapshot) {
-                      final progress = snapshot.data?.progress ?? 0;
-                      return PartialCircleSpinner(progress: progress);
-                    },
-                  ),
+                child: Column(
+                  mainAxisSize: .min,
+                  spacing: 12,
+                  children: [
+                    const BrandedLoadingIndicator(size: 44),
+
+                    // Without RepaintBoundary, the progress indicator repaints
+                    // the entire screen while it's running.
+                    RepaintBoundary(
+                      child: Consumer(
+                        builder: (context, ref, _) {
+                          final progress =
+                              (ref
+                                          .watch(
+                                            videoEditorCompositeProgressProvider,
+                                          )
+                                          .asData
+                                          ?.value
+                                          .progress ??
+                                      0)
+                                  .clamp(0.0, 1.0);
+                          return PartialCircleSpinner(progress: progress);
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
             )

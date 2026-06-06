@@ -165,6 +165,70 @@ class _CropParameters {
   String toString() => '($x, $y, ${width}x$height)';
 }
 
+class _RenderProgressTracker {
+  _RenderProgressTracker({
+    required this.taskId,
+    required int clipCount,
+  }) : _proofBudget =
+           VideoEditorRenderService.proofModeProgressBudgetForClipCount(
+             clipCount,
+           ),
+       _proofSteps = clipCount + 1;
+
+  final String taskId;
+  final double _proofBudget;
+  final int _proofSteps;
+  StreamSubscription<ProgressModel>? _renderSubscription;
+  double _lastProgress = 0;
+
+  double get _renderBudget => 1 - _proofBudget;
+
+  void start() {
+    // Emit an explicit reset so a reused broadcast stream does not keep showing
+    // the completed progress of a previous render.
+    _lastProgress = 0;
+    VideoEditorRenderService._emitCompositeProgress(
+      taskId: taskId,
+      progress: 0,
+    );
+    _renderSubscription = ProVideoEditor.instance
+        .progressStreamById(taskId)
+        .listen((progressModel) {
+          _emit(progressModel.progress * _renderBudget);
+        });
+  }
+
+  Future<void> markRenderComplete() async {
+    // Stop listening to render progress so late events from the render stream
+    // cannot regress the composite progress during the proof phase.
+    await _renderSubscription?.cancel();
+    _renderSubscription = null;
+    _emit(_renderBudget);
+  }
+
+  void markProofStepComplete(int completedSteps) {
+    final normalizedSteps = completedSteps.clamp(0, _proofSteps);
+    _emit(_renderBudget + (_proofBudget * normalizedSteps / _proofSteps));
+  }
+
+  Future<void> dispose() async {
+    await _renderSubscription?.cancel();
+    _renderSubscription = null;
+  }
+
+  /// Emits a monotonically increasing composite progress value, guarding
+  /// against backwards jumps caused by out-of-order stream events.
+  void _emit(double progress) {
+    final clamped = progress.clamp(0.0, 1.0);
+    if (clamped <= _lastProgress) return;
+    _lastProgress = clamped;
+    VideoEditorRenderService._emitCompositeProgress(
+      taskId: taskId,
+      progress: clamped,
+    );
+  }
+}
+
 /// Service for rendering final video from multiple clips.
 ///
 /// Handles video rendering with aspect ratio cropping and clip concatenation.
@@ -172,6 +236,37 @@ class VideoEditorRenderService {
   VideoEditorRenderService._();
 
   static const _logName = 'VideoEditorRenderService';
+  static final _compositeProgressController =
+      StreamController<ProgressModel>.broadcast();
+
+  @visibleForTesting
+  static double proofModeProgressBudgetForClipCount(int clipCount) {
+    final normalizedClipCount = clipCount < 1 ? 1 : clipCount;
+    return (normalizedClipCount * 0.01).clamp(0.05, 0.10);
+  }
+
+  static Stream<ProgressModel> compositeProgressStreamById(String taskId) {
+    return _compositeProgressController.stream.where(
+      (progress) => progress.id == taskId,
+    );
+  }
+
+  static void _emitCompositeProgress({
+    required String taskId,
+    required double progress,
+  }) {
+    _compositeProgressController.add(
+      ProgressModel(id: taskId, progress: progress.clamp(0.0, 1.0)),
+    );
+  }
+
+  @visibleForTesting
+  static void emitCompositeProgressForTesting({
+    required String taskId,
+    required double progress,
+  }) {
+    _emitCompositeProgress(taskId: taskId, progress: progress);
+  }
 
   /// Test-only override for [renderVideoToClip].
   ///
@@ -185,6 +280,20 @@ class VideoEditorRenderService {
     String? taskId,
   })?
   renderVideoToClipOverride;
+
+  /// Test-only override for [renderVideo].
+  ///
+  /// When set, [renderVideo] delegates to this callback instead of running the
+  /// real render pipeline. Reset to `null` in `tearDown`.
+  @visibleForTesting
+  static Future<String?> Function({
+    required List<DivineVideoClip> clips,
+    required bool usePersistentStorage,
+    model.AspectRatio? aspectRatio,
+    CompleteParameters? parameters,
+    String? taskId,
+  })?
+  renderVideoOverride;
 
   // ─────────────────────────────────────────────────────────────────────────
   // Public API
@@ -218,73 +327,93 @@ class VideoEditorRenderService {
 
     if (clips.isEmpty) return null;
 
-    Log.debug(
-      '🎬 renderVideoToClip: clips=${clips.length}, '
-      'parameters=${parameters?.toLogString()}',
-      name: _logName,
-      category: LogCategory.video,
-    );
+    final effectiveTaskId = taskId ?? clips.first.id;
+    final progressTracker = _RenderProgressTracker(
+      taskId: effectiveTaskId,
+      clipCount: clips.length,
+    )..start();
 
-    final outputPath = await renderVideo(
-      clips: clips,
-      aspectRatio: clips.first.targetAspectRatio,
-      usePersistentStorage: true,
-      parameters: parameters,
-      taskId: taskId,
-    );
-
-    if (outputPath == null) return null;
-
-    final metaData = await ProVideoEditor.instance.getMetadata(
-      EditorVideo.file(outputPath),
-    );
-
-    // Generate ProofMode attestation
-    Log.debug(
-      '🔐 Generating proofmode attestation for video',
-      name: _logName,
-      category: LogCategory.video,
-    );
-
-    // Ensure all clips have proof attestations before generating the
-    // final combined proof. Clips recorded before the feature was added
-    // or where proof generation failed will be attested now.
-    final attestedClips = await _ensureClipProofs(clips);
-
-    final proofData = await NativeProofModeService.proofFile(
-      File(outputPath),
-      clips: attestedClips,
-      editorStateHistory: editorStateHistory,
-    );
-    final String? proofManifestJson = proofData != null
-        ? jsonEncode(proofData)
-        : null;
-
-    if (proofManifestJson != null) {
-      Log.info(
-        '✅ Proofmode attestation generated',
+    try {
+      Log.debug(
+        '🎬 renderVideoToClip: clips=${clips.length}, '
+        'parameters=${parameters?.toLogString()}',
         name: _logName,
         category: LogCategory.video,
       );
-    } else {
-      Log.warning(
-        '⚠️ No proofmode data available',
+
+      final outputPath = await renderVideo(
+        clips: clips,
+        aspectRatio: clips.first.targetAspectRatio,
+        usePersistentStorage: true,
+        parameters: parameters,
+        taskId: effectiveTaskId,
+      );
+
+      if (outputPath == null) return null;
+
+      await progressTracker.markRenderComplete();
+
+      final metaData = await ProVideoEditor.instance.getMetadata(
+        EditorVideo.file(outputPath),
+      );
+
+      // Generate ProofMode attestation
+      Log.debug(
+        '🔐 Generating proofmode attestation for video',
         name: _logName,
         category: LogCategory.video,
       );
+
+      // Ensure all clips have proof attestations before generating the
+      // final combined proof. Clips recorded before the feature was added
+      // or where proof generation failed will be attested now.
+      var completedProofSteps = 0;
+      final attestedClips = await _ensureClipProofs(
+        clips,
+        onClipProcessed: () {
+          completedProofSteps++;
+          progressTracker.markProofStepComplete(completedProofSteps);
+        },
+      );
+
+      final proofData = await NativeProofModeService.proofFile(
+        File(outputPath),
+        clips: attestedClips,
+        editorStateHistory: editorStateHistory,
+      );
+      progressTracker.markProofStepComplete(completedProofSteps + 1);
+      final String? proofManifestJson = proofData != null
+          ? jsonEncode(proofData)
+          : null;
+
+      if (proofManifestJson != null) {
+        Log.info(
+          '✅ Proofmode attestation generated',
+          name: _logName,
+          category: LogCategory.video,
+        );
+      } else {
+        Log.warning(
+          '⚠️ No proofmode data available',
+          name: _logName,
+          category: LogCategory.video,
+        );
+      }
+
+      final clip = DivineVideoClip(
+        id: 'clip-${DateTime.now().millisecondsSinceEpoch}',
+        video: EditorVideo.file(outputPath),
+        duration: metaData.duration,
+        recordedAt: DateTime.now(),
+        originalAspectRatio: clips.first.originalAspectRatio,
+        targetAspectRatio: clips.first.targetAspectRatio,
+        thumbnailPath: clips.first.thumbnailPath,
+      );
+
+      return (clip, proofManifestJson);
+    } finally {
+      await progressTracker.dispose();
     }
-
-    final clip = DivineVideoClip(
-      id: 'clip-${DateTime.now().millisecondsSinceEpoch}',
-      video: EditorVideo.file(outputPath),
-      duration: metaData.duration,
-      recordedAt: DateTime.now(),
-      originalAspectRatio: clips.first.originalAspectRatio,
-      targetAspectRatio: clips.first.targetAspectRatio,
-      thumbnailPath: clips.first.thumbnailPath,
-    );
-
-    return (clip, proofManifestJson);
   }
 
   /// Ensures every clip has a [proofManifestJson].
@@ -293,18 +422,21 @@ class VideoEditorRenderService {
   /// proof, [NativeProofModeService.proofFile] is called on the clip's video
   /// file and the clip is updated with the result.
   static Future<List<DivineVideoClip>> _ensureClipProofs(
-    List<DivineVideoClip> clips,
-  ) async {
+    List<DivineVideoClip> clips, {
+    VoidCallback? onClipProcessed,
+  }) async {
     final result = <DivineVideoClip>[];
     for (final clip in clips) {
       if (clip.proofManifestJson != null) {
         result.add(clip);
+        onClipProcessed?.call();
         continue;
       }
 
       final videoFile = clip.video.file;
       if (videoFile == null) {
         result.add(clip);
+        onClipProcessed?.call();
         continue;
       }
 
@@ -333,6 +465,7 @@ class VideoEditorRenderService {
         );
         result.add(clip);
       }
+      onClipProcessed?.call();
     }
     return result;
   }
@@ -357,6 +490,17 @@ class VideoEditorRenderService {
     CompleteParameters? parameters,
     String? taskId,
   }) async {
+    final override = renderVideoOverride;
+    if (override != null) {
+      return override(
+        clips: clips,
+        usePersistentStorage: usePersistentStorage,
+        aspectRatio: aspectRatio,
+        parameters: parameters,
+        taskId: taskId,
+      );
+    }
+
     final cacheDir = await getTemporaryDirectory();
     final outputDir = usePersistentStorage
         ? await getApplicationDocumentsDirectory()
