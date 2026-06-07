@@ -4754,6 +4754,13 @@ class AppLocalizationsDe extends AppLocalizations {
       'Unser Team prüft deine Meldung und ergreift entsprechende Maßnahmen. Du erhältst möglicherweise Updates per Direktnachricht.';
 
   @override
+  String get reportModerationDmDelayed =>
+      'We couldn\'t reach the moderation team directly just now, but your report was received and will be reviewed.';
+
+  @override
+  String get reportContactModeration => 'Message the moderation team';
+
+  @override
   String get reportLearnMore => 'Mehr erfahren';
 
   @override

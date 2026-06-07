@@ -8210,6 +8210,18 @@ abstract class AppLocalizations {
   /// **'Our team will review your report and take appropriate action. You may receive updates via direct message.'**
   String get reportReceivedReviewNotice;
 
+  /// Calm, non-blocking notice shown on the report confirmation screen when the secondary NIP-17 direct message to the moderation team failed to send. The report itself still succeeded via other channels.
+  ///
+  /// In en, this message translates to:
+  /// **'We couldn\'t reach the moderation team directly just now, but your report was received and will be reviewed.'**
+  String get reportModerationDmDelayed;
+
+  /// Button on the report confirmation screen that opens a direct-message conversation with the Divine moderation team so the user can follow up about their report.
+  ///
+  /// In en, this message translates to:
+  /// **'Message the moderation team'**
+  String get reportContactModeration;
+
   /// No description provided for @reportLearnMore.
   ///
   /// In en, this message translates to:

@@ -661,6 +661,7 @@ void main() {
           recipientPubkey: any(named: 'recipientPubkey'),
           content: any(named: 'content'),
           replyToId: any(named: 'replyToId'),
+          skipNip04Fallback: any(named: 'skipNip04Fallback'),
         ),
       ).thenAnswer(
         (_) async => NIP17SendResult.success(
@@ -737,6 +738,7 @@ void main() {
           recipientPubkey: ModerationLabelService.fallbackModerationPubkeyHex,
           content: any(named: 'content'),
           replyToId: any(named: 'replyToId'),
+          skipNip04Fallback: any(named: 'skipNip04Fallback'),
         ),
       ).called(1);
     });
@@ -752,6 +754,7 @@ void main() {
           recipientPubkey: any(named: 'recipientPubkey'),
           content: captureAny(named: 'content'),
           replyToId: any(named: 'replyToId'),
+          skipNip04Fallback: any(named: 'skipNip04Fallback'),
         ),
       ).captured;
 
@@ -779,6 +782,7 @@ void main() {
           recipientPubkey: any(named: 'recipientPubkey'),
           content: any(named: 'content'),
           replyToId: any(named: 'replyToId'),
+          skipNip04Fallback: any(named: 'skipNip04Fallback'),
         ),
       ).thenThrow(Exception('DM relay unreachable'));
 
@@ -790,6 +794,116 @@ void main() {
         findsOneWidget,
         reason: 'Report should succeed even if DM fails',
       );
+      // C9: the swallowed DM failure is now surfaced as a calm notice
+      // instead of only a log line.
+      expect(find.text(l10n.reportModerationDmDelayed), findsOneWidget);
+    });
+
+    testWidgets('moderation DM opts out of the NIP-04 fallback (privacy)', (
+      tester,
+    ) async {
+      await setLargeSurface(tester);
+      await openAndSubmitReport(tester);
+
+      // C8: moderation reports carry user identity + reported content and
+      // must never degrade to a metadata-leaking NIP-04 plaintext duplicate.
+      verify(
+        () => mockDmRepository.sendMessage(
+          recipientPubkey: any(named: 'recipientPubkey'),
+          content: any(named: 'content'),
+          replyToId: any(named: 'replyToId'),
+          skipNip04Fallback: true,
+        ),
+      ).called(1);
+    });
+
+    testWidgets('does not show the DM-delayed notice when the DM succeeds', (
+      tester,
+    ) async {
+      await setLargeSurface(tester);
+      await openAndSubmitReport(tester);
+
+      expect(find.text(l10n.reportReceivedTitle), findsOneWidget);
+      expect(find.text(l10n.reportModerationDmDelayed), findsNothing);
+    });
+
+    Widget buildSubjectWithAuth(MockAuthService auth) {
+      final router = GoRouter(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (context, state) => Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (_) =>
+                        Material(child: ReportContentDialog(video: testVideo)),
+                  ),
+                  child: const Text('Open Report'),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+
+      return testProviderScope(
+        mockNostrService: mockNostrClient,
+        mockAuthService: auth,
+        mockModerationLabelService: mockModerationLabelService,
+        additionalOverrides: [
+          contentReportingServiceProvider.overrideWith(
+            (ref) async => mockReportingService,
+          ),
+          dmRepositoryProvider.overrideWithValue(mockDmRepository),
+        ],
+        child: MaterialApp.router(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          routerConfig: router,
+        ),
+      );
+    }
+
+    Future<void> openSubmitWithAuth(
+      WidgetTester tester,
+      MockAuthService a,
+    ) async {
+      await tester.pumpWidget(buildSubjectWithAuth(a));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open Report'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.reportReasonSpam));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(DivineButton, l10n.reportSubmit));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'shows the "Message the moderation team" affordance when signed in',
+      (tester) async {
+        final mockAuth = createMockAuthService();
+        when(() => mockAuth.currentPublicKeyHex).thenReturn(
+          '78a5c21b5166dc1474b64ddf7454bf79e6b5d6b4a77148593bf1e866b73c2738',
+        );
+
+        await setLargeSurface(tester);
+        await openSubmitWithAuth(tester, mockAuth);
+
+        expect(find.text(l10n.reportContactModeration), findsOneWidget);
+      },
+    );
+
+    testWidgets('hides the contact-moderation affordance when signed out', (
+      tester,
+    ) async {
+      // createMockAuthService stubs currentPublicKeyHex -> null.
+      await setLargeSurface(tester);
+      await openSubmitWithAuth(tester, createMockAuthService());
+
+      expect(find.text(l10n.reportReceivedTitle), findsOneWidget);
+      expect(find.text(l10n.reportContactModeration), findsNothing);
     });
 
     testWidgets(
@@ -801,6 +915,7 @@ void main() {
             recipientPubkey: any(named: 'recipientPubkey'),
             content: any(named: 'content'),
             replyToId: any(named: 'replyToId'),
+            skipNip04Fallback: any(named: 'skipNip04Fallback'),
           ),
         ).thenThrow(Exception('No keys available'));
 
@@ -858,6 +973,7 @@ void main() {
             recipientPubkey: any(named: 'recipientPubkey'),
             content: any(named: 'content'),
             replyToId: any(named: 'replyToId'),
+            skipNip04Fallback: any(named: 'skipNip04Fallback'),
           ),
         );
       },
@@ -888,6 +1004,7 @@ void main() {
           recipientPubkey: any(named: 'recipientPubkey'),
           content: any(named: 'content'),
           replyToId: any(named: 'replyToId'),
+          skipNip04Fallback: any(named: 'skipNip04Fallback'),
         ),
       ).thenAnswer(
         (_) async => NIP17SendResult.success(
@@ -970,6 +1087,7 @@ void main() {
             recipientPubkey: any(named: 'recipientPubkey'),
             content: captureAny(named: 'content'),
             replyToId: any(named: 'replyToId'),
+            skipNip04Fallback: any(named: 'skipNip04Fallback'),
           ),
         ).captured;
 
@@ -1021,6 +1139,7 @@ void main() {
           recipientPubkey: any(named: 'recipientPubkey'),
           content: any(named: 'content'),
           replyToId: any(named: 'replyToId'),
+          skipNip04Fallback: any(named: 'skipNip04Fallback'),
         ),
       ).thenAnswer(
         (_) async => NIP17SendResult.success(
@@ -1130,6 +1249,7 @@ void main() {
             recipientPubkey: any(named: 'recipientPubkey'),
             content: captureAny(named: 'content'),
             replyToId: any(named: 'replyToId'),
+            skipNip04Fallback: any(named: 'skipNip04Fallback'),
           ),
         ).captured;
 

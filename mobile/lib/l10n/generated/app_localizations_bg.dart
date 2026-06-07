@@ -4747,6 +4747,13 @@ class AppLocalizationsBg extends AppLocalizations {
       'Екипът ни ще прегледа сигнала ти и ще предприеме нужните действия. Може да получаваш новини чрез директно съобщение.';
 
   @override
+  String get reportModerationDmDelayed =>
+      'We couldn\'t reach the moderation team directly just now, but your report was received and will be reviewed.';
+
+  @override
+  String get reportContactModeration => 'Message the moderation team';
+
+  @override
   String get reportLearnMore => 'Научи повече';
 
   @override

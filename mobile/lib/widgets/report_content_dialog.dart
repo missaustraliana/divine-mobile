@@ -2,12 +2,15 @@
 // ABOUTME: Replaces the legacy AlertDialog with a VineBottomSheet-based flow.
 
 import 'package:divine_ui/divine_ui.dart';
+import 'package:dm_repository/dm_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:models/models.dart' hide LogCategory;
 import 'package:openvine/l10n/content_filter_reason_localizations.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/providers/app_providers.dart';
+import 'package:openvine/screens/inbox/conversation/conversation_page.dart';
 import 'package:openvine/services/content_moderation_service.dart';
 import 'package:openvine/utils/pause_aware_modals.dart';
 import 'package:unified_logger/unified_logger.dart';
@@ -170,6 +173,7 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
   final ScrollController _scrollController = ScrollController();
   bool _isSubmitting = false;
   bool _submitted = false;
+  bool _moderationDmFailed = false;
   String? _errorMessage;
   bool _scrollWhenKeyboardOpens = false;
   double _previousViewInsetsBottom = 0;
@@ -234,7 +238,26 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
   @override
   Widget build(BuildContext context) {
     if (_submitted) {
-      return _ReportConfirmationView(isFromShareMenu: widget.isFromShareMenu);
+      final currentPubkey = ref.read(authServiceProvider).currentPublicKeyHex;
+      final moderationPubkey = ref
+          .read(moderationLabelServiceProvider)
+          .divineModerationPubkeyHex;
+      // The moderation conversation is an ordinary NIP-17 thread; deep-link
+      // straight to it so the user can follow up about their report. Null
+      // when we have no current pubkey (signed out) — the button hides.
+      final moderationConversationId =
+          (currentPubkey != null && currentPubkey.isNotEmpty)
+          ? DmRepository.computeConversationId([
+              currentPubkey,
+              moderationPubkey,
+            ])
+          : null;
+      return _ReportConfirmationView(
+        isFromShareMenu: widget.isFromShareMenu,
+        moderationDmFailed: _moderationDmFailed,
+        moderationPubkey: moderationPubkey,
+        moderationConversationId: moderationConversationId,
+      );
     }
 
     final l10n = context.l10n;
@@ -414,6 +437,7 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
           // Send DM to moderation team with report details (TC-025/026)
           final dmRepo = ref.read(dmRepositoryProvider);
           final labelService = ref.read(moderationLabelServiceProvider);
+          var moderationDmFailed = false;
           try {
             await dmRepo.sendMessage(
               recipientPubkey: labelService.divineModerationPubkeyHex,
@@ -422,8 +446,17 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
                 eventId: _eventId,
                 details: _detailsController.text.trim(),
               ),
+              // Moderation reports carry user identity + reported content;
+              // never let them degrade to a metadata-leaking NIP-04
+              // plaintext duplicate. NIP-17 gift wrap only.
+              skipNip04Fallback: true,
             );
           } catch (e) {
+            // The report itself already succeeded (relay + Zendesk); the
+            // moderation DM is a secondary notification. Don't fail the
+            // flow, but surface the outcome instead of swallowing it so
+            // the user isn't told the team was reached when it wasn't.
+            moderationDmFailed = true;
             Log.warning(
               'Failed to send moderation DM: $e',
               name: 'ReportContentDialog',
@@ -432,7 +465,10 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
           }
 
           if (mounted) {
-            setState(() => _submitted = true);
+            setState(() {
+              _submitted = true;
+              _moderationDmFailed = moderationDmFailed;
+            });
             final controller = widget.draggableController;
             if (controller != null && controller.isAttached) {
               controller.animateTo(
@@ -494,9 +530,28 @@ class _ReportContentDialogState extends ConsumerState<ReportContentDialog> {
 // =============================================================================
 
 class _ReportConfirmationView extends StatelessWidget {
-  const _ReportConfirmationView({required this.isFromShareMenu});
+  const _ReportConfirmationView({
+    required this.isFromShareMenu,
+    required this.moderationDmFailed,
+    required this.moderationPubkey,
+    required this.moderationConversationId,
+  });
 
   final bool isFromShareMenu;
+
+  /// Whether the secondary NIP-17 DM to the moderation team failed to
+  /// send. The report itself still succeeded; this only drives a calm
+  /// informational notice so the user isn't misled.
+  final bool moderationDmFailed;
+
+  /// The Divine moderation account pubkey, passed to the conversation
+  /// route so it can render the thread.
+  final String moderationPubkey;
+
+  /// The 1:1 conversation id between the current user and the moderation
+  /// account. Null when signed out — the "Message the moderation team"
+  /// affordance is hidden in that case.
+  final String? moderationConversationId;
 
   @override
   Widget build(BuildContext context) {
@@ -530,6 +585,13 @@ class _ReportConfirmationView extends StatelessWidget {
             l10n.reportReceivedReviewNotice,
             style: VineTheme.bodyMediumFont(color: VineTheme.onSurfaceMuted),
           ),
+          if (moderationDmFailed) ...[
+            const SizedBox(height: 12),
+            Text(
+              l10n.reportModerationDmDelayed,
+              style: VineTheme.bodySmallFont(color: VineTheme.onSurfaceMuted),
+            ),
+          ],
           const SizedBox(height: 8),
           GestureDetector(
             onTap: () async {
@@ -556,6 +618,28 @@ class _ReportConfirmationView extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
+          if (moderationConversationId case final conversationId?) ...[
+            DivineButton(
+              label: l10n.reportContactModeration,
+              type: DivineButtonType.secondary,
+              expanded: true,
+              onPressed: () {
+                // Capture the router before popping the sheet so the push
+                // doesn't run against a defunct context.
+                final router = GoRouter.of(context);
+                final navigator = Navigator.of(context);
+                navigator.pop();
+                if (isFromShareMenu) {
+                  navigator.pop();
+                }
+                router.push(
+                  ConversationPage.pathForId(conversationId),
+                  extra: [moderationPubkey],
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
           DivineButton(
             label: l10n.reportClose,
             expanded: true,

@@ -4718,6 +4718,13 @@ class AppLocalizationsNl extends AppLocalizations {
       'Ons team bekijkt je melding en onderneemt passende actie. Je kunt updates ontvangen via directe berichten.';
 
   @override
+  String get reportModerationDmDelayed =>
+      'We couldn\'t reach the moderation team directly just now, but your report was received and will be reviewed.';
+
+  @override
+  String get reportContactModeration => 'Message the moderation team';
+
+  @override
   String get reportLearnMore => 'Meer info';
 
   @override
