@@ -1057,6 +1057,122 @@ void main() {
           },
         );
 
+        test(
+          'keeps relay archival tags separate from bulk live engagement stats',
+          () async {
+            when(
+              () => mockFunnelcakeClient.getRecentVideos(
+                limit: any(named: 'limit'),
+                before: any(named: 'before'),
+              ),
+            ).thenThrow(const FunnelcakeException('Network error'));
+
+            final relayEvent = _createVideoEvent(
+              id: 'relay-event',
+              pubkey: 'author',
+              videoUrl: 'https://example.com/relay.mp4',
+              createdAt: 1704067200,
+              extraTags: const [
+                ['likes', '273622'],
+                ['comments', '6023'],
+                ['reposts', '122059'],
+              ],
+            );
+            when(
+              () => mockNostrClient.queryEvents(any()),
+            ).thenAnswer((_) async => [relayEvent]);
+            when(
+              () => mockFunnelcakeClient.getBulkVideoStats(['relay-event']),
+            ).thenAnswer(
+              (_) async => const BulkVideoStatsResponse(
+                stats: {
+                  'relay-event': BulkVideoStatsEntry(
+                    eventId: 'relay-event',
+                    reactions: 5,
+                    comments: 2,
+                    reposts: 3,
+                    views: 11,
+                  ),
+                },
+              ),
+            );
+
+            final result = await repositoryWithApi.getNewVideos();
+
+            expect(result, hasLength(1));
+            expect(result.first.originalLikes, equals(273622));
+            expect(result.first.nostrLikeCount, equals(5));
+            expect(result.first.totalLikes, equals(273627));
+            expect(result.first.originalComments, equals(6023));
+            expect(result.first.nostrCommentCount, equals(2));
+            expect(result.first.originalReposts, equals(122059));
+            expect(result.first.nostrRepostCount, equals(3));
+          },
+        );
+
+        test(
+          'does not double count REST stats when bulk hydration also returns '
+          'them',
+          () async {
+            when(
+              () => mockFunnelcakeClient.getRecentVideos(
+                limit: any(named: 'limit'),
+                before: any(named: 'before'),
+              ),
+            ).thenAnswer(
+              (_) async => [
+                _createVideoStats(
+                  id: 'event-1',
+                  pubkey: 'author',
+                  dTag: 'dtag-1',
+                  videoUrl: 'https://example.com/video.mp4',
+                  reactions: 2,
+                  comments: 1,
+                ),
+              ],
+            );
+            when(
+              () => mockFunnelcakeClient.getBulkVideoStats(['event-1']),
+            ).thenAnswer(
+              (_) async => const BulkVideoStatsResponse(
+                stats: {
+                  'event-1': BulkVideoStatsEntry(
+                    eventId: 'event-1',
+                    reactions: 2,
+                    comments: 1,
+                    reposts: 0,
+                    views: 14,
+                  ),
+                },
+              ),
+            );
+
+            final result = await repositoryWithApi.getNewVideos();
+
+            expect(result, hasLength(1));
+            expect(result.first.originalLikes, isNull);
+            expect(result.first.nostrLikeCount, equals(2));
+            expect(result.first.totalLikes, equals(2));
+            expect(result.first.originalComments, isNull);
+            expect(result.first.nostrCommentCount, equals(1));
+            expect(
+              (result.first.originalComments ?? 0) +
+                  (result.first.nostrCommentCount ?? 0),
+              equals(1),
+            );
+            expect(result.first.originalReposts, isNull);
+            expect(result.first.nostrRepostCount, equals(0));
+            expect(
+              (result.first.originalReposts ?? 0) +
+                  (result.first.nostrRepostCount ?? 0),
+              equals(0),
+            );
+            verify(
+              () => mockFunnelcakeClient.getBulkVideoStats(['event-1']),
+            ).called(1);
+          },
+        );
+
         test('caches the hydrated videos, not the un-hydrated ones', () async {
           final feedCache = InMemoryFeedCache();
           final repoWithCache = VideosRepository(
@@ -4428,10 +4544,12 @@ void main() {
             );
 
             expect(videos, hasLength(1));
-            expect(videos.single.originalLikes, equals(21));
-            expect(videos.single.originalComments, equals(5));
-            expect(videos.single.originalReposts, equals(8));
-            expect(videos.single.nostrLikeCount, equals(0));
+            expect(videos.single.originalLikes, isNull);
+            expect(videos.single.originalComments, isNull);
+            expect(videos.single.originalReposts, isNull);
+            expect(videos.single.nostrLikeCount, equals(21));
+            expect(videos.single.nostrCommentCount, equals(5));
+            expect(videos.single.nostrRepostCount, equals(8));
             expect(videos.single.totalLikes, equals(21));
             verify(
               () => mockFunnelcakeClient.getBulkVideoStats(['leaderboard-1']),
@@ -4754,10 +4872,12 @@ void main() {
             );
 
             expect(result, hasLength(1));
-            expect(result.single.originalLikes, equals(12));
-            expect(result.single.originalComments, equals(3));
-            expect(result.single.originalReposts, equals(4));
-            expect(result.single.nostrLikeCount, equals(0));
+            expect(result.single.originalLikes, isNull);
+            expect(result.single.originalComments, isNull);
+            expect(result.single.originalReposts, isNull);
+            expect(result.single.nostrLikeCount, equals(12));
+            expect(result.single.nostrCommentCount, equals(3));
+            expect(result.single.nostrRepostCount, equals(4));
             expect(result.single.totalLikes, equals(12));
             verify(
               () => mockFunnelcakeClient.getBulkVideoStats([
@@ -8404,10 +8524,12 @@ void main() {
           expect(result, isNotNull);
           expect(result!.originalLoops, equals(42));
           expect(result.rawTags['views'], equals('100'));
-          expect(result.originalLikes, equals(7));
-          expect(result.originalComments, equals(5));
-          expect(result.originalReposts, equals(3));
-          expect(result.nostrLikeCount, equals(0));
+          expect(result.originalLikes, isNull);
+          expect(result.originalComments, isNull);
+          expect(result.originalReposts, isNull);
+          expect(result.nostrLikeCount, equals(7));
+          expect(result.nostrCommentCount, equals(5));
+          expect(result.nostrRepostCount, equals(3));
         },
       );
 
@@ -10424,6 +10546,9 @@ VideoStats _createVideoStats({
   String thumbnail = 'https://example.com/thumb.jpg',
   int? loops,
   int? views,
+  int reactions = 0,
+  int comments = 0,
+  int reposts = 0,
   Map<String, String> rawTags = const {},
   List<String> moderationLabels = const [],
   List<String> collaboratorPubkeys = const [],
@@ -10437,9 +10562,9 @@ VideoStats _createVideoStats({
     title: title,
     thumbnail: thumbnail,
     videoUrl: videoUrl,
-    reactions: 0,
-    comments: 0,
-    reposts: 0,
+    reactions: reactions,
+    comments: comments,
+    reposts: reposts,
     engagementScore: 0,
     loops: loops,
     views: views,
