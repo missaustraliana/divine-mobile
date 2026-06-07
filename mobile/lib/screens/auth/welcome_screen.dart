@@ -279,6 +279,9 @@ class _ReturningUserLayout extends StatelessWidget {
   Widget build(BuildContext context) {
     final account = state.selectedAccount;
     if (account == null) return const SizedBox.shrink();
+    final displayName =
+        account.profile?.bestDisplayName ??
+        UserProfile.defaultDisplayNameFor(account.pubkeyHex);
 
     return CustomScrollView(
       slivers: [
@@ -308,9 +311,13 @@ class _ReturningUserLayout extends StatelessWidget {
                 const SizedBox(height: 16),
               ],
 
+              const _TermsNotice(),
+
+              const SizedBox(height: 20),
+
               // Sign back in button (primary)
               DivineButton(
-                label: context.l10n.authSignBackIn,
+                label: context.l10n.authContinueAs(displayName),
                 isLoading: isLoading,
                 expanded: true,
                 onPressed: () => context.read<WelcomeBloc>().add(
@@ -322,7 +329,7 @@ class _ReturningUserLayout extends StatelessWidget {
 
               // Login with different account (secondary)
               DivineButton(
-                label: context.l10n.authSignInDifferentAccount,
+                label: context.l10n.authUseAnotherAccount,
                 expanded: true,
                 type: .secondary,
                 onPressed: isLoading
@@ -336,7 +343,7 @@ class _ReturningUserLayout extends StatelessWidget {
 
               // Create new account (tertiary)
               DivineButton(
-                label: context.l10n.authCreateNewAccount,
+                label: context.l10n.authCreateNewAccountShort,
                 expanded: true,
                 type: .secondary,
                 onPressed: isLoading
@@ -345,10 +352,6 @@ class _ReturningUserLayout extends StatelessWidget {
                         const WelcomeCreateAccountRequested(),
                       ),
               ),
-
-              const SizedBox(height: 20),
-
-              const _TermsNotice(),
 
               const SizedBox(height: 32),
             ],

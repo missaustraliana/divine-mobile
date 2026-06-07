@@ -17,6 +17,7 @@ import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/environment_provider.dart';
 import 'package:openvine/providers/nostr_client_provider.dart';
+import 'package:openvine/screens/auth/welcome_screen.dart';
 import 'package:openvine/screens/blossom_settings_screen.dart';
 import 'package:openvine/screens/developer_options_screen.dart';
 import 'package:openvine/screens/key_management_screen.dart';
@@ -164,14 +165,10 @@ class _RemoveKeysTile extends StatelessWidget {
       onConfirm: () async {
         if (!context.mounted) return;
 
+        final progressOverlay = _ProgressOverlay.show(context);
+
         unawaited(
-          showDialog<void>(
-            context: context,
-            barrierDismissible: false,
-            builder: (context) => const Center(
-              child: CircularProgressIndicator(color: VineTheme.vineGreen),
-            ),
-          ),
+          progressOverlay.closed,
         );
 
         try {
@@ -179,11 +176,18 @@ class _RemoveKeysTile extends StatelessWidget {
             deleteKeys: true,
             abortOnKeyDeletionFailure: true,
           );
+          final hasRemainingAccounts =
+              (await authService.getKnownAccounts()).isNotEmpty;
+          progressOverlay.dismiss();
+          if (!context.mounted) return;
+          if (!hasRemainingAccounts) {
+            GoRouter.maybeOf(context)?.go(WelcomeScreen.path);
+          }
         } on SecureKeyStorageException {
+          progressOverlay.dismiss();
           // Platform key deletion failed — user stays signed in and can
           // retry without having to log back in.
           if (!context.mounted) return;
-          context.pop();
 
           if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -194,8 +198,8 @@ class _RemoveKeysTile extends StatelessWidget {
           );
           return;
         } catch (e) {
+          progressOverlay.dismiss();
           if (!context.mounted) return;
-          context.pop();
 
           if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -207,6 +211,44 @@ class _RemoveKeysTile extends StatelessWidget {
         }
       },
     );
+  }
+}
+
+class _ProgressOverlay {
+  _ProgressOverlay._(
+    this._navigator, {
+    required this.route,
+    required this.closed,
+  });
+
+  final NavigatorState _navigator;
+  final Route<void> route;
+  final Future<void> closed;
+  bool _dismissed = false;
+
+  static _ProgressOverlay show(BuildContext context) {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    late final DialogRoute<void> route;
+    route = DialogRoute<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(color: VineTheme.vineGreen),
+      ),
+    );
+
+    final closed = navigator.push(route);
+    return _ProgressOverlay._(
+      navigator,
+      route: route,
+      closed: closed,
+    );
+  }
+
+  void dismiss() {
+    if (_dismissed || !_navigator.mounted || !route.isActive) return;
+    _dismissed = true;
+    _navigator.removeRoute(route);
   }
 }
 

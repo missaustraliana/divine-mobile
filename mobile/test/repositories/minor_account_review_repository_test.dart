@@ -58,6 +58,28 @@ void main() {
       expect(result.currentCase, isNull);
     });
 
+    test('rethrows when endpoint request has no HTTP status', () async {
+      when(() => apiService.getMinorAccountReviewStatus()).thenThrow(
+        const ApiException('Network error during moderation status request'),
+      );
+
+      await expectLater(
+        repository.fetchCurrentStatus(),
+        throwsA(isA<ApiException>()),
+      );
+    });
+
+    test('keeps HTTP server failures visible', () async {
+      when(() => apiService.getMinorAccountReviewStatus()).thenThrow(
+        const ApiException('server error', statusCode: 500),
+      );
+
+      await expectLater(
+        repository.fetchCurrentStatus(),
+        throwsA(isA<ApiException>()),
+      );
+    });
+
     test('submits parent contact through api service', () async {
       when(
         () => apiService.submitMinorAccountReviewParentContact(
