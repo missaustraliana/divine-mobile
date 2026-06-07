@@ -114,6 +114,15 @@ void main() {
       when(
         () => mockCleanupService.claimLegacyRows(any()),
       ).thenAnswer((_) async {});
+      when(
+        () => mockKeyStorage.deleteIdentityKeyContainer(
+          any(),
+          biometricPrompt: any(named: 'biometricPrompt'),
+        ),
+      ).thenAnswer((_) async {});
+      when(
+        () => mockKeyStorage.getKeyContainer(),
+      ).thenAnswer((_) async => null);
     });
 
     test('signOut should clear current_user_pubkey_hex', () async {
