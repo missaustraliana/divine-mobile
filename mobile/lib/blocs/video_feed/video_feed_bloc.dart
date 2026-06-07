@@ -373,6 +373,12 @@ class VideoFeedBloc extends Bloc<VideoFeedEvent, VideoFeedBlocState> {
       return;
     }
 
+    if (state.source.type == VideoFeedSourceType.forYou &&
+        state.paginationCursor == null) {
+      emit(state.copyWith(hasMore: false));
+      return;
+    }
+
     emit(state.copyWith(isLoadingMore: true));
 
     try {
@@ -383,9 +389,15 @@ class VideoFeedBloc extends Bloc<VideoFeedEvent, VideoFeedBlocState> {
       final oldestCreatedAt = state.videos
           .map((v) => v.createdAt)
           .reduce((a, b) => a < b ? a : b);
-      final cursor = oldestCreatedAt - 1;
+      final until = oldestCreatedAt - 1;
 
-      final result = await _fetchVideosForSource(state.source, until: cursor);
+      final result = await _fetchVideosForSource(
+        state.source,
+        until: state.source.type == VideoFeedSourceType.forYou ? null : until,
+        paginationCursor: state.source.type == VideoFeedSourceType.forYou
+            ? state.paginationCursor
+            : null,
+      );
 
       // Filter out videos without valid URLs
       final validNewVideos = result.videos
@@ -422,10 +434,16 @@ class VideoFeedBloc extends Bloc<VideoFeedEvent, VideoFeedBlocState> {
           videos: updatedVideos,
           // Only stop pagination when the server returns nothing.
           // Fewer than _pageSize can happen due to server-side filtering.
-          hasMore: result.videos.isNotEmpty,
+          hasMore: _hasMoreForSource(
+            state.source,
+            result,
+            fallbackHasMore: result.videos.isNotEmpty,
+          ),
           isLoadingMore: false,
           videoListSources: mergedSources,
           listOnlyVideoIds: mergedListOnly,
+          paginationCursor: result.paginationCursor,
+          clearPaginationCursor: result.paginationCursor == null,
         ),
       );
 
@@ -641,6 +659,7 @@ class VideoFeedBloc extends Bloc<VideoFeedEvent, VideoFeedBlocState> {
               status: VideoFeedStatus.success,
               videos: cachedValid,
               hasMore: true,
+              clearPaginationCursor: true,
               clearError: true,
             ),
           );
@@ -672,12 +691,18 @@ class VideoFeedBloc extends Bloc<VideoFeedEvent, VideoFeedBlocState> {
           videos: validVideos,
           // Only stop pagination when no results at all.
           // Fewer than _pageSize can happen due to server-side filtering.
-          hasMore:
-              source.type != VideoFeedSourceType.subscribedList &&
-              validVideos.isNotEmpty,
+          hasMore: _hasMoreForSource(
+            source,
+            result,
+            fallbackHasMore:
+                source.type != VideoFeedSourceType.subscribedList &&
+                validVideos.isNotEmpty,
+          ),
           clearError: true,
           videoListSources: result.videoListSources,
           listOnlyVideoIds: result.listOnlyVideoIds,
+          paginationCursor: result.paginationCursor,
+          clearPaginationCursor: result.paginationCursor == null,
         ),
       );
 
@@ -719,6 +744,19 @@ class VideoFeedBloc extends Bloc<VideoFeedEvent, VideoFeedBlocState> {
     }
   }
 
+  bool _hasMoreForSource(
+    VideoFeedSource source,
+    HomeFeedResult result, {
+    required bool fallbackHasMore,
+  }) {
+    final upstreamHasMore = result.hasMore ?? fallbackHasMore;
+    if (source.type != VideoFeedSourceType.forYou) {
+      return upstreamHasMore;
+    }
+
+    return upstreamHasMore && result.paginationCursor != null;
+  }
+
   /// Fetch videos for a specific mode from the repository.
   ///
   /// Returns [HomeFeedResult] for all modes. For home/forYou, includes
@@ -732,13 +770,21 @@ class VideoFeedBloc extends Bloc<VideoFeedEvent, VideoFeedBlocState> {
   Future<HomeFeedResult> _fetchVideosForSource(
     VideoFeedSource source, {
     int? until,
+    String? paginationCursor,
     bool skipCache = false,
   }) => switch (source.type) {
-    VideoFeedSourceType.forYou => _videosRepository.getRecommendedVideos(
-      userPubkey: _userPubkey,
-      until: until,
-      skipCache: skipCache,
-    ),
+    VideoFeedSourceType.forYou =>
+      paginationCursor == null
+          ? _videosRepository.getRecommendedVideos(
+              userPubkey: _userPubkey,
+              until: until,
+              skipCache: skipCache,
+            )
+          : _videosRepository.getRecommendedVideos(
+              userPubkey: _userPubkey,
+              cursor: paginationCursor,
+              skipCache: skipCache,
+            ),
     VideoFeedSourceType.following => _videosRepository.getHomeFeedVideos(
       authors: _followRepository.followingPubkeys,
       userPubkey: _userPubkey,
