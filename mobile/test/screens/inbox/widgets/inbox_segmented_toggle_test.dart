@@ -2,6 +2,7 @@
 // ABOUTME: Tests rendering of labels, notification badge, and tap interactions.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/screens/inbox/widgets/inbox_segmented_toggle.dart';
@@ -102,6 +103,37 @@ void main() {
 
         expect(find.text('99+'), findsOneWidget);
         expect(find.text('150'), findsNothing);
+      });
+
+      testWidgets('limits localized labels to one line with ellipsis', (
+        tester,
+      ) async {
+        final l10n = lookupAppLocalizations(const Locale('de'));
+
+        await tester.pumpWidget(
+          MaterialApp(
+            locale: const Locale('de'),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 180,
+                  child: InboxSegmentedToggle(
+                    selected: InboxTab.messages,
+                    onChanged: (_) {},
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        final notificationsLabel = tester.renderObject<RenderParagraph>(
+          find.text(l10n.settingsNotifications),
+        );
+        expect(notificationsLabel.didExceedMaxLines, isTrue);
       });
     });
 
