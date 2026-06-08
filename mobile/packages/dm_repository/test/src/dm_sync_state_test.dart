@@ -115,5 +115,92 @@ void main() {
         expect(prefs.getString('unrelated_key'), equals('keep_me'));
       },
     );
+
+    group('historyDrainComplete', () {
+      test('defaults to false when nothing persisted', () {
+        expect(state.historyDrainComplete(pkA), isFalse);
+      });
+
+      test('markHistoryDrainComplete flips the flag to true', () async {
+        await state.markHistoryDrainComplete(pkA);
+
+        expect(state.historyDrainComplete(pkA), isTrue);
+      });
+
+      test('is scoped per pubkey', () async {
+        await state.markHistoryDrainComplete(pkA);
+
+        expect(state.historyDrainComplete(pkA), isTrue);
+        expect(state.historyDrainComplete(pkB), isFalse);
+      });
+
+      test('clear re-arms the drain for the given pubkey only', () async {
+        await state.markHistoryDrainComplete(pkA);
+        await state.markHistoryDrainComplete(pkB);
+
+        await state.clear(pkA);
+
+        expect(state.historyDrainComplete(pkA), isFalse);
+        expect(state.historyDrainComplete(pkB), isTrue);
+      });
+
+      test('clearAll re-arms the drain for every pubkey', () async {
+        await state.markHistoryDrainComplete(pkA);
+        await state.markHistoryDrainComplete(pkB);
+
+        await state.clearAll();
+
+        expect(state.historyDrainComplete(pkA), isFalse);
+        expect(state.historyDrainComplete(pkB), isFalse);
+      });
+    });
+
+    group('historyDrainCursor', () {
+      test('defaults to null when nothing persisted', () {
+        expect(state.historyDrainCursor(pkA), isNull);
+      });
+
+      test('setHistoryDrainCursor round-trips the value', () async {
+        await state.setHistoryDrainCursor(pkA, 1699000000);
+
+        expect(state.historyDrainCursor(pkA), equals(1699000000));
+      });
+
+      test('is scoped per pubkey', () async {
+        await state.setHistoryDrainCursor(pkA, 1000);
+
+        expect(state.historyDrainCursor(pkA), equals(1000));
+        expect(state.historyDrainCursor(pkB), isNull);
+      });
+
+      test('markHistoryDrainComplete clears the cursor', () async {
+        await state.setHistoryDrainCursor(pkA, 1000);
+
+        await state.markHistoryDrainComplete(pkA);
+
+        expect(state.historyDrainCursor(pkA), isNull);
+        expect(state.historyDrainComplete(pkA), isTrue);
+      });
+
+      test('clear removes the cursor for the given pubkey only', () async {
+        await state.setHistoryDrainCursor(pkA, 1000);
+        await state.setHistoryDrainCursor(pkB, 2000);
+
+        await state.clear(pkA);
+
+        expect(state.historyDrainCursor(pkA), isNull);
+        expect(state.historyDrainCursor(pkB), equals(2000));
+      });
+
+      test('clearAll removes the cursor for every pubkey', () async {
+        await state.setHistoryDrainCursor(pkA, 1000);
+        await state.setHistoryDrainCursor(pkB, 2000);
+
+        await state.clearAll();
+
+        expect(state.historyDrainCursor(pkA), isNull);
+        expect(state.historyDrainCursor(pkB), isNull);
+      });
+    });
   });
 }

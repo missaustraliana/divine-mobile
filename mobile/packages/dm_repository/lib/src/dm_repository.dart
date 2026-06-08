@@ -67,6 +67,24 @@ const Set<int> _supportedDmKinds = {
   EventKind.fileMessage, // 15
 };
 
+/// Tuning for the one-time full-history drain
+/// (`DmRepository.backfillHistoryIfNeeded`).
+///
+/// The drain pages relays newest→oldest until the relay runs out of
+/// events or [maxPages] is reached, whichever comes first. The cap is a
+/// safety valve for pathological histories: because the drain walks
+/// newest-first and a conversation appears as soon as *any* of its
+/// messages is persisted, the most-recent [maxPages] × [pageSize] window
+/// already contains the latest message of essentially every active
+/// conversation.
+abstract class DmHistoryDrainConfig {
+  /// Events requested per relay page.
+  static const int pageSize = 100;
+
+  /// Maximum pages fetched in a single drain (≈ [pageSize] × this events).
+  static const int maxPages = 50;
+}
+
 const _relayLoopbackHosts = <String>{
   'localhost',
   '127.0.0.1',
@@ -173,6 +191,11 @@ class DmRepository {
   /// emitting stale denormalized previews before repairs land.
   Future<void>? _postAuthMaintenance;
 
+  /// The in-flight one-time history drain, shared by concurrent callers so
+  /// repeated [backfillHistoryIfNeeded] calls (e.g. every inbox open) never
+  /// launch overlapping drains. Cleared when the drain settles.
+  Future<void>? _historyDrain;
+
   /// User-scoped subscription ID to prevent collision when the provider
   /// rebuilds during auth transitions (old unsubscribe won't kill new sub).
   String _subscriptionId = 'dm_inbox';
@@ -243,6 +266,9 @@ class DmRepository {
   void _resetState() {
     _disposed = true;
     _eventLock = null;
+    // Drop the in-flight history drain so the next user can start a fresh
+    // one; the running loop bails on the _userPubkey change.
+    _historyDrain = null;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     unawaited(_giftWrapSubscription?.cancel());
@@ -374,41 +400,185 @@ class DmRepository {
     // isolate. See docs/plans/2026-04-05-dm-scaling-fix-design.md and #2931.
   }
 
-  /// Fetches an older page of DM events (gift wraps, NIP-04, deletions)
-  /// from the relay, bounded above by [DmSyncState.oldestSyncedAt]. The
-  /// filter uses `until:` so the relay returns events *older* than the
-  /// current pagination boundary, capped to 50 by `limit`.
-  ///
-  /// No-op if [DmSyncState] is unset or no sync has happened yet — in
-  /// that case the caller should invoke [startListening] instead to
-  /// establish a baseline.
-  ///
-  /// Events flow through [_handleIncomingEvent] so dedup, transaction
-  /// integrity, and sync-boundary tracking apply automatically.
-  Future<void> loadOlderMessages() async {
-    if (!isInitialized) return;
-    final oldest = _syncState?.oldestSyncedAt(_userPubkey);
-    if (oldest == null) return;
-
+  /// Fetches a single older page of DM events (gift wraps, NIP-04,
+  /// deletions) addressed to [pubkey] from the relay older than [until]
+  /// (inclusive), capped to [limit]. Each event flows through
+  /// [_handleIncomingEvent] so dedup, transaction integrity, and
+  /// sync-boundary tracking apply automatically. Returns the raw events so
+  /// the caller can advance its own pagination cursor by their outer
+  /// `created_at`, or `null` if the user switched / the repository was torn
+  /// down mid-fetch (so the caller stops paging for the stale user).
+  Future<List<Event>?> _fetchHistoryPage({
+    required int until,
+    required int limit,
+    required String subscriptionId,
+    required String pubkey,
+  }) async {
     final filter = nostr_filter.Filter(
       kinds: [
         EventKind.giftWrap,
         EventKind.directMessage,
         EventKind.eventDeletion,
       ],
-      p: [_userPubkey],
-      until: oldest,
-      limit: 50,
+      p: [pubkey],
+      until: until,
+      limit: limit,
     );
 
     final events = await _nostrClient.queryEvents(
       [filter],
-      subscriptionId: 'dm_older_${DateTime.now().millisecondsSinceEpoch}',
+      subscriptionId: subscriptionId,
       useCache: false,
     );
+    if (_disposed || _userPubkey != pubkey) return null;
 
     for (final event in events) {
+      if (_disposed || _userPubkey != pubkey) return null;
       await _handleIncomingEvent(event);
+    }
+    return events;
+  }
+
+  /// Recovers the user's full DM history from relays once per install.
+  ///
+  /// On reinstall the local DB and [DmSyncState] are wiped, so the live
+  /// subscription's bounded first-open window (`limit:50`) only persists
+  /// the most-recent conversations; the rest are absent from the
+  /// conversation list (a pure local-DB projection) with no UI path to
+  /// recover them. This drains older pages newest→oldest until the relay
+  /// is exhausted (or [DmHistoryDrainConfig.maxPages] is reached),
+  /// backfilling every conversation that still has events on a relay.
+  /// See #4953.
+  ///
+  /// Idempotent and resumable: returns immediately once a clean drain has
+  /// completed for the user ([DmSyncState.historyDrainComplete]); an
+  /// interrupted drain resumes from the persisted boundary on the next
+  /// call. Concurrent callers share one in-flight run. Runs in the
+  /// background — per-event decryption already offloads to a [compute]
+  /// isolate — so it is safe to fire-and-forget from the inbox BLoC on
+  /// every open.
+  Future<void> backfillHistoryIfNeeded() {
+    final existing = _historyDrain;
+    if (existing != null) return existing;
+    final drain = _runHistoryDrain();
+    _historyDrain = drain;
+    unawaited(
+      drain.whenComplete(() {
+        if (identical(_historyDrain, drain)) _historyDrain = null;
+      }),
+    );
+    return drain;
+  }
+
+  Future<void> _runHistoryDrain() async {
+    if (!isInitialized) return;
+    final syncState = _syncState;
+    if (syncState == null) return;
+    // Pin the user for the whole drain so an account switch mid-drain can
+    // never mark the wrong pubkey complete or query for the new user.
+    final pubkey = _userPubkey;
+    if (syncState.historyDrainComplete(pubkey)) {
+      Log.info(
+        'DM history drain skipped for $pubkey: already complete',
+        category: LogCategory.system,
+      );
+      return;
+    }
+
+    Log.info(
+      'DM history drain starting for $pubkey '
+      '(connected relays ${_nostrClient.connectedRelayCount}/'
+      '${_nostrClient.configuredRelayCount})',
+      category: LogCategory.system,
+    );
+
+    try {
+      // The relay filters `until:` on the OUTER gift-wrap created_at, which
+      // NIP-59 randomizes up to 2 days into the past — so the cursor tracks
+      // fetched events' outer timestamps, NOT the rumor times recorded in
+      // oldestSyncedAt. Resume from the persisted drain cursor when an
+      // earlier run was interrupted or page-capped; otherwise seed below
+      // the live subscription's discovered boundary (oldestSyncedAt); else
+      // now.
+      var cursor =
+          syncState.historyDrainCursor(pubkey) ??
+          syncState.oldestSyncedAt(pubkey) ??
+          DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+      var reachedEnd = false;
+      var pagesRun = 0;
+      var totalEvents = 0;
+      for (var page = 0; page < DmHistoryDrainConfig.maxPages; page++) {
+        // Bail if the user switched or the repository was torn down.
+        if (_disposed || _userPubkey != pubkey) return;
+        final events = await _fetchHistoryPage(
+          until: cursor,
+          limit: DmHistoryDrainConfig.pageSize,
+          subscriptionId: 'dm_drain_${pubkey}_$page',
+          pubkey: pubkey,
+        );
+        if (events == null) return;
+        pagesRun++;
+        totalEvents += events.length;
+        if (events.isEmpty) {
+          reachedEnd = true;
+          break;
+        }
+
+        // Step strictly below the oldest event seen so the loop always
+        // makes progress. `until` is inclusive, so re-requesting the
+        // boundary on a saturated page is absorbed by hasGiftWrap dedup
+        // rather than lost.
+        final minCreatedAt = events
+            .map((event) => event.createdAt)
+            .reduce((a, b) => a < b ? a : b);
+        cursor = minCreatedAt < cursor ? minCreatedAt : cursor - 1;
+        if (cursor <= 0) {
+          reachedEnd = true;
+          break;
+        }
+        // Persist the boundary so an interrupted or page-capped run
+        // resumes from here on the next inbox open rather than restarting
+        // from the top.
+        await syncState.setHistoryDrainCursor(pubkey, cursor);
+      }
+
+      if (reachedEnd) {
+        await syncState.markHistoryDrainComplete(pubkey);
+        Log.info(
+          'DM history drain complete for $pubkey: '
+          'pages=$pagesRun, eventsFetched=$totalEvents',
+          category: LogCategory.system,
+        );
+      } else {
+        // Page cap hit: leave historyDrainComplete unset and the cursor
+        // persisted so the next inbox open resumes the remaining history
+        // instead of permanently truncating it for heavy users. See #4953.
+        Log.warning(
+          'DM history drain paused at the page cap '
+          '(${DmHistoryDrainConfig.maxPages}) for $pubkey after '
+          '$totalEvents events; will resume from the persisted cursor '
+          '($cursor) on the next inbox open.',
+          category: LogCategory.system,
+        );
+      }
+    } on Object catch (e, stackTrace) {
+      // Relay/IO failures are expected on flaky networks and are NOT
+      // reportable (see error_handling.md). Leaving historyDrainComplete
+      // unset lets the next inbox open resume the drain.
+      Log.error(
+        'DM history drain failed (will resume on next inbox open): $e',
+        category: LogCategory.system,
+        error: e,
+        stackTrace: stackTrace,
+      );
+      if (e is StateError || e is TypeError || e is RangeError) {
+        _errorReporter?.call(
+          e,
+          stackTrace,
+          site: DmRepositoryReportableSites.historyDrainUnexpectedFailure,
+        );
+      }
     }
   }
 
