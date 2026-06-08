@@ -119,6 +119,16 @@ class FeedVideosState extends ConsumerState<FeedVideos> with RouteAware {
   Future<void> animateToPage(int index) =>
       _feedKey.currentState?.animateToPage(index) ?? Future.value();
 
+  Future<bool> _retryPooledVideoAt(
+    int index,
+    Map<String, String> httpHeaders,
+  ) =>
+      _feedKey.currentState?.retryAt(
+        index,
+        httpHeaders: httpHeaders,
+      ) ??
+      Future.value(false);
+
   @override
   void didUpdateWidget(covariant FeedVideos oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -207,11 +217,26 @@ class FeedVideosState extends ConsumerState<FeedVideos> with RouteAware {
   @override
   Widget build(BuildContext context) {
     final isFeedActive = widget.isActive && _routeAllowsPlayback;
-    return BlocListener<VideoVolumeCubit, VideoVolumeState>(
-      // Sync volume when hardware buttons change system volume.
-      listener: (_, state) {
-        _feedKey.currentState?.setVolume(state.volume);
-      },
+    return MultiBlocListener(
+      listeners: [
+        BlocListener<VideoVolumeCubit, VideoVolumeState>(
+          // Sync volume when hardware buttons change system volume.
+          listener: (_, state) {
+            _feedKey.currentState?.setVolume(state.volume);
+          },
+        ),
+        BlocListener<VideoPlaybackStatusCubit, VideoPlaybackStatusState>(
+          listenWhen: (previous, current) => previous != current,
+          // Once a video recovers to `ready` (e.g. after age verification),
+          // forget its last reported error so a later re-error re-surfaces
+          // through the errorBuilder dedupe instead of being suppressed.
+          listener: (_, state) {
+            _lastReportedError.removeWhere(
+              (videoId, _) => state.statusFor(videoId) == PlaybackStatus.ready,
+            );
+          },
+        ),
+      ],
       child: InfiniteVideoFeed(
         key: _feedKey,
         videos: widget.videos,
@@ -301,6 +326,8 @@ class FeedVideosState extends ConsumerState<FeedVideos> with RouteAware {
               ref: ref,
               video: video,
               index: index,
+              retryPlayback: (httpHeaders) =>
+                  _retryPooledVideoAt(index, httpHeaders),
             ),
             errorType: errorType,
             shouldPortraitExpand: widget.shouldPortraitExpand,
@@ -453,6 +480,12 @@ class __OverlayState extends ConsumerState<_Overlay> {
       ref: ref,
       video: widget.video,
       index: widget.index,
+      retryPlayback: (httpHeaders) =>
+          _feedState?.retryAt(
+            widget.index,
+            httpHeaders: httpHeaders,
+          ) ??
+          Future.value(false),
     );
   }
 
@@ -850,6 +883,14 @@ class _FeedLoadingOrRestrictedOverlayView extends ConsumerWidget {
           ref: ref,
           video: video,
           index: index,
+          retryPlayback: (httpHeaders) =>
+              context
+                  .findAncestorStateOfType<InfiniteVideoFeedState>()
+                  ?.retryAt(
+                    index,
+                    httpHeaders: httpHeaders,
+                  ) ??
+              Future.value(false),
         ),
         errorType: VideoErrorType.notFound,
         shouldPortraitExpand: shouldPortraitExpand,

@@ -22,7 +22,28 @@ void main() {
       );
 
       expect(result, equals(('urlA', 0)));
+      expect(controller.lastSource?.httpHeaders, isEmpty);
       expect(logs, isEmpty);
+    });
+
+    test('passes headers for the selected source', () async {
+      final controller = FakeController();
+      addTearDown(controller.dispose);
+
+      final result = await setSourceWithFallbacks(
+        index: 0,
+        controller: controller,
+        sources: ['urlA'],
+        log: logs.add,
+        httpHeadersForSource: (source) =>
+            source == 'urlA' ? {'Authorization': 'Nostr token'} : null,
+      );
+
+      expect(result, equals(('urlA', 0)));
+      expect(
+        controller.lastSource?.httpHeaders,
+        equals({'Authorization': 'Nostr token'}),
+      );
     });
 
     test('returns (nextSource, 1) and logs when first source fails', () async {
@@ -39,6 +60,56 @@ void main() {
       expect(result, equals(('goodUrl', 1)));
       expect(logs, hasLength(1));
       expect(logs.first, contains('badUrl'));
+    });
+
+    test(
+      'applies the same headers to every source in the fallover chain',
+      () async {
+        final clips = <VideoClip>[];
+        final controller = _RecordingControllerWithOneFailure(clips.add);
+        addTearDown(controller.dispose);
+
+        const headers = {'Authorization': 'Nostr token'};
+        final result = await setSourceWithFallbacks(
+          index: 0,
+          controller: controller,
+          sources: ['optimizedUrl', 'hlsUrl'],
+          log: logs.add,
+          // Mirrors _httpHeadersByIndex: one hash-bound header set returned for
+          // every resolved source, so the fallback authenticates too.
+          httpHeadersForSource: (_) => headers,
+        );
+
+        expect(result, equals(('hlsUrl', 1)));
+        expect(clips, hasLength(2));
+        expect(clips[0].uri, 'optimizedUrl');
+        expect(clips[0].httpHeaders, equals(headers));
+        expect(clips[1].uri, 'hlsUrl');
+        expect(clips[1].httpHeaders, equals(headers));
+      },
+    );
+
+    test('uses headers returned for the successful failover source', () async {
+      final clips = <VideoClip>[];
+      final controller = _RecordingControllerWithOneFailure(clips.add);
+      addTearDown(controller.dispose);
+
+      const headers = {'Authorization': 'Nostr token'};
+      final result = await setSourceWithFallbacks(
+        index: 0,
+        controller: controller,
+        sources: ['anonymousUrl', 'authedUrl'],
+        log: logs.add,
+        httpHeadersForSource: (source) =>
+            source == 'authedUrl' ? headers : null,
+      );
+
+      expect(result, equals(('authedUrl', 1)));
+      expect(clips, hasLength(2));
+      expect(clips[0].uri, 'anonymousUrl');
+      expect(clips[0].httpHeaders, isEmpty);
+      expect(clips[1].uri, 'authedUrl');
+      expect(clips[1].httpHeaders, equals(headers));
     });
 
     test('rethrows when all sources fail', () async {
@@ -97,6 +168,24 @@ class _FakeControllerWithOneFailure extends FakeController {
 
   @override
   Future<void> setSource(VideoClip clip) async {
+    if (!_failed) {
+      _failed = true;
+      throw Exception('first source error');
+    }
+  }
+}
+
+/// A [FakeController] that records every clip and fails only on the first
+/// [setSource] call, so a fallover chain can be asserted clip-by-clip.
+class _RecordingControllerWithOneFailure extends FakeController {
+  _RecordingControllerWithOneFailure(this._record);
+
+  final void Function(VideoClip) _record;
+  var _failed = false;
+
+  @override
+  Future<void> setSource(VideoClip clip) async {
+    _record(clip);
     if (!_failed) {
       _failed = true;
       throw Exception('first source error');
