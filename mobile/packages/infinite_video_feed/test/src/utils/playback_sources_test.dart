@@ -174,6 +174,36 @@ void main() {
       );
     });
 
+    test('returns generic for HTTP 202 while Divine derivatives process', () {
+      expect(
+        classifyVideoError(
+          errorMessage: 'CoreMediaErrorDomain error -12667 - HTTP 202',
+          source: 'https://media.divine.video/$_hash/720p.mp4',
+        ),
+        equals(VideoErrorType.generic),
+      );
+    });
+
+    test('returns generic for Android response-code 202 messages', () {
+      expect(
+        classifyVideoError(
+          errorMessage: 'Response code: 202',
+          source: 'https://media.divine.video/$_hash/720p.mp4',
+        ),
+        equals(VideoErrorType.generic),
+      );
+    });
+
+    test('does not classify unrelated numbers as HTTP 202', () {
+      expect(
+        classifyVideoError(
+          errorMessage: 'Response completed in 2025 ms',
+          source: 'https://media.divine.video/$_hash/720p.mp4',
+        ),
+        equals(VideoErrorType.notFound),
+      );
+    });
+
     test('returns notFound when source is a Divine blob URL', () {
       expect(
         classifyVideoError(source: _rawUrl),
