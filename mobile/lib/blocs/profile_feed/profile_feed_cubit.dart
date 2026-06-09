@@ -170,7 +170,9 @@ class ProfileFeedCubit extends Bloc<ProfileFeedEvent, ProfileFeedState> {
     );
 
     if (!isClosed && result?.isFromCache == true) {
-      await _doRefresh(emit);
+      await _doRefresh(emit, backfillInitialPage: true);
+    } else if (!isClosed && result != null) {
+      await _backfillInitialRestPage(emit);
     }
   }
 
@@ -184,7 +186,10 @@ class ProfileFeedCubit extends Bloc<ProfileFeedEvent, ProfileFeedState> {
     Emitter<ProfileFeedState> emit,
   ) => _doRefresh(emit);
 
-  Future<void> _doRefresh(Emitter<ProfileFeedState> emit) async {
+  Future<void> _doRefresh(
+    Emitter<ProfileFeedState> emit, {
+    bool backfillInitialPage = false,
+  }) async {
     emit(
       state.copyWith(
         isRefreshing: true,
@@ -200,6 +205,9 @@ class ProfileFeedCubit extends Bloc<ProfileFeedEvent, ProfileFeedState> {
       mergeWithCurrent: false,
       skipCache: true,
     );
+    if (backfillInitialPage && !isClosed) {
+      await _backfillInitialRestPage(emit);
+    }
   }
 
   Future<AuthorFeedResult?> _loadFromRest(
@@ -242,6 +250,68 @@ class ProfileFeedCubit extends Bloc<ProfileFeedEvent, ProfileFeedState> {
     }
   }
 
+  Future<void> _backfillInitialRestPage(Emitter<ProfileFeedState> emit) async {
+    var targetCount = AppConstants.paginationBatchSize;
+    final totalVideoCount = state.totalVideoCount;
+    if (totalVideoCount != null && totalVideoCount < targetCount) {
+      targetCount = totalVideoCount;
+    }
+
+    while (!isClosed &&
+        state.hasMoreContent &&
+        state.nextOffset != null &&
+        state.videos.length < targetCount) {
+      final offset = state.nextOffset;
+      if (offset == null) return;
+
+      final beforeCount = state.videos.length;
+      final AuthorFeedResult result;
+      try {
+        result = await _videosRepository.getAuthorFeed(
+          authorPubkey: _authorPubkey,
+          offset: offset,
+        );
+        if (isClosed) return;
+      } on Object catch (error, stackTrace) {
+        if (isClosed) return;
+        addError(error, stackTrace);
+        emit(state.copyWith(hasLoadMoreError: true));
+        return;
+      }
+
+      if (result.videos.isEmpty) {
+        if (_isAdvancingRestPage(result, offset)) {
+          _applyRestPage(
+            emit,
+            pageVideos: const [],
+            totalCount: result.totalCount,
+            nextOffset: result.nextOffset,
+            hasMore: result.hasMore,
+            mergeWithCurrent: true,
+          );
+          continue;
+        }
+        emit(state.copyWith(hasMoreContent: false));
+        return;
+      }
+
+      final enriched = await _enrichVideos(result.videos);
+      if (isClosed) return;
+      _applyRestPage(
+        emit,
+        pageVideos: enriched,
+        totalCount: result.totalCount,
+        nextOffset: result.nextOffset,
+        hasMore: result.hasMore,
+        mergeWithCurrent: true,
+      );
+
+      if (state.videos.length <= beforeCount && state.nextOffset == offset) {
+        return;
+      }
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Load more (REST offset page or Nostr-fallback page)
   // ---------------------------------------------------------------------------
@@ -255,12 +325,24 @@ class ProfileFeedCubit extends Bloc<ProfileFeedEvent, ProfileFeedState> {
 
     try {
       if (state.nextOffset != null) {
+        final offset = state.nextOffset;
         final result = await _videosRepository.getAuthorFeed(
           authorPubkey: _authorPubkey,
-          offset: state.nextOffset,
+          offset: offset,
         );
         if (isClosed) return;
         if (result.videos.isEmpty) {
+          if (_isAdvancingRestPage(result, offset)) {
+            _applyRestPage(
+              emit,
+              pageVideos: const [],
+              totalCount: result.totalCount,
+              nextOffset: result.nextOffset,
+              hasMore: result.hasMore,
+              mergeWithCurrent: true,
+            );
+            return;
+          }
           emit(state.copyWith(hasMoreContent: false, isLoadingMore: false));
           return;
         }
@@ -312,6 +394,13 @@ class ProfileFeedCubit extends Bloc<ProfileFeedEvent, ProfileFeedState> {
       addError(error, stackTrace);
       emit(state.copyWith(isLoadingMore: false, hasLoadMoreError: true));
     }
+  }
+
+  bool _isAdvancingRestPage(AuthorFeedResult result, int? previousOffset) {
+    final nextOffset = result.nextOffset;
+    return result.hasMore == true &&
+        nextOffset != null &&
+        nextOffset != previousOffset;
   }
 
   void _applyRestPage(
