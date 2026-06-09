@@ -76,7 +76,7 @@ const _hydrationLimit = 50;
 /// 4. Group like/comment/repost by `(referencedEventId, kind)` into
 ///    [VideoNotification]s — threshold 1
 /// 5. Map follow/mention/system into [ActorNotification]s
-/// 6. Consolidate follow duplicates (keep earliest per source pubkey)
+/// 6. Consolidate follow duplicates (keep most recent per source pubkey)
 /// 7. Truncate long comment text
 class NotificationRepository {
   /// Creates a [NotificationRepository].
@@ -1468,7 +1468,21 @@ class NotificationRepository {
     );
   }
 
-  /// Consolidates follow notifications — keeps the earliest per pubkey.
+  /// Consolidates follow notifications — keeps the most recent per pubkey.
+  ///
+  /// Kind 3 (contact list) is a replaceable event: a single follower can
+  /// produce several follow notifications over time (re-publishes, plus
+  /// the same logical follow arriving via both the REST page and the
+  /// realtime bridge). Collapsing them to one row per `sourcePubkey` keeps
+  /// the Follows tab from showing the same person repeatedly.
+  ///
+  /// The surviving row must carry the *latest* `createdAt`, not the
+  /// earliest. The feed sorts newest-first and paginates, so stamping a
+  /// recent follow with a stale timestamp sinks it below older
+  /// notifications — potentially off the first page entirely, which
+  /// surfaces as an empty "Follows" tab even though the follow exists.
+  /// Keeping the most recent timestamp also matches the realtime path,
+  /// which inserts new follows at the top of the snapshot.
   List<RelayNotification> _consolidateFollows(List<RelayNotification> raw) {
     final followsByPubkey = <String, RelayNotification>{};
     final result = <RelayNotification>[];
@@ -1477,7 +1491,7 @@ class NotificationRepository {
       final kind = _mapNotificationKind(n);
       if (kind == NotificationKind.follow) {
         final existing = followsByPubkey[n.sourcePubkey];
-        if (existing == null || n.createdAt.isBefore(existing.createdAt)) {
+        if (existing == null || n.createdAt.isAfter(existing.createdAt)) {
           followsByPubkey[n.sourcePubkey] = n;
         }
       } else {
