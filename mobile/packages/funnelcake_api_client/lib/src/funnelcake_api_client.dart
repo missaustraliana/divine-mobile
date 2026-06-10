@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:meta/meta.dart';
 import 'package:models/models.dart';
 import 'package:nostr_sdk/nostr_sdk.dart';
+import 'package:unified_logger/unified_logger.dart';
 
 /// Source split for the v2 popular feed.
 enum PopularVideosVariant {
@@ -65,6 +66,42 @@ class FunnelcakeApiClient {
 
   /// Default moderation profile sent with video-bearing Funnelcake requests.
   static const String defaultModerationProfile = 'default';
+
+  static const Set<String> _diagnosticStructuralKeys = {
+    'categories',
+    'data',
+    'error',
+    'followers',
+    'following',
+    'hashtags',
+    'items',
+    'message',
+    'notifications',
+    'pagination',
+    'profiles',
+    'results',
+    'status',
+    'success',
+    'videos',
+  };
+
+  /// Sink used to surface warning-level diagnostics from static helpers such
+  /// as [_unwrapListResponse].
+  ///
+  /// Defaults to routing through `unified_logger`'s [Log.warning] (the
+  /// repo-wide logging contract). Tests override this to assert that envelope
+  /// regressions are surfaced rather than silently swallowed; production code
+  /// should leave it untouched.
+  @visibleForTesting
+  static void Function(String message) warningLogger = _defaultWarningLogger;
+
+  static void _defaultWarningLogger(String message) {
+    Log.warning(
+      message,
+      name: 'FunnelcakeApiClient',
+      category: LogCategory.api,
+    );
+  }
 
   final String _baseUrl;
   final http.Client _httpClient;
@@ -186,8 +223,38 @@ class FunnelcakeApiClient {
         return (items: data, hasMore: hasMore, nextCursor: nextCursor);
       }
     }
-    // Unrecognised shape — return empty so callers never throw.
+    // Unrecognised shape — log so envelope regressions are visible, then
+    // return empty so callers never throw.
+    warningLogger(
+      'Unrecognised funnelcake list response shape; returning empty list. '
+      'shape=${_describeShape(decoded)}',
+    );
     return (items: const <dynamic>[], hasMore: false, nextCursor: null);
+  }
+
+  /// Builds a short, non-sensitive description of an unrecognised decoded
+  /// response for diagnostic logging.
+  ///
+  /// Avoids dumping full response bodies (which may be large or contain user
+  /// data); reports the runtime type plus, for maps, key counts and a small
+  /// allow-list of structural keys. Unknown keys are counted rather than
+  /// emitted because malformed responses may carry user data in key position.
+  static String _describeShape(Object? decoded) {
+    if (decoded == null) {
+      return 'null';
+    }
+    if (decoded is Map) {
+      final keys = decoded.keys.map((key) => '$key').toSet();
+      final structuralKeys =
+          keys.where(_diagnosticStructuralKeys.contains).toList()..sort();
+      final unknownKeyCount = keys.length - structuralKeys.length;
+      return 'Map('
+          'keyCount: ${keys.length}, '
+          'structuralKeys: [${structuralKeys.join(', ')}], '
+          'unknownKeyCount: $unknownKeyCount'
+          ')';
+    }
+    return decoded.runtimeType.toString();
   }
 
   static int? _parseIntPageToken(String? value) {

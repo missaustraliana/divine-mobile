@@ -5078,6 +5078,43 @@ void main() {
             expect(videos, isEmpty);
           },
         );
+
+        test(
+          'unrecognised shape logs a warning while staying non-throwing',
+          () async {
+            final originalLogger = FunnelcakeApiClient.warningLogger;
+            addTearDown(
+              () => FunnelcakeApiClient.warningLogger = originalLogger,
+            );
+
+            final warnings = <String>[];
+            FunnelcakeApiClient.warningLogger = warnings.add;
+
+            when(
+              () => mockHttpClient.get(any(), headers: any(named: 'headers')),
+            ).thenAnswer(
+              (_) async => http.Response('{"unexpected": "shape"}', 200),
+            );
+
+            // Behavior contract: still returns empty, never throws.
+            final videos = await client.getTrendingVideos();
+            expect(videos, isEmpty);
+
+            // Observability contract: the regression is surfaced exactly once
+            // with a non-sensitive shape description (counts, not body/keys).
+            expect(warnings, hasLength(1));
+            expect(
+              warnings.single,
+              allOf(
+                contains('Unrecognised funnelcake list response shape'),
+                contains(
+                  'Map(keyCount: 1, structuralKeys: [], unknownKeyCount: 1)',
+                ),
+                isNot(contains('unexpected')),
+              ),
+            );
+          },
+        );
       });
 
       group('searchVideos envelope shape', () {
