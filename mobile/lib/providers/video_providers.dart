@@ -422,6 +422,7 @@ LikesRepository likesRepository(Ref ref) {
   final repository = LikesRepository(
     nostrClient: nostrClient,
     localStorage: localStorage,
+    blockFilter: createBlockedAuthorFilter(ref),
     isOnline: () =>
         connectionStatus.isOnline && authService.canPublishNostrWritesNow,
     queueOfflineAction: pendingActionService != null
@@ -510,6 +511,7 @@ RepostsRepository repostsRepository(Ref ref) {
   final repository = RepostsRepository(
     nostrClient: nostrClient,
     localStorage: localStorage,
+    blockFilter: createBlockedAuthorFilter(ref),
     isOnline: () =>
         connectionStatus.isOnline && authService.canPublishNostrWritesNow,
     queueOfflineAction: pendingActionService != null
