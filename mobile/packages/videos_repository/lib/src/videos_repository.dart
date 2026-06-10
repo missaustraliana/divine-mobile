@@ -66,6 +66,27 @@ const Duration _routeRelayTimeout = Duration(seconds: 3);
 const String _popularCacheKey = 'popular';
 const String _popularLegacyBeforeCursorPrefix = 'before:';
 
+/// Result of a hashtag REST feed fetch.
+class HashtagFeedVideosResult {
+  /// Creates a successful hashtag feed result.
+  const HashtagFeedVideosResult.success(this.videos) : succeeded = true;
+
+  /// Creates a failed or skipped hashtag feed result.
+  const HashtagFeedVideosResult.failure()
+    : videos = const [],
+      succeeded = false;
+
+  /// Videos returned by the REST feed in display order.
+  final List<VideoEvent> videos;
+
+  /// Whether the REST fetch completed successfully.
+  ///
+  /// A successful fetch may still contain an empty [videos] list. Callers use
+  /// this to distinguish a real empty feed from a transient failure, timeout,
+  /// or unavailable client.
+  final bool succeeded;
+}
+
 String _encodePopularLegacyBeforeCursor(int before) =>
     '$_popularLegacyBeforeCursorPrefix$before';
 
@@ -1703,6 +1724,84 @@ class VideosRepository {
       );
       return (videos: <VideoEvent>[], totalCount: 0, hasMore: false);
     }
+  }
+
+  /// Fetches the hashtag feed from the Funnelcake REST API.
+  ///
+  /// Fetches trending and classic videos for [hashtag] in parallel and
+  /// interleaves them 1:1 (trending first), deduplicating classics that
+  /// also appear in trending (by event ID or vine ID, case-insensitive).
+  /// Both lists pass through the same filtering pipeline as
+  /// [_transformVideoStats] — block filter, transport scheme, expiration,
+  /// content preferences. The endpoint is anonymous, so the injected
+  /// block filter is the only block/mute enforcement on this path (#948).
+  ///
+  /// Returns a failed result when [hashtag] is blank, the API client is
+  /// unavailable, or the fetch fails or exceeds [timeout] — the REST feed
+  /// is a fast-path enrichment; callers keep their relay source/cache.
+  Future<HashtagFeedVideosResult> getHashtagFeedVideos({
+    required String hashtag,
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final trimmed = hashtag.trim();
+    if (trimmed.isEmpty) return const HashtagFeedVideosResult.failure();
+    if (_funnelcakeApiClient == null || !_funnelcakeApiClient.isAvailable) {
+      return const HashtagFeedVideosResult.failure();
+    }
+
+    try {
+      final results = await Future.wait([
+        getVideosByHashtag(hashtag: trimmed, limit: 50),
+        getClassicVideosByHashtag(hashtag: trimmed, limit: 50),
+      ]).timeout(timeout);
+
+      return HashtagFeedVideosResult.success(
+        _interleaveHashtagVideos(results[0], results[1]),
+      );
+    } on Exception catch (e, stackTrace) {
+      Log.error(
+        'getHashtagFeedVideos failed for "#$trimmed"',
+        name: 'VideosRepository',
+        category: LogCategory.video,
+        error: e,
+        stackTrace: stackTrace,
+      );
+      return const HashtagFeedVideosResult.failure();
+    }
+  }
+
+  /// Interleaves trending and classic hashtag videos 1:1 for a balanced
+  /// feed. Classics that already appear in trending (by event ID or vine
+  /// ID, case-insensitive) are dropped; when one list runs out, the
+  /// remainder of the other is appended.
+  List<VideoEvent> _interleaveHashtagVideos(
+    List<VideoEvent> trending,
+    List<VideoEvent> classics,
+  ) {
+    final trendingIds = <String>{};
+    for (final video in trending) {
+      if (video.id.isNotEmpty) trendingIds.add(video.id.toLowerCase());
+      final vineId = video.vineId;
+      if (vineId != null && vineId.isNotEmpty) {
+        trendingIds.add(vineId.toLowerCase());
+      }
+    }
+
+    final uniqueClassics = classics.where((video) {
+      final vineId = video.vineId;
+      return !trendingIds.contains(video.id.toLowerCase()) &&
+          (vineId == null || !trendingIds.contains(vineId.toLowerCase()));
+    }).toList();
+
+    final result = <VideoEvent>[];
+    final maxLen = trending.length > uniqueClassics.length
+        ? trending.length
+        : uniqueClassics.length;
+    for (var i = 0; i < maxLen; i++) {
+      if (i < trending.length) result.add(trending[i]);
+      if (i < uniqueClassics.length) result.add(uniqueClassics[i]);
+    }
+    return result;
   }
 
   /// Deduplicates videos by ID and sorts by popularity (loops then time).
