@@ -58,9 +58,7 @@ void main() {
       // Mock successful event publishing
       when(() => mockNostr.publishEvent(any())).thenAnswer((invocation) {
         return Future<PublishResult>.value(
-          PublishSuccess(
-            event: invocation.positionalArguments[0] as Event,
-          ),
+          PublishSuccess(event: invocation.positionalArguments[0] as Event),
         );
       });
 
@@ -299,6 +297,32 @@ void main() {
         // Should have called subscribeToEvents
         verify(() => mockNostr.subscribe(any())).called(1);
       });
+
+      test('relay-synced own lists stay in myLists', () async {
+        when(() => mockNostr.subscribe(any())).thenAnswer(
+          (_) => Stream.value(
+            Event.fromJson({
+              'id': 'relay_list_event',
+              'pubkey': _ownerPubkey,
+              'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+              'kind': 30005,
+              'tags': [
+                ['d', 'relay_list_1'],
+                ['title', 'Relay List'],
+              ],
+              'content': 'List from relay',
+              'sig': 'test_signature',
+            }),
+          ),
+        );
+
+        await service.fetchUserListsFromRelays();
+
+        final relayList = service.getListById('relay_list_1');
+        expect(relayList, isNotNull);
+        expect(relayList!.pubkey, _ownerPubkey);
+        expect(service.myLists.map((list) => list.id), contains(relayList.id));
+      });
     });
 
     group('createList()', () {
@@ -339,6 +363,25 @@ void main() {
         expect(list.playOrder, PlayOrder.shuffle);
       });
 
+      test(
+        'rapidly created lists get unique ids and keep their data',
+        () async {
+          for (var i = 0; i < 10; i++) {
+            await service.createList(name: 'List $i');
+          }
+
+          expect(service.lists, hasLength(10));
+          expect(service.lists.map((l) => l.id).toSet(), hasLength(10));
+          expect(
+            service.lists.map((l) => l.name).toSet(),
+            hasLength(10),
+            reason:
+                'an ID collision makes the post-publish update '
+                'overwrite a sibling list',
+          );
+        },
+      );
+
       test('adds created list to lists collection', () async {
         expect(service.lists, isEmpty);
 
@@ -348,14 +391,11 @@ void main() {
         expect(service.lists.first.name, 'Test List');
       });
 
-      test('publishes public list to Nostr when it has videos', () async {
-        // Create list, add a video, then verify publish
-        final list = await service.createList(name: 'Public List');
+      test('publishes empty public list to Nostr on creation', () async {
+        final list = await service.createList(name: 'Empty Public List');
 
-        // Add a video to the list so it will publish
-        await service.addVideoToList(list!.id, 'test_video_id');
-
-        // Should create and sign event when video is added (not when empty)
+        // An unpublished list exists only on this device, so even empty
+        // lists publish immediately.
         verify(
           () => mockAuth.createAndSignEvent(
             kind: 30005,
@@ -363,22 +403,48 @@ void main() {
             tags: any(named: 'tags'),
           ),
         ).called(1);
+        verify(() => mockNostr.publishEvent(any())).called(1);
+        expect(service.getListById(list!.id)!.nostrEventId, isNotNull);
+      });
 
-        // Should publish event
+      test('publishes again when a video is added', () async {
+        final list = await service.createList(name: 'Public List');
+        reset(mockNostr);
+        when(() => mockNostr.publishEvent(any())).thenAnswer(
+          (invocation) async =>
+              PublishSuccess(event: invocation.positionalArguments[0] as Event),
+        );
+
+        await service.addVideoToList(list!.id, 'test_video_id');
+
         verify(() => mockNostr.publishEvent(any())).called(1);
       });
 
-      test('does not publish empty public list to Nostr', () async {
-        await service.createList(name: 'Empty Public List');
+      test('keeps list locally when publish fails', () async {
+        when(
+          () => mockNostr.publishEvent(any()),
+        ).thenAnswer((_) => Future<PublishResult>.value(const PublishFailed()));
 
-        // Empty lists should not be published to avoid relay spam
-        verifyNever(
+        final list = await service.createList(name: 'Unlucky List');
+
+        expect(list, isNotNull);
+        expect(service.getListById(list!.id), isNotNull);
+        expect(service.getListById(list.id)!.nostrEventId, isNull);
+      });
+
+      test('keeps list locally when event signing fails', () async {
+        when(
           () => mockAuth.createAndSignEvent(
             kind: any(named: 'kind'),
             content: any(named: 'content'),
             tags: any(named: 'tags'),
           ),
-        );
+        ).thenAnswer((_) async => null);
+
+        final list = await service.createList(name: 'Unsigned List');
+
+        expect(list, isNotNull);
+        expect(service.getListById(list!.id)!.nostrEventId, isNull);
         verifyNever(() => mockNostr.publishEvent(any()));
       });
 
@@ -492,7 +558,6 @@ void main() {
 
       test('publishes update to Nostr for public list with videos', () async {
         final list = await service.createList(name: 'Test List');
-        // Add a video so the list will be published (empty lists don't publish)
         await service.addVideoToList(list!.id, 'test_video_id');
         reset(mockNostr); // Clear previous invocations
 
@@ -623,6 +688,13 @@ void main() {
     group('deleteOwnedList()', () {
       test('publishes NIP-09 deletion for owned kind 30005 list', () async {
         final list = await service.createList(name: 'Owned Public List');
+        // Creation publishes the kind 30005 event; reset so the capture
+        // below only sees the deletion event.
+        reset(mockNostr);
+        when(() => mockNostr.publishEvent(any())).thenAnswer(
+          (invocation) async =>
+              PublishSuccess(event: invocation.positionalArguments[0] as Event),
+        );
 
         final result = await service.deleteOwnedList(list!.id);
 
@@ -630,9 +702,7 @@ void main() {
         expect(service.getListById(list.id), isNull);
 
         final published =
-            verify(
-                  () => mockNostr.publishEvent(captureAny()),
-                ).captured.single
+            verify(() => mockNostr.publishEvent(captureAny())).captured.single
                 as Event;
         expect(published.kind, EventKind.eventDeletion);
         expect(published.content, 'Deleted curated list ${list.id}');
@@ -646,9 +716,9 @@ void main() {
       test('keeps local list when publish fails', () async {
         final list = await service.createList(name: 'Owned Public List');
         reset(mockNostr);
-        when(() => mockNostr.publishEvent(any())).thenAnswer(
-          (_) => Future<PublishResult>.value(const PublishFailed()),
-        );
+        when(
+          () => mockNostr.publishEvent(any()),
+        ).thenAnswer((_) => Future<PublishResult>.value(const PublishFailed()));
 
         final result = await service.deleteOwnedList(list!.id);
 

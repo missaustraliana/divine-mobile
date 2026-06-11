@@ -102,6 +102,23 @@ class CuratedListService extends ChangeNotifier {
         .toList();
   }
 
+  /// Lists belonging to the current user: lists they own (by pubkey) plus
+  /// local-only lists that have not been published to Nostr yet.
+  ///
+  /// Owned lists keep showing here after a successful publish — filtering
+  /// only on a null [CuratedList.nostrEventId] made lists vanish from the
+  /// "My Lists" UI the moment they reached the relay.
+  List<CuratedList> get myLists {
+    final currentPubkey = _currentAuthenticatedPubkey();
+    return _lists
+        .where(
+          (list) =>
+              list.nostrEventId == null ||
+              (currentPubkey != null && list.pubkey == currentPubkey),
+        )
+        .toList();
+  }
+
   /// Initialize the service and create default list if needed.
   ///
   /// This method returns quickly after loading local cache.
@@ -200,6 +217,22 @@ class CuratedListService extends ChangeNotifier {
     );
   }
 
+  /// Generates a list ID that is unique within the cached lists.
+  ///
+  /// Two lists created within the same millisecond would otherwise share an
+  /// ID, and ID-based lookups (e.g. the post-publish copyWith) would then
+  /// overwrite the wrong list.
+  String _generateListId(DateTime now) {
+    final base = 'list_${now.millisecondsSinceEpoch}';
+    var listId = base;
+    var suffix = 1;
+    while (_lists.any((list) => list.id == listId)) {
+      listId = '${base}_$suffix';
+      suffix++;
+    }
+    return listId;
+  }
+
   /// Internal method to create a list with optional explicit ID
   Future<CuratedList?> _createList({
     required String name,
@@ -215,7 +248,7 @@ class CuratedListService extends ChangeNotifier {
   }) async {
     try {
       final now = DateTime.now();
-      final listId = id ?? 'list_${now.millisecondsSinceEpoch}';
+      final listId = id ?? _generateListId(now);
       final ownerPubkey = _currentAuthenticatedPubkey();
 
       final newList = CuratedList(
@@ -993,8 +1026,14 @@ class CuratedListService extends ChangeNotifier {
     );
   }
 
-  /// Publish list to Nostr as NIP-51 kind 30005 event
-  Future<void> _publishListToNostr(CuratedList list) async {
+  /// Publish list to Nostr as NIP-51 kind 30005 event.
+  ///
+  /// Empty lists are published too — a freshly created public list must
+  /// reach the relay immediately or it exists only on this device.
+  ///
+  /// Returns `true` when the relay accepted the event. Failures are logged
+  /// and leave the local list intact with a null [CuratedList.nostrEventId].
+  Future<bool> _publishListToNostr(CuratedList list) async {
     try {
       if (!_authService.isAuthenticated) {
         Log.warning(
@@ -1002,17 +1041,7 @@ class CuratedListService extends ChangeNotifier {
           name: 'CuratedListService',
           category: LogCategory.system,
         );
-        return;
-      }
-
-      // Don't spam relay with empty lists
-      if (list.videoEventIds.isEmpty) {
-        Log.debug(
-          'Skipping publish of empty list: ${list.name}',
-          name: 'CuratedListService',
-          category: LogCategory.system,
-        );
-        return;
+        return false;
       }
 
       final content = list.description ?? 'Curated video list: ${list.name}';
@@ -1024,28 +1053,46 @@ class CuratedListService extends ChangeNotifier {
         tags: tags,
       );
 
-      if (event != null) {
-        final sentEvent = await _nostrService.publishEvent(event);
-        if (sentEvent is PublishSuccess) {
-          // Update local list with Nostr event ID
-          final listIndex = _lists.indexWhere((l) => l.id == list.id);
-          if (listIndex != -1) {
-            _lists[listIndex] = list.copyWith(nostrEventId: event.id);
-            await _saveLists();
-          }
-          Log.debug(
-            'Published list to Nostr: ${list.name} (${event.id})',
-            name: 'CuratedListService',
-            category: LogCategory.system,
-          );
-        }
+      if (event == null) {
+        Log.warning(
+          'Failed to sign curated list event: ${list.name} (${list.id})',
+          name: 'CuratedListService',
+          category: LogCategory.system,
+        );
+        return false;
       }
+
+      final publishResult = await _nostrService.publishEvent(event);
+      final failureReason = publishResult.failureReason;
+      if (failureReason != null) {
+        Log.warning(
+          'Failed to publish curated list: ${list.name} (${list.id}): '
+          '$failureReason',
+          name: 'CuratedListService',
+          category: LogCategory.system,
+        );
+        return false;
+      }
+
+      // Update local list with Nostr event ID
+      final listIndex = _lists.indexWhere((l) => l.id == list.id);
+      if (listIndex != -1) {
+        _lists[listIndex] = list.copyWith(nostrEventId: event.id);
+        await _saveLists();
+      }
+      Log.debug(
+        'Published list to Nostr: ${list.name} (${event.id})',
+        name: 'CuratedListService',
+        category: LogCategory.system,
+      );
+      return true;
     } catch (e) {
       Log.error(
         'Failed to publish list to Nostr: $e',
         name: 'CuratedListService',
         category: LogCategory.system,
       );
+      return false;
     }
   }
 
