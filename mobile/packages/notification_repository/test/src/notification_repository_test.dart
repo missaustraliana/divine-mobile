@@ -3433,8 +3433,8 @@ void main() {
       test('acceptRealtime dedupes a WS arrival whose id matches a REST '
           "item's sourceEventId", () async {
         // REST raws carry the Nostr event id in `sourceEventId` (server's
-        // UUID lives in `id`). WS raws — built by the realtime bridge —
-        // carry the Nostr event id in `id`. Without the cross-path check
+        // UUID lives in `id`). Realtime raws carry the Nostr event id in
+        // `id`. Without the cross-path check
         // the same logical Nostr event accepted via WS after REST would
         // inflate the snapshot and the unread count.
         stubProfiles({
@@ -3508,8 +3508,8 @@ void main() {
     });
 
     group('WS-first dedupe in page-merge (#4264)', () {
-      // WS raws (built by `notification_realtime_bridge.dart`) carry the
-      // Nostr event id in both `id` and `sourceEventId`. REST raws carry
+      // Realtime raws carry the Nostr event id in both `id` and
+      // `sourceEventId`. REST raws carry
       // the Nostr event id in `sourceEventId` (with the server's UUID in
       // `id`). When WS arrives first and a later REST pagination page
       // returns the same logical event, dedupe must key on the shared

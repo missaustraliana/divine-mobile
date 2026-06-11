@@ -617,10 +617,6 @@ class NotificationRepository {
   /// (deleted in `ead8114f8`) so a second realtime like/comment/repost on
   /// a video that already has a grouped row updates the existing row's
   /// count rather than creating a duplicate.
-  ///
-  /// Replaces the legacy
-  /// `mobile/lib/providers/notification_realtime_bridge_provider.dart`
-  /// which wrote into the now-unused Riverpod cache.
   Future<void> acceptRealtime(RelayNotification raw) async {
     if (_snapshotContainsSourceEventId(raw.id)) return;
 
