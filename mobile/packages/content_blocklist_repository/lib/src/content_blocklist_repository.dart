@@ -24,6 +24,11 @@ const _mutedUsersPrefsKey = 'muted_users_list';
 /// SharedPreferences key for severed followers (follow broken by block)
 const _severedFollowersPrefsKey = 'severed_followers_list';
 
+/// SharedPreferences key recording which account's per-account state the
+/// persisted sets belong to. Written on identity adoption so the next
+/// construction hydrates the right account before auth resolves.
+const _activePubkeyPrefsKey = 'blocklist_active_pubkey';
+
 /// Service for managing content blocklist
 ///
 /// This service maintains an internal blocklist of npubs whose content
@@ -47,6 +52,14 @@ class ContentBlocklistRepository {
        _onChanged = onChanged {
     // Initialize with the specific npub requested
     _addInitialBlockedContent();
+    _activeAccountPubkey = _prefs?.getString(_activePubkeyPrefsKey);
+    final seededAccount = _activeAccountPubkey;
+    _scopedBasesPresentAtConstruction = seededAccount == null
+        ? const <String>{}
+        : <String>{
+            for (final base in _legacySetsByBase.keys)
+              if (_prefs?.getString('$base.$seededAccount') != null) base,
+          };
     _loadBlockedUsers();
     _loadMutedUsers();
     _loadSeveredFollowers();
@@ -96,6 +109,20 @@ class ContentBlocklistRepository {
   // followers list until they explicitly re-follow.
   final Set<String> _severedFollowers = <String>{};
 
+  // Persisted sets that migrate from legacy un-namespaced keys, by key.
+  late final Map<String, Set<String>> _legacySetsByBase = {
+    _blockedUsersPrefsKey: _runtimeBlocklist,
+    _mutedUsersPrefsKey: _mutedPubkeys,
+    _severedFollowersPrefsKey: _severedFollowers,
+  };
+
+  // Scoped keys of the seeded account that already held data when this
+  // instance hydrated. _migrateLegacyKeys treats those as authoritative
+  // over the legacy snapshot; a scoped key that appears later in the
+  // session was written by a save racing the migration and must be
+  // merged with the legacy data, not preferred over it.
+  late final Set<String> _scopedBasesPresentAtConstruction;
+
   final _stateController = StreamController<ContentPolicyState>.broadcast();
 
   // Granular per-pubkey change events. Subscribers (e.g. VideoEventService)
@@ -107,6 +134,11 @@ class ContentBlocklistRepository {
   String? _mutualMuteSubscriptionId;
   bool _mutualMuteSyncStarted = false;
   String? _ourPubkey;
+
+  // Account whose persisted sets are currently loaded. Seeded from prefs at
+  // construction so hydration covers the window before auth resolves;
+  // corrected by [_adoptIdentity] once the session identity is known.
+  String? _activeAccountPubkey;
 
   // Subscription tracking for block list sync
   bool _blockListSyncStarted = false;
@@ -167,12 +199,192 @@ class ContentBlocklistRepository {
     // Users can still block individuals via the app UI
   }
 
+  /// Storage key for [base] scoped to the active account.
+  ///
+  /// Falls back to the legacy un-namespaced key while no account has been
+  /// adopted yet (pre-auth or pre-migration installs).
+  String _scopedKey(String base) {
+    final account = _activeAccountPubkey;
+    return account == null ? base : '$base.$account';
+  }
+
+  /// Adopts [pubkey] as the session identity, resetting state that
+  /// belongs to a different account.
+  ///
+  /// All in-memory sets are keyed to one identity: `_blockedByOthers` /
+  /// `_mutualMuteBlocklist` hold who blocks/mutes *us*, and the persisted
+  /// sets are stored per account. Before this existed, the keepAlive
+  /// repository carried account A's state into account B after a switch,
+  /// filtering the wrong authors and showing false "account not
+  /// available" gates (#4969).
+  void _adoptIdentity(String pubkey) {
+    if (_ourPubkey == pubkey) return;
+    final isSwitch = _ourPubkey != null;
+    final storedAccountDiffers =
+        _activeAccountPubkey != null && _activeAccountPubkey != pubkey;
+
+    _ourPubkey = pubkey;
+
+    if (isSwitch || storedAccountDiffers) {
+      _runtimeBlocklist.clear();
+      _mutedPubkeys.clear();
+      _mutualMuteBlocklist.clear();
+      _blockedByOthers.clear();
+      _latestMuteListEventCreatedAtByAuthor.clear();
+      _latestBlockListEventCreatedAtByAuthor.clear();
+      _severedFollowers.clear();
+      // Force fresh subscriptions filtered on the new pubkey. On a
+      // same-client switch the old subscription's listener is
+      // intentionally left in place (no handle is retained to cancel
+      // it); its deliveries stay harmless because every handler
+      // re-checks the live _ourPubkey at delivery time.
+      _mutualMuteSyncStarted = false;
+      _blockListSyncStarted = false;
+    }
+
+    // Legacy un-namespaced data predates per-account keys and follows
+    // the first identity that signed in; the move no-ops for any other
+    // account. Must run before _activeAccountPubkey is reassigned.
+    unawaited(_migrateLegacyKeys(pubkey));
+
+    _activeAccountPubkey = pubkey;
+    unawaited(_saveActiveAccountPubkey(pubkey));
+
+    if (isSwitch || storedAccountDiffers) {
+      _loadBlockedUsers();
+      _loadMutedUsers();
+      _loadSeveredFollowers();
+      _notifyChanged();
+      Log.info(
+        'Adopted new identity; blocklist state reset and reloaded '
+        '(${_runtimeBlocklist.length} persisted blocks)',
+        name: 'ContentBlocklistRepository',
+        category: LogCategory.system,
+      );
+    }
+  }
+
+  /// Persists which account the per-account sets belong to.
+  ///
+  /// Failures are logged and swallowed — persistence must never break
+  /// the in-memory blocklist, matching the other save methods.
+  Future<void> _saveActiveAccountPubkey(String pubkey) async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    try {
+      await prefs.setString(_activePubkeyPrefsKey, pubkey);
+    } on Object catch (e) {
+      Log.error(
+        'Failed to persist active blocklist account: $e',
+        name: 'ContentBlocklistRepository',
+        category: LogCategory.system,
+      );
+    }
+  }
+
+  /// Moves legacy un-namespaced persisted sets to [pubkey]'s scoped keys.
+  ///
+  /// Runs while no account was ever adopted on this install, or while
+  /// [pubkey] is the recorded account — so a move that failed on a
+  /// previous launch is retried instead of orphaning the legacy data.
+  /// Legacy values merge into the in-memory sets synchronously (a no-op
+  /// when construction already hydrated them) and persist via full-set
+  /// writes; a legacy key is removed only once its data is confirmed
+  /// under the scoped key, so a partial failure never destroys data.
+  Future<void> _migrateLegacyKeys(String pubkey) async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    if (_activeAccountPubkey != null && _activeAccountPubkey != pubkey) {
+      return;
+    }
+
+    // Decide and merge synchronously so no concurrent write can land
+    // between reading a legacy value and folding it into memory.
+    final pendingMoves = <String, Set<String>>{};
+    final staleBases = <String>[];
+    var recovered = false;
+    for (final entry in _legacySetsByBase.entries) {
+      final base = entry.key;
+      final legacy = prefs.getString(base);
+      if (legacy == null || legacy.isEmpty) continue;
+      final scopedExists = prefs.getString('$base.$pubkey') != null;
+      if (scopedExists &&
+          (_scopedBasesPresentAtConstruction.contains(base) ||
+              _activeAccountPubkey == null)) {
+        // A scoped value that predates this adoption is authoritative:
+        // merging the stale legacy snapshot could resurrect entries
+        // deleted since the original copy. (Before first adoption,
+        // saves write the legacy key itself, so a scoped value can
+        // only be a leftover from an earlier partially-failed
+        // migration — while for the recorded account, one that was
+        // absent at construction was written by a save racing this
+        // migration and is merged below instead.)
+        staleBases.add(base);
+        continue;
+      }
+      try {
+        final decoded = (jsonDecode(legacy) as List<dynamic>).cast<String>();
+        final target = entry.value;
+        final sizeBefore = target.length;
+        target.addAll(decoded);
+        recovered = recovered || target.length != sizeBefore;
+        pendingMoves[base] = target;
+      } on Object catch (e) {
+        Log.error(
+          'Skipping corrupt legacy blocklist key $base: $e',
+          name: 'ContentBlocklistRepository',
+          category: LogCategory.system,
+        );
+      }
+    }
+    if (recovered) {
+      // A retried move recovered data that construction could not see;
+      // notify so watchers re-filter with it this session.
+      _notifyChanged();
+    }
+
+    for (final base in staleBases) {
+      try {
+        await prefs.remove(base);
+      } on Object catch (e) {
+        Log.error(
+          'Failed to drop stale legacy blocklist key $base: $e',
+          name: 'ContentBlocklistRepository',
+          category: LogCategory.system,
+        );
+      }
+    }
+
+    for (final entry in pendingMoves.entries) {
+      // Re-checked before every write: after a mid-flight account
+      // switch the live sets belong to the new identity and must not
+      // be serialized under [pubkey]'s keys.
+      if (_activeAccountPubkey != null && _activeAccountPubkey != pubkey) {
+        return;
+      }
+      try {
+        final written = await prefs.setString(
+          '${entry.key}.$pubkey',
+          jsonEncode(entry.value.toList()),
+        );
+        if (!written) continue;
+        await prefs.remove(entry.key);
+      } on Object catch (e) {
+        Log.error(
+          'Failed to migrate legacy blocklist key ${entry.key}: $e',
+          name: 'ContentBlocklistRepository',
+          category: LogCategory.system,
+        );
+      }
+    }
+  }
+
   /// Load persisted blocked users from SharedPreferences
   void _loadBlockedUsers() {
     final prefs = _prefs;
     if (prefs == null) return;
 
-    final stored = prefs.getString(_blockedUsersPrefsKey);
+    final stored = prefs.getString(_scopedKey(_blockedUsersPrefsKey));
     if (stored == null || stored.isEmpty) return;
 
     try {
@@ -201,7 +413,7 @@ class ContentBlocklistRepository {
 
     try {
       final json = jsonEncode(_runtimeBlocklist.toList());
-      await prefs.setString(_blockedUsersPrefsKey, json);
+      await prefs.setString(_scopedKey(_blockedUsersPrefsKey), json);
     } on Object catch (e) {
       Log.error(
         'Failed to persist blocked users: $e',
@@ -219,7 +431,7 @@ class ContentBlocklistRepository {
     final prefs = _prefs;
     if (prefs == null) return;
 
-    final stored = prefs.getString(_mutedUsersPrefsKey);
+    final stored = prefs.getString(_scopedKey(_mutedUsersPrefsKey));
     if (stored == null || stored.isEmpty) return;
 
     try {
@@ -248,7 +460,7 @@ class ContentBlocklistRepository {
 
     try {
       final json = jsonEncode(_mutedPubkeys.toList());
-      await prefs.setString(_mutedUsersPrefsKey, json);
+      await prefs.setString(_scopedKey(_mutedUsersPrefsKey), json);
     } on Object catch (e) {
       Log.error(
         'Failed to persist muted authors: $e',
@@ -263,7 +475,7 @@ class ContentBlocklistRepository {
     final prefs = _prefs;
     if (prefs == null) return;
 
-    final stored = prefs.getString(_severedFollowersPrefsKey);
+    final stored = prefs.getString(_scopedKey(_severedFollowersPrefsKey));
     if (stored == null || stored.isEmpty) return;
 
     try {
@@ -292,7 +504,7 @@ class ContentBlocklistRepository {
 
     try {
       final json = jsonEncode(_severedFollowers.toList());
-      await prefs.setString(_severedFollowersPrefsKey, json);
+      await prefs.setString(_scopedKey(_severedFollowersPrefsKey), json);
     } on Object catch (e) {
       Log.error(
         'Failed to persist severed followers: $e',
@@ -579,6 +791,10 @@ class ContentBlocklistRepository {
     NostrClient nostrService,
     String ourPubkey,
   ) async {
+    // Reset per-account state (and the started flags) if the identity
+    // changed, so the subscription below filters on the new pubkey (#4969).
+    _adoptIdentity(ourPubkey);
+
     // If the NostrClient changed (e.g., account switch), the old subscription
     // was on a disposed client. Reset so we create a fresh subscription.
     if (_mutualMuteSyncStarted && _nostrClient != nostrService) {
@@ -593,8 +809,6 @@ class ContentBlocklistRepository {
       );
       return;
     }
-
-    _ourPubkey = ourPubkey;
 
     // Store references for Nostr publishing
     _nostrClient = nostrService;
@@ -655,6 +869,10 @@ class ContentBlocklistRepository {
     BlockListSigner signer,
     String ourPubkey,
   ) async {
+    // Reset per-account state (and the started flags) if the identity
+    // changed, so the subscription below filters on the new pubkey (#4969).
+    _adoptIdentity(ourPubkey);
+
     // If the NostrClient changed (e.g., account switch), the old subscription
     // was on a disposed client. Reset so we create a fresh subscription.
     if (_blockListSyncStarted && _nostrClient != nostrService) {
@@ -670,7 +888,6 @@ class ContentBlocklistRepository {
       return;
     }
 
-    _ourPubkey = ourPubkey;
     _signer = signer;
     _nostrClient = nostrService;
 
