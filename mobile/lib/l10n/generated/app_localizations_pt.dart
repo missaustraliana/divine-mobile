@@ -7982,6 +7982,25 @@ class AppLocalizationsPt extends AppLocalizations {
       'Definir a velocidade de reprodução do clipe selecionado';
 
   @override
+  String get videoEditorReverseLabel => 'Inverter';
+
+  @override
+  String get videoEditorReverseClipSemanticLabel =>
+      'Ativar ou desativar a reprodução inversa para o clipe selecionado';
+
+  @override
+  String get videoEditorReverseProgressLabel =>
+      'Um momento, estamos invertendo seu clipe';
+
+  @override
+  String get videoEditorReverseNoLocalFile =>
+      'Não é possível inverter: o clipe não está disponível localmente.';
+
+  @override
+  String get videoEditorReverseFailed =>
+      'Não foi possível inverter o clipe. Por favor, tente novamente.';
+
+  @override
   String get videoEditorSpeedSheetTitle => 'Velocidade do clipe';
 
   @override

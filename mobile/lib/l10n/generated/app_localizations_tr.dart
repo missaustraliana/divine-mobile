@@ -7910,6 +7910,25 @@ class AppLocalizationsTr extends AppLocalizations {
       'Seçili klip için oynatma hızını ayarla';
 
   @override
+  String get videoEditorReverseLabel => 'Tersine Çevir';
+
+  @override
+  String get videoEditorReverseClipSemanticLabel =>
+      'Seçili klip için ters oynatmayı aç veya kapat';
+
+  @override
+  String get videoEditorReverseProgressLabel =>
+      'Bir saniye, klibini tersine çeviriyoruz';
+
+  @override
+  String get videoEditorReverseNoLocalFile =>
+      'Tersine çevrilemiyor: klip yerel olarak kullanılamıyor.';
+
+  @override
+  String get videoEditorReverseFailed =>
+      'Klip tersine çevrilemedi. Lütfen tekrar deneyin.';
+
+  @override
   String get videoEditorSpeedSheetTitle => 'Klip Hızı';
 
   @override

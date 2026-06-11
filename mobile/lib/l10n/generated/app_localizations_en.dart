@@ -7930,6 +7930,25 @@ class AppLocalizationsEn extends AppLocalizations {
       'Set playback speed for selected clip';
 
   @override
+  String get videoEditorReverseLabel => 'Reverse';
+
+  @override
+  String get videoEditorReverseClipSemanticLabel =>
+      'Toggle reverse playback for selected clip';
+
+  @override
+  String get videoEditorReverseProgressLabel =>
+      'One moment, we\'re reversing your clip';
+
+  @override
+  String get videoEditorReverseNoLocalFile =>
+      'Cannot reverse: clip is not locally available.';
+
+  @override
+  String get videoEditorReverseFailed =>
+      'Could not reverse clip. Please try again.';
+
+  @override
   String get videoEditorSpeedSheetTitle => 'Clip Speed';
 
   @override

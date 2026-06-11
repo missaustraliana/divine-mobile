@@ -8088,6 +8088,25 @@ class AppLocalizationsPl extends AppLocalizations {
       'Ustaw prędkość odtwarzania dla wybranego klipu';
 
   @override
+  String get videoEditorReverseLabel => 'Odwróć';
+
+  @override
+  String get videoEditorReverseClipSemanticLabel =>
+      'Włącz lub wyłącz odwrotne odtwarzanie dla wybranego klipu';
+
+  @override
+  String get videoEditorReverseProgressLabel =>
+      'Chwileczkę, odwracamy Twój klip';
+
+  @override
+  String get videoEditorReverseNoLocalFile =>
+      'Nie można odwrócić: klip nie jest dostępny lokalnie.';
+
+  @override
+  String get videoEditorReverseFailed =>
+      'Nie udało się odwrócić klipu. Spróbuj ponownie.';
+
+  @override
   String get videoEditorSpeedSheetTitle => 'Prędkość klipu';
 
   @override

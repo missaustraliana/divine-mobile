@@ -8106,6 +8106,24 @@ class AppLocalizationsRo extends AppLocalizations {
       'Setați viteza de redare pentru clipul selectat';
 
   @override
+  String get videoEditorReverseLabel => 'Invers';
+
+  @override
+  String get videoEditorReverseClipSemanticLabel =>
+      'Activați sau dezactivați redarea inversă pentru clipul selectat';
+
+  @override
+  String get videoEditorReverseProgressLabel => 'O clipă, inversăm clipul tău';
+
+  @override
+  String get videoEditorReverseNoLocalFile =>
+      'Nu se poate inversa: clipul nu este disponibil local.';
+
+  @override
+  String get videoEditorReverseFailed =>
+      'Nu s-a putut inversa clipul. Vă rugăm să încercați din nou.';
+
+  @override
   String get videoEditorSpeedSheetTitle => 'Viteza clipului';
 
   @override

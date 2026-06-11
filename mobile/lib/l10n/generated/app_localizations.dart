@@ -13814,6 +13814,36 @@ abstract class AppLocalizations {
   /// **'Set playback speed for selected clip'**
   String get videoEditorSetClipSpeedSemanticLabel;
 
+  /// Label for the Reverse button in the timeline clip controls.
+  ///
+  /// In en, this message translates to:
+  /// **'Reverse'**
+  String get videoEditorReverseLabel;
+
+  /// Accessibility label for the Reverse button in the timeline clip controls.
+  ///
+  /// In en, this message translates to:
+  /// **'Toggle reverse playback for selected clip'**
+  String get videoEditorReverseClipSemanticLabel;
+
+  /// Status text shown while the selected clip is being rendered in reverse for preview playback.
+  ///
+  /// In en, this message translates to:
+  /// **'One moment, we\'re reversing your clip'**
+  String get videoEditorReverseProgressLabel;
+
+  /// Snackbar message shown when a reverse is requested for a clip that has no locally available file.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot reverse: clip is not locally available.'**
+  String get videoEditorReverseNoLocalFile;
+
+  /// Snackbar message shown when reversing a clip fails during rendering.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not reverse clip. Please try again.'**
+  String get videoEditorReverseFailed;
+
   /// Title of the bottom sheet for adjusting clip playback speed.
   ///
   /// In en, this message translates to:

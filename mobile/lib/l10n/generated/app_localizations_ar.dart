@@ -7873,6 +7873,25 @@ class AppLocalizationsAr extends AppLocalizations {
       'تعيين سرعة التشغيل للمقطع المحدد';
 
   @override
+  String get videoEditorReverseLabel => 'عكس';
+
+  @override
+  String get videoEditorReverseClipSemanticLabel =>
+      'تبديل تشغيل المقطع المحدد بشكل معكوس';
+
+  @override
+  String get videoEditorReverseProgressLabel =>
+      'لحظة من فضلك، نحن نعكس المقطع الخاص بك';
+
+  @override
+  String get videoEditorReverseNoLocalFile =>
+      'لا يمكن العكس: المقطع غير متاح محليًا.';
+
+  @override
+  String get videoEditorReverseFailed =>
+      'تعذّر عكس المقطع. يرجى المحاولة مجددًا.';
+
+  @override
   String get videoEditorSpeedSheetTitle => 'سرعة المقطع';
 
   @override

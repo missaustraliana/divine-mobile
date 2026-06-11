@@ -2,6 +2,7 @@
 // ABOUTME: Verifies loading UI and FAB visibility rules.
 
 import 'package:bloc_test/bloc_test.dart';
+import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -125,6 +126,32 @@ void main() {
     });
 
     testWidgets(
+      'shows reverse progress overlay while clip reverse is running',
+      (
+        tester,
+      ) async {
+        final clipBloc = _MockClipEditorBloc();
+        const reversingState = ClipEditorState(
+          isReversing: true,
+          reversingClipId: 'clip-1',
+        );
+
+        when(() => clipBloc.state).thenReturn(reversingState);
+        whenListen(
+          clipBloc,
+          const Stream<ClipEditorState>.empty(),
+          initialState: reversingState,
+        );
+
+        await tester.pumpWidget(
+          buildWidget(isLoading: false, clipBlocOverride: clipBloc),
+        );
+
+        expect(find.byType(PartialCircleSpinner), findsOneWidget);
+      },
+    );
+
+    testWidgets(
       'writes history on extraction success even when handled above clip controls',
       (tester) async {
         final clipBloc = _MockClipEditorBloc();
@@ -191,6 +218,79 @@ void main() {
           captured[VideoEditorConstants.audioStateHistoryKey],
           equals([audioEvent.toJson()]),
         );
+      },
+    );
+
+    testWidgets('shows a snackbar when a clip reverse render fails', (
+      tester,
+    ) async {
+      final clipBloc = _MockClipEditorBloc();
+      final failureState = ClipEditorState(
+        lastReverseResult: ClipReverseFailure(),
+      );
+
+      when(() => clipBloc.state).thenReturn(const ClipEditorState());
+      whenListen(
+        clipBloc,
+        Stream<ClipEditorState>.fromIterable([failureState]),
+        initialState: const ClipEditorState(),
+      );
+
+      await tester.pumpWidget(
+        buildWidget(isLoading: true, clipBlocOverride: clipBloc),
+      );
+      await tester.pump();
+
+      final l10n = lookupAppLocalizations(const Locale('en'));
+      expect(find.text(l10n.videoEditorReverseFailed), findsOneWidget);
+    });
+
+    testWidgets(
+      'shows a snackbar when a clip reverse has no local file',
+      (tester) async {
+        final clipBloc = _MockClipEditorBloc();
+        final noFileState = ClipEditorState(
+          lastReverseResult: ClipReverseNoLocalFile(),
+        );
+
+        when(() => clipBloc.state).thenReturn(const ClipEditorState());
+        whenListen(
+          clipBloc,
+          Stream<ClipEditorState>.fromIterable([noFileState]),
+          initialState: const ClipEditorState(),
+        );
+
+        await tester.pumpWidget(
+          buildWidget(isLoading: true, clipBlocOverride: clipBloc),
+        );
+        await tester.pump();
+
+        final l10n = lookupAppLocalizations(const Locale('en'));
+        expect(find.text(l10n.videoEditorReverseNoLocalFile), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'ignores discarded reverse results without a snackbar',
+      (tester) async {
+        final clipBloc = _MockClipEditorBloc();
+        final discardedState = ClipEditorState(
+          lastReverseResult: ClipReverseDiscarded(),
+        );
+
+        when(() => clipBloc.state).thenReturn(const ClipEditorState());
+        whenListen(
+          clipBloc,
+          Stream<ClipEditorState>.fromIterable([discardedState]),
+          initialState: const ClipEditorState(),
+        );
+
+        await tester.pumpWidget(
+          buildWidget(isLoading: true, clipBlocOverride: clipBloc),
+        );
+        await tester.pump();
+
+        expect(find.byType(SnackBar), findsNothing);
       },
     );
 

@@ -7941,6 +7941,25 @@ class AppLocalizationsSv extends AppLocalizations {
       'Ange uppspelningshastighet för valt klipp';
 
   @override
+  String get videoEditorReverseLabel => 'Baklänges';
+
+  @override
+  String get videoEditorReverseClipSemanticLabel =>
+      'Aktivera eller inaktivera omvänd uppspelning för valt klipp';
+
+  @override
+  String get videoEditorReverseProgressLabel =>
+      'Ett ögonblick, vi vänder ditt klipp baklänges';
+
+  @override
+  String get videoEditorReverseNoLocalFile =>
+      'Kan inte vända baklänges: klippet är inte tillgängligt lokalt.';
+
+  @override
+  String get videoEditorReverseFailed =>
+      'Kunde inte vända klippet baklänges. Försök igen.';
+
+  @override
   String get videoEditorSpeedSheetTitle => 'Klipphastighet';
 
   @override

@@ -8023,6 +8023,25 @@ class AppLocalizationsFil extends AppLocalizations {
       'Itakda ang bilis ng playback para sa napiling clip';
 
   @override
+  String get videoEditorReverseLabel => 'Baligtad';
+
+  @override
+  String get videoEditorReverseClipSemanticLabel =>
+      'I-toggle ang pabalik na pagpapalaro para sa napiling clip';
+
+  @override
+  String get videoEditorReverseProgressLabel =>
+      'Sandali lang, nirereverse namin ang clip mo';
+
+  @override
+  String get videoEditorReverseNoLocalFile =>
+      'Hindi ma-reverse: hindi available ang clip nang lokal.';
+
+  @override
+  String get videoEditorReverseFailed =>
+      'Hindi na-reverse ang clip. Pakisubukang muli.';
+
+  @override
   String get videoEditorSpeedSheetTitle => 'Bilis ng Clip';
 
   @override
