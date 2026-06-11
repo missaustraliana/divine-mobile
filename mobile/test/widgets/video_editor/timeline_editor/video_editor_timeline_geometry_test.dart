@@ -3,9 +3,29 @@
 // ABOUTME: across single-clip, multi-clip, and empty-clip compositions.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:models/models.dart' show AudioEvent;
 import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/video_editor_timeline_geometry.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
+
+AudioEvent _audio({
+  required String id,
+  required Duration startTime,
+  required Duration endTime,
+  Duration startOffset = Duration.zero,
+  double? duration,
+  String? anchorClipId,
+}) => AudioEvent(
+  id: id,
+  pubkey: '',
+  createdAt: 0,
+  url: '/tmp/$id.wav',
+  duration: duration,
+  startTime: startTime,
+  endTime: endTime,
+  startOffset: startOffset,
+  anchorClipId: anchorClipId,
+);
 
 DivineVideoClip _clip(
   String id,
@@ -39,11 +59,7 @@ void main() {
   //   pos  5 s  → 5 * 52 + 2 gaps = 262 px  (start of gap after clip 1)
   //   pos  6 s  → 6 * 52 + 2 gaps = 314 px  (within clip 2)
 
-  final clips = [
-    _clip('c0', 2),
-    _clip('c1', 3),
-    _clip('c2', 2),
-  ];
+  final clips = [_clip('c0', 2), _clip('c1', 3), _clip('c2', 2)];
   const pps = 52.0;
   const totalDuration = Duration(seconds: 7);
 
@@ -351,12 +367,7 @@ void main() {
     test('respects playback speed for preceding and target clips', () {
       final trimClips = [
         _clip('clip-1', 10, speed: 2.0),
-        _clip(
-          'clip-2',
-          10,
-          speed: 2.0,
-          trimStart: const Duration(seconds: 2),
-        ),
+        _clip('clip-2', 10, speed: 2.0, trimStart: const Duration(seconds: 2)),
       ];
 
       expect(
@@ -423,50 +434,26 @@ void main() {
     });
 
     test('sorts rebased markers from multiple clips', () {
-      final oldClips = [
-        _clip('a', 3),
-        _clip('b', 5),
-        _clip('c', 2),
-      ];
-      final newClips = [
-        _clip('c', 2),
-        _clip('a', 3),
-        _clip('b', 5),
-      ];
+      final oldClips = [_clip('a', 3), _clip('b', 5), _clip('c', 2)];
+      final newClips = [_clip('c', 2), _clip('a', 3), _clip('b', 5)];
 
       expect(
         rebaseTimelineMarkersForClipState(
           oldClips: oldClips,
           newClips: newClips,
-          markers: [
-            const Duration(seconds: 4),
-            const Duration(seconds: 9),
-          ],
+          markers: [const Duration(seconds: 4), const Duration(seconds: 9)],
         ),
-        equals([
-          const Duration(seconds: 1),
-          const Duration(seconds: 6),
-        ]),
+        equals([const Duration(seconds: 1), const Duration(seconds: 6)]),
       );
     });
 
     test('respects trimmed and speed-adjusted playback duration', () {
       final oldClips = [
         _clip('intro', 10, speed: 2.0),
-        _clip(
-          'target',
-          10,
-          speed: 2.0,
-          trimStart: const Duration(seconds: 2),
-        ),
+        _clip('target', 10, speed: 2.0, trimStart: const Duration(seconds: 2)),
       ];
       final newClips = [
-        _clip(
-          'target',
-          10,
-          speed: 2.0,
-          trimStart: const Duration(seconds: 2),
-        ),
+        _clip('target', 10, speed: 2.0, trimStart: const Duration(seconds: 2)),
         _clip('intro', 10, speed: 2.0),
       ];
 
@@ -481,16 +468,8 @@ void main() {
     });
 
     test('anchors an exact internal boundary to the following clip', () {
-      final oldClips = [
-        _clip('a', 3),
-        _clip('b', 5),
-        _clip('c', 2),
-      ];
-      final newClips = [
-        _clip('c', 2),
-        _clip('b', 5),
-        _clip('a', 3),
-      ];
+      final oldClips = [_clip('a', 3), _clip('b', 5), _clip('c', 2)];
+      final newClips = [_clip('c', 2), _clip('b', 5), _clip('a', 3)];
 
       expect(
         rebaseTimelineMarkersForClipState(
@@ -504,9 +483,7 @@ void main() {
 
     test('drops a marker when its source position is trimmed from the end', () {
       final oldClips = [_clip('clip', 6)];
-      final newClips = [
-        _clip('clip', 6, trimEnd: const Duration(seconds: 3)),
-      ];
+      final newClips = [_clip('clip', 6, trimEnd: const Duration(seconds: 3))];
 
       expect(
         rebaseTimelineMarkersForClipState(
@@ -568,14 +545,8 @@ void main() {
     });
 
     test('shifts later markers when a preceding clip speed changes', () {
-      final oldClips = [
-        _clip('intro', 4),
-        _clip('target', 6),
-      ];
-      final newClips = [
-        _clip('intro', 4, speed: 2.0),
-        _clip('target', 6),
-      ];
+      final oldClips = [_clip('intro', 4), _clip('target', 6)];
+      final newClips = [_clip('intro', 4, speed: 2.0), _clip('target', 6)];
 
       expect(
         rebaseTimelineMarkersForClipState(
@@ -588,10 +559,7 @@ void main() {
     });
 
     test('drops markers whose source clip no longer exists', () {
-      final oldClips = [
-        _clip('a', 3),
-        _clip('b', 5),
-      ];
+      final oldClips = [_clip('a', 3), _clip('b', 5)];
       final newClips = [_clip('a', 3)];
 
       expect(
@@ -605,15 +573,8 @@ void main() {
     });
 
     test('shifts later markers earlier when a preceding clip is removed', () {
-      final oldClips = [
-        _clip('a', 3),
-        _clip('b', 5),
-        _clip('c', 4),
-      ];
-      final newClips = [
-        _clip('a', 3),
-        _clip('c', 4),
-      ];
+      final oldClips = [_clip('a', 3), _clip('b', 5), _clip('c', 4)];
+      final newClips = [_clip('a', 3), _clip('c', 4)];
 
       expect(
         rebaseTimelineMarkersForClipState(
@@ -628,41 +589,22 @@ void main() {
     test('keeps earlier markers in place when a clip is appended', () {
       // Mirrors the clip-duplication call site: the copy is added at the
       // end, so markers on the existing clips must not move.
-      final oldClips = [
-        _clip('a', 3),
-        _clip('b', 5),
-      ];
-      final newClips = [
-        _clip('a', 3),
-        _clip('b', 5),
-        _clip('a_copy', 3),
-      ];
+      final oldClips = [_clip('a', 3), _clip('b', 5)];
+      final newClips = [_clip('a', 3), _clip('b', 5), _clip('a_copy', 3)];
 
       expect(
         rebaseTimelineMarkersForClipState(
           oldClips: oldClips,
           newClips: newClips,
-          markers: [
-            const Duration(seconds: 1),
-            const Duration(seconds: 6),
-          ],
+          markers: [const Duration(seconds: 1), const Duration(seconds: 6)],
         ),
-        equals([
-          const Duration(seconds: 1),
-          const Duration(seconds: 6),
-        ]),
+        equals([const Duration(seconds: 1), const Duration(seconds: 6)]),
       );
     });
 
     test('clamps a marker past the timeline end to the last clip end', () {
-      final oldClips = [
-        _clip('a', 3),
-        _clip('b', 5),
-      ];
-      final newClips = [
-        _clip('a', 3),
-        _clip('b', 5),
-      ];
+      final oldClips = [_clip('a', 3), _clip('b', 5)];
+      final newClips = [_clip('a', 3), _clip('b', 5)];
 
       expect(
         rebaseTimelineMarkersForClipState(
@@ -705,10 +647,7 @@ void main() {
   group('speed-aware geometry', () {
     // Two-clip composition: clip 0 is 10 s at 2×speed (→ 5 s wide),
     // clip 1 is 4 s at 1×speed (→ 4 s wide).  Total playback = 9 s.
-    final speedClips = [
-      _clip('fast', 10, speed: 2.0),
-      _clip('normal', 4),
-    ];
+    final speedClips = [_clip('fast', 10, speed: 2.0), _clip('normal', 4)];
     const speedPps = 52.0;
     const speedTotal = Duration(seconds: 9);
 
@@ -835,17 +774,11 @@ void main() {
     });
 
     test('subtracts one gap at first boundary', () {
-      expect(
-        timelineOverlayOffsetToMs(edges, 105, pps, totalMs),
-        equals(2000),
-      );
+      expect(timelineOverlayOffsetToMs(edges, 105, pps, totalMs), equals(2000));
     });
 
     test('subtracts two gaps at second boundary', () {
-      expect(
-        timelineOverlayOffsetToMs(edges, 262, pps, totalMs),
-        equals(5000),
-      );
+      expect(timelineOverlayOffsetToMs(edges, 262, pps, totalMs), equals(5000));
     });
 
     test('offset inside a gap clamps to the shared boundary', () {
@@ -871,5 +804,308 @@ void main() {
         );
       });
     }
+  });
+
+  group(audioLeftTrimResult, () {
+    test('advances the source offset when the left handle moves right', () {
+      final track = _audio(
+        id: 'sound',
+        startTime: const Duration(seconds: 10),
+        endTime: const Duration(seconds: 20),
+      );
+
+      final result = audioLeftTrimResult(
+        track,
+        newStartTime: const Duration(seconds: 13),
+      );
+
+      expect(result.startOffset, const Duration(seconds: 3));
+      expect(result.anchorStillValid, isTrue);
+    });
+
+    test('clears the anchor when revealing before the audio source head', () {
+      final track = _audio(
+        id: 'sound',
+        startTime: const Duration(seconds: 13),
+        endTime: const Duration(seconds: 20),
+        startOffset: const Duration(seconds: 2),
+      );
+
+      final result = audioLeftTrimResult(
+        track,
+        newStartTime: const Duration(seconds: 10),
+      );
+
+      expect(result.startOffset, Duration.zero);
+      expect(result.anchorStillValid, isFalse);
+    });
+
+    test(
+      'clears the anchor when trimming beyond the audio source duration',
+      () {
+        final track = _audio(
+          id: 'sound',
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 20),
+          startOffset: const Duration(seconds: 8),
+          duration: 10,
+        );
+
+        final result = audioLeftTrimResult(
+          track,
+          newStartTime: const Duration(seconds: 13),
+        );
+
+        expect(result.startOffset, const Duration(seconds: 10));
+        expect(result.anchorStillValid, isFalse);
+      },
+    );
+  });
+
+  group(rebaseAnchoredAudioForClipState, () {
+    // Two clips, both 10 s, no trim. clip-b starts at timeline 10 s.
+    // An anchored track covers clip-b exactly: 10–20 s, startOffset 0.
+    List<DivineVideoClip> baseClips() => [_clip('a', 10), _clip('b', 10)];
+
+    test('shifts the anchored track left when its clip is trimmed left', () {
+      // Trim clip-b's left edge by 3 s. The audio keeps its full content and
+      // span, translating left so its tail stays in sync (J-Cut).
+      final clips = [
+        _clip('a', 10),
+        _clip('b', 10, trimStart: const Duration(seconds: 3)),
+      ];
+      final track = _audio(
+        id: 'b-audio',
+        startTime: const Duration(seconds: 10),
+        endTime: const Duration(seconds: 20),
+        anchorClipId: 'b',
+      );
+
+      final result = rebaseAnchoredAudioForClipState(clips, [track]);
+
+      expect(result.single.startTime, const Duration(seconds: 7));
+      expect(result.single.endTime, const Duration(seconds: 17));
+      // Content (startOffset) and span are preserved.
+      expect(result.single.startOffset, Duration.zero);
+      expect(
+        result.single.endTime! - result.single.startTime,
+        const Duration(seconds: 10),
+      );
+    });
+
+    test('keeps the anchored track in place when its clip is right-trimmed '
+        '(L-Cut overhang into the next clip)', () {
+      // [a:10][b:10][c:10]. clip-b right-trimmed by 3 s → b occupies
+      // timeline 10–17 s, c ripples to 17–27 s. The anchored audio must stay
+      // put so its tail (…20 s) trails over clip-c's video.
+      final clips = [
+        _clip('a', 10),
+        _clip('b', 10, trimEnd: const Duration(seconds: 3)),
+        _clip('c', 10),
+      ];
+      final track = _audio(
+        id: 'b-audio',
+        startTime: const Duration(seconds: 10),
+        endTime: const Duration(seconds: 20),
+        anchorClipId: 'b',
+      );
+
+      final result = rebaseAnchoredAudioForClipState(clips, [track]);
+
+      // Audio does not move on a right-trim.
+      expect(result.single.startTime, const Duration(seconds: 10));
+      expect(result.single.endTime, const Duration(seconds: 20));
+      // Its end now overhangs clip-b's trimmed end (17 s) into clip-c.
+      expect(result.single.endTime, greaterThan(const Duration(seconds: 17)));
+    });
+
+    test('ripples a later anchored track when an earlier clip is trimmed', () {
+      // clip-a trimmed left by 4 s → total shrinks, clip-b ripples to start
+      // at timeline 6 s. clip-b's anchored audio must follow.
+      final clips = [
+        _clip('a', 10, trimStart: const Duration(seconds: 4)),
+        _clip('b', 10),
+      ];
+      final track = _audio(
+        id: 'b-audio',
+        startTime: const Duration(seconds: 10),
+        endTime: const Duration(seconds: 20),
+        anchorClipId: 'b',
+      );
+
+      final result = rebaseAnchoredAudioForClipState(clips, [track]);
+
+      expect(result.single.startTime, const Duration(seconds: 6));
+      expect(result.single.endTime, const Duration(seconds: 16));
+    });
+
+    test(
+      'uses playback-time starts when an earlier clip has playbackSpeed',
+      () {
+        // clip-a is 4 s source at 0.5x, so it occupies 8 s on the timeline.
+        // clip-b's anchored audio follows that playback-time start.
+        final clips = [_clip('a', 4, speed: 0.5), _clip('b', 10)];
+        final track = _audio(
+          id: 'b-audio',
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 20),
+          anchorClipId: 'b',
+        );
+
+        final result = rebaseAnchoredAudioForClipState(clips, [track]);
+
+        expect(result.single.startTime, const Duration(seconds: 8));
+        expect(result.single.endTime, const Duration(seconds: 18));
+      },
+    );
+
+    test('preserves a user-shortened span (L-Cut) while translating', () {
+      // User right-trimmed the audio to 10–15 s (5 s span). A later clip
+      // edit must keep that span, only translating it.
+      final clips = [
+        _clip('a', 10),
+        _clip('b', 10, trimStart: const Duration(seconds: 3)),
+      ];
+      final track = _audio(
+        id: 'b-audio',
+        startTime: const Duration(seconds: 10),
+        endTime: const Duration(seconds: 15),
+        anchorClipId: 'b',
+      );
+
+      final result = rebaseAnchoredAudioForClipState(clips, [track]);
+
+      expect(result.single.startTime, const Duration(seconds: 7));
+      expect(result.single.endTime, const Duration(seconds: 12));
+    });
+
+    test('clips impossible pre-roll for an anchored first clip', () {
+      // clip-a is first (timeline start 0). Trimming it left by 3 s cannot
+      // produce a lead, so the start clamps to zero and the lost pre-roll is
+      // consumed from the audio source offset instead.
+      final clips = [
+        _clip('a', 10, trimStart: const Duration(seconds: 3)),
+        _clip('b', 10),
+      ];
+      final track = _audio(
+        id: 'a-audio',
+        startTime: Duration.zero,
+        endTime: const Duration(seconds: 10),
+        anchorClipId: 'a',
+      );
+
+      final result = rebaseAnchoredAudioForClipState(clips, [track]);
+
+      expect(result.single.startTime, Duration.zero);
+      expect(result.single.startOffset, const Duration(seconds: 3));
+      expect(result.single.endTime, const Duration(seconds: 7));
+      expect(
+        result.single.endTime! - result.single.startTime,
+        const Duration(seconds: 7),
+      );
+    });
+
+    test('leaves an un-anchored track untouched', () {
+      final clips = [
+        _clip('a', 10),
+        _clip('b', 10, trimStart: const Duration(seconds: 3)),
+      ];
+      final tracks = [
+        _audio(
+          id: 'free',
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 20),
+        ),
+      ];
+
+      final result = rebaseAnchoredAudioForClipState(clips, tracks);
+
+      // No anchored track moved → original list instance returned.
+      expect(identical(result, tracks), isTrue);
+      expect(result.single.startTime, const Duration(seconds: 10));
+      expect(result.single.endTime, const Duration(seconds: 20));
+    });
+
+    test('leaves a track whose anchor clip was removed untouched', () {
+      final track = _audio(
+        id: 'orphan',
+        startTime: const Duration(seconds: 10),
+        endTime: const Duration(seconds: 20),
+        anchorClipId: 'gone',
+      );
+
+      final result = rebaseAnchoredAudioForClipState(baseClips(), [track]);
+
+      expect(result.single.startTime, const Duration(seconds: 10));
+      expect(result.single.endTime, const Duration(seconds: 20));
+    });
+
+    test(
+      'left-trimmed anchored audio is not repositioned by an unrelated clip edit',
+      () {
+        // The sound began aligned with clip-b at 10–20 s, then the user moved
+        // its left trim handle to 13 s. The trim consumes 3 s of source audio,
+        // so the anchor invariant still holds after any unrelated clip edit.
+        final clips = [_clip('a', 10), _clip('b', 10), _clip('copy', 10)];
+        final track = _audio(
+          id: 'b-audio',
+          startTime: const Duration(seconds: 13),
+          endTime: const Duration(seconds: 20),
+          startOffset: const Duration(seconds: 3),
+          anchorClipId: 'b',
+        );
+        final tracks = [track];
+
+        final result = rebaseAnchoredAudioForClipState(clips, tracks);
+
+        expect(identical(result, tracks), isTrue);
+        expect(result.single.startTime, const Duration(seconds: 13));
+        expect(result.single.endTime, const Duration(seconds: 20));
+        expect(result.single.startOffset, const Duration(seconds: 3));
+      },
+    );
+
+    test(
+      'detached clamped left-trim audio is not repositioned by a later clip edit',
+      () {
+        final clips = [_clip('a', 10), _clip('b', 10), _clip('copy', 10)];
+        final track = _audio(
+          id: 'b-audio',
+          startTime: const Duration(seconds: 9),
+          endTime: const Duration(seconds: 19),
+        );
+        final tracks = [track];
+
+        final result = rebaseAnchoredAudioForClipState(clips, tracks);
+
+        expect(identical(result, tracks), isTrue);
+        expect(result.single.startTime, const Duration(seconds: 9));
+        expect(result.single.endTime, const Duration(seconds: 19));
+      },
+    );
+
+    test('returns the same list instance when nothing moves', () {
+      // Anchored track already aligned with its un-edited clip.
+      final tracks = [
+        _audio(
+          id: 'b-audio',
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 20),
+          anchorClipId: 'b',
+        ),
+      ];
+
+      final result = rebaseAnchoredAudioForClipState(baseClips(), tracks);
+
+      expect(identical(result, tracks), isTrue);
+    });
+
+    test('returns the same empty list instance', () {
+      const tracks = <AudioEvent>[];
+      expect(
+        identical(rebaseAnchoredAudioForClipState(baseClips(), tracks), tracks),
+        isTrue,
+      );
+    });
   });
 }

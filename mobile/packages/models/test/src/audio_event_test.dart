@@ -690,6 +690,28 @@ void main() {
         expect(event1, isNot(equals(event2)));
         expect(event1.hashCode, isNot(equals(event2.hashCode)));
       });
+
+      test('events with same id but different anchorClipId are not equal', () {
+        const event1 = AudioEvent(
+          id: 'same-id-123456789012345678901234567890123456789012345678901',
+          pubkey: 'pubkey',
+          createdAt: 1700000000,
+          url: 'https://example.com/audio.aac',
+          mimeType: 'audio/aac',
+          anchorClipId: 'clip-a',
+        );
+
+        const event2 = AudioEvent(
+          id: 'same-id-123456789012345678901234567890123456789012345678901',
+          pubkey: 'pubkey',
+          createdAt: 1700000000,
+          url: 'https://example.com/audio.aac',
+          mimeType: 'audio/aac',
+        );
+
+        expect(event1, isNot(equals(event2)));
+        expect(event1.hashCode, isNot(equals(event2.hashCode)));
+      });
     });
 
     group('toString', () {
@@ -1110,6 +1132,52 @@ void main() {
 
         expect(updated.startOffset, equals(const Duration(seconds: 5)));
         expect(updated.title, equals('New Title'));
+      });
+    });
+
+    group('anchorClipId', () {
+      const anchored = AudioEvent(
+        id: 'anchor-id-123456789012345678901234567890123456789012345678901',
+        pubkey: testPubkey,
+        createdAt: 1700000000,
+        url: 'https://example.com/audio.aac',
+        anchorClipId: 'clip-7',
+      );
+
+      test('isAnchored reflects anchorClipId presence', () {
+        expect(anchored.isAnchored, isTrue);
+        expect(
+          anchored.copyWith(clearAnchorClipId: true).isAnchored,
+          isFalse,
+        );
+      });
+
+      test('copyWith clears the anchor with clearAnchorClipId', () {
+        final unanchored = anchored.copyWith(clearAnchorClipId: true);
+        expect(unanchored.anchorClipId, isNull);
+        // Other fields are preserved.
+        expect(unanchored.id, equals(anchored.id));
+        expect(unanchored.url, equals(anchored.url));
+      });
+
+      test('copyWith preserves the anchor when not specified', () {
+        final updated = anchored.copyWith(title: 'New Title');
+        expect(updated.anchorClipId, equals('clip-7'));
+      });
+
+      test('survives a toJson/fromJson roundtrip', () {
+        final restored = AudioEvent.fromJson(anchored.toJson());
+        expect(restored.anchorClipId, equals('clip-7'));
+      });
+
+      test('is omitted from JSON when null', () {
+        const original = AudioEvent(
+          id: 'plain-id-1234567890123456789012345678901234567890123456789012',
+          pubkey: testPubkey,
+          createdAt: 1700000000,
+        );
+        expect(original.toJson(), isNot(contains('anchorClipId')));
+        expect(AudioEvent.fromJson(original.toJson()).anchorClipId, isNull);
       });
     });
   });

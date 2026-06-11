@@ -2,6 +2,7 @@
 // ABOUTME: Converts between playback positions and scroll offsets,
 // ABOUTME: accounting for the 1-px gap between adjacent clip strips.
 
+import 'package:models/models.dart' show AudioEvent;
 import 'package:openvine/constants/video_editor_timeline_constants.dart';
 import 'package:openvine/models/divine_video_clip.dart';
 
@@ -28,9 +29,7 @@ Duration? clipSourcePositionToTimelinePosition(
       final speed = clip.playbackSpeed ?? 1.0;
       final relativePlayback = speed <= 0 || speed == 1.0
           ? relative
-          : Duration(
-              microseconds: (relative.inMicroseconds / speed).round(),
-            );
+          : Duration(microseconds: (relative.inMicroseconds / speed).round());
       return precedingDuration + relativePlayback;
     }
 
@@ -38,6 +37,52 @@ Duration? clipSourcePositionToTimelinePosition(
   }
 
   return null;
+}
+
+/// Returns the source offset and anchor state for an audio track after its
+/// timeline start handle moves to [newStartTime].
+///
+/// Left-trimming a sound should consume or reveal audio source content rather
+/// than sliding the same source frame to a new timeline position. Keeping this
+/// offset in step with the timeline start also preserves the anchored-audio
+/// alignment invariant used by [rebaseAnchoredAudioForClipState].
+AudioLeftTrimResult audioLeftTrimResult(
+  AudioEvent track, {
+  required Duration newStartTime,
+}) {
+  final nextOffset = track.startOffset + (newStartTime - track.startTime);
+  if (nextOffset < Duration.zero) {
+    return const AudioLeftTrimResult(
+      startOffset: Duration.zero,
+      anchorStillValid: false,
+    );
+  }
+
+  final duration = track.duration;
+  if (duration == null) {
+    return AudioLeftTrimResult(startOffset: nextOffset);
+  }
+
+  final maxOffset = Duration(milliseconds: (duration * 1000).round());
+  if (nextOffset > maxOffset) {
+    return AudioLeftTrimResult(startOffset: maxOffset, anchorStillValid: false);
+  }
+  return AudioLeftTrimResult(startOffset: nextOffset);
+}
+
+/// Result of applying a left trim to an audio track's source offset.
+class AudioLeftTrimResult {
+  const AudioLeftTrimResult({
+    required this.startOffset,
+    this.anchorStillValid = true,
+  });
+
+  /// Source offset to apply to the track.
+  final Duration startOffset;
+
+  /// Whether the requested timeline start can still be represented by the
+  /// anchored-audio alignment invariant.
+  final bool anchorStillValid;
 }
 
 /// Reprojects marker positions after clip order, trim, or speed changes.
@@ -88,6 +133,95 @@ List<Duration> rebaseTimelineMarkersForClipState({
   return rebased.toList()..sort();
 }
 
+/// Re-aligns anchored (extracted, not-yet-moved) audio tracks to their
+/// source clips after a clip edit (trim, reorder, or ripple from an earlier
+/// clip's trim).
+///
+/// For each [AudioEvent] whose [AudioEvent.anchorClipId] still resolves to a
+/// clip in [clips], the audio is translated on the timeline so its source
+/// content stays aligned with the clip's source content. This implements the
+/// J-Cut behaviour: the audio keeps its [AudioEvent.startOffset] and its span
+/// (so its full content survives — the head simply leads), while only its
+/// [AudioEvent.startTime]/[AudioEvent.endTime] move. If that lead would start
+/// before timeline zero, the impossible pre-roll is clipped by advancing
+/// [AudioEvent.startOffset] and shortening the audible span.
+///
+/// The alignment invariant preserved is, for the anchored clip:
+///
+///   startTime == clipTimelineStart - clip.trimStart + audio.startOffset
+///
+/// [clipTimelineStart] is accumulated in playback time so earlier clip speed
+/// changes still ripple anchored audio correctly. [AudioEvent.startOffset] and
+/// [DivineVideoClip.trimStart] remain source-time values because extracted
+/// audio is not tempo-adjusted; if extracted audio becomes speed-adjusted, this
+/// conversion must be revisited.
+///
+/// Tracks with no anchor, or whose anchor clip was removed or split into new
+/// clip IDs, are returned unchanged. The original list instance is returned
+/// when nothing moved, so callers can cheaply detect a no-op via `identical`.
+List<AudioEvent> rebaseAnchoredAudioForClipState(
+  List<DivineVideoClip> clips,
+  List<AudioEvent> audioTracks,
+) {
+  if (audioTracks.isEmpty) return audioTracks;
+
+  final clipStarts = <String, Duration>{};
+  final clipsById = <String, DivineVideoClip>{};
+  var cursor = Duration.zero;
+  for (final clip in clips) {
+    clipStarts[clip.id] = cursor;
+    clipsById[clip.id] = clip;
+    cursor += clip.playbackDuration;
+  }
+
+  var changed = false;
+  final result = <AudioEvent>[];
+  for (final track in audioTracks) {
+    final anchorId = track.anchorClipId;
+    final clipStart = anchorId == null ? null : clipStarts[anchorId];
+    final clip = anchorId == null ? null : clipsById[anchorId];
+    if (clipStart == null || clip == null) {
+      result.add(track);
+      continue;
+    }
+
+    final span = (track.endTime ?? track.startTime) - track.startTime;
+    final newStartRaw = clipStart + track.startOffset - clip.trimStart;
+    var newStart = newStartRaw;
+    var newStartOffset = track.startOffset;
+    var newSpan = span;
+
+    if (newStartRaw < Duration.zero) {
+      final clippedLead = Duration.zero - newStartRaw;
+      newStart = Duration.zero;
+      newStartOffset += clippedLead;
+      newSpan -= clippedLead;
+      if (newSpan < Duration.zero) {
+        newSpan = Duration.zero;
+      }
+    }
+
+    final newEnd = track.endTime == null ? null : newStart + newSpan;
+
+    if (newStart == track.startTime &&
+        newEnd == track.endTime &&
+        newStartOffset == track.startOffset) {
+      result.add(track);
+      continue;
+    }
+    changed = true;
+    result.add(
+      track.copyWith(
+        startOffset: newStartOffset,
+        startTime: newStart,
+        endTime: newEnd,
+      ),
+    );
+  }
+
+  return changed ? result : audioTracks;
+}
+
 _TimelineMarkerAnchor? _timelineMarkerAnchorForPosition(
   List<DivineVideoClip> clips,
   Duration marker,
@@ -122,9 +256,7 @@ Duration _playbackOffsetToSourcePosition(
   final speed = clip.playbackSpeed ?? 1.0;
   final sourceOffset = speed <= 0 || speed == 1.0
       ? playbackOffset
-      : Duration(
-          microseconds: (playbackOffset.inMicroseconds * speed).round(),
-        );
+      : Duration(microseconds: (playbackOffset.inMicroseconds * speed).round());
 
   return clip.trimStart + _clampDuration(sourceOffset, clip.trimmedDuration);
 }
@@ -143,9 +275,7 @@ Duration? _sourcePositionToPlaybackOffset(
   final speed = clip.playbackSpeed ?? 1.0;
   if (speed <= 0 || speed == 1.0) return sourceOffset;
 
-  return Duration(
-    microseconds: (sourceOffset.inMicroseconds / speed).round(),
-  );
+  return Duration(microseconds: (sourceOffset.inMicroseconds / speed).round());
 }
 
 Duration _clampDuration(Duration value, Duration max) {
