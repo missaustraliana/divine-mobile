@@ -680,10 +680,9 @@ class ClipEditorBloc extends Bloc<ClipEditorEvent, ClipEditorState> {
       onFinalClipInvalidated.call();
     } catch (e, stackTrace) {
       final error = switch (e) {
-        StateError() || TypeError() || RangeError() => Reportable(
-          e,
-          context: '_onClipReverseRequested',
-        ),
+        StateError() ||
+        TypeError() ||
+        RangeError() => Reportable(e, context: '_onClipReverseRequested'),
         _ => e,
       };
       addError(error, stackTrace);
@@ -713,6 +712,7 @@ class ClipEditorBloc extends Bloc<ClipEditorEvent, ClipEditorState> {
 
     final clip = clips[state.currentClipIndex];
     final videoPath = clip.video.file?.path;
+    final extractionSpeed = _effectiveAudioExtractionSpeed(clip);
 
     if (videoPath == null) {
       Log.warning(
@@ -729,7 +729,10 @@ class ClipEditorBloc extends Bloc<ClipEditorEvent, ClipEditorState> {
     emit(state.copyWith(isExtractingAudio: true));
 
     try {
-      final result = await _audioExtractionService.extractAudio(videoPath);
+      final result = await _audioExtractionService.extractAudio(
+        videoPath: videoPath,
+        speed: extractionSpeed,
+      );
 
       // Reconcile against current state after the async gap.
       // Other event handlers (remove, split, insert) may have mutated
@@ -746,6 +749,7 @@ class ClipEditorBloc extends Bloc<ClipEditorEvent, ClipEditorState> {
           name: 'ClipEditorBloc',
           category: LogCategory.video,
         );
+        await _cleanupDiscardedAudioExtraction(result.audioFilePath);
         emit(
           state.copyWith(
             isExtractingAudio: false,
@@ -756,6 +760,27 @@ class ClipEditorBloc extends Bloc<ClipEditorEvent, ClipEditorState> {
       }
 
       final currentClip = currentClips[currentIndex];
+      final currentVideoPath = currentClip.video.file?.path;
+      final currentExtractionSpeed = _effectiveAudioExtractionSpeed(
+        currentClip,
+      );
+      if (currentVideoPath != videoPath ||
+          currentExtractionSpeed != extractionSpeed) {
+        Log.warning(
+          '⚠️ Audio extraction result discarded: clip ${clip.id} source '
+          'changed while extraction was running',
+          name: 'ClipEditorBloc',
+          category: LogCategory.video,
+        );
+        await _cleanupDiscardedAudioExtraction(result.audioFilePath);
+        emit(
+          state.copyWith(
+            isExtractingAudio: false,
+            lastAudioExtraction: ClipAudioExtractionDiscarded(),
+          ),
+        );
+        return;
+      }
 
       // Recompute absolute start from current state so clips inserted
       // or removed before this one are accounted for.
@@ -772,9 +797,11 @@ class ClipEditorBloc extends Bloc<ClipEditorEvent, ClipEditorState> {
         mimeType: result.mimeType,
         sha256: result.sha256Hash,
         fileSize: result.fileSize,
-        duration: currentClip.duration.inMilliseconds / 1000,
+        duration: result.duration,
         title: event.clipTitle,
-        startOffset: currentClip.trimStart,
+        startOffset: currentClip.sourceDurationToPlaybackDuration(
+          currentClip.trimStart,
+        ),
         startTime: clipStart,
         endTime: clipStart + currentClip.playbackDuration,
         // Anchor the extracted audio to its source clip so it follows the
@@ -835,6 +862,23 @@ class ClipEditorBloc extends Bloc<ClipEditorEvent, ClipEditorState> {
           isExtractingAudio: false,
           lastAudioExtraction: ClipAudioExtractionFailure(),
         ),
+      );
+    }
+  }
+
+  double _effectiveAudioExtractionSpeed(DivineVideoClip clip) {
+    final speed = clip.playbackSpeed;
+    return speed != null && speed > 0 ? speed : 1.0;
+  }
+
+  Future<void> _cleanupDiscardedAudioExtraction(String audioFilePath) async {
+    try {
+      await _audioExtractionService.cleanupAudioFile(audioFilePath);
+    } catch (e) {
+      Log.warning(
+        '⚠️ Failed to cleanup discarded extracted audio: $e',
+        name: 'ClipEditorBloc',
+        category: LogCategory.video,
       );
     }
   }

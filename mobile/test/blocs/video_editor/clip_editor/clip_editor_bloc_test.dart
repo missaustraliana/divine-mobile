@@ -60,6 +60,7 @@ DivineVideoClip _createClipWithFile({
   Duration duration = const Duration(seconds: 5),
   Duration trimStart = const Duration(seconds: 1),
   Duration trimEnd = const Duration(milliseconds: 500),
+  double? playbackSpeed,
 }) {
   return DivineVideoClip(
     id: id,
@@ -68,6 +69,7 @@ DivineVideoClip _createClipWithFile({
     recordedAt: DateTime(2025),
     targetAspectRatio: .vertical,
     originalAspectRatio: 9 / 16,
+    playbackSpeed: playbackSpeed,
   ).copyWith(trimStart: trimStart, trimEnd: trimEnd);
 }
 
@@ -1191,9 +1193,8 @@ void main() {
         'keeps clips unmodifiable',
         build: buildBloc,
         seed: () => ClipEditorState(clips: twoClips),
-        act: (bloc) => bloc.add(
-          const ClipEditorAllClipsVolumeChanged(volume: -1.0),
-        ),
+        act: (bloc) =>
+            bloc.add(const ClipEditorAllClipsVolumeChanged(volume: -1.0)),
         expect: () => [
           isA<ClipEditorState>()
               .having(
@@ -1219,9 +1220,8 @@ void main() {
               .map((c) => c.copyWith(volume: 0.5))
               .toList(growable: false),
         ),
-        act: (bloc) => bloc.add(
-          const ClipEditorAllClipsVolumeChanged(volume: 2.0),
-        ),
+        act: (bloc) =>
+            bloc.add(const ClipEditorAllClipsVolumeChanged(volume: 2.0)),
         expect: () => [
           isA<ClipEditorState>().having(
             (s) => s.clips.map((c) => c.volume).toList(),
@@ -1235,9 +1235,8 @@ void main() {
         'is no-op when there are no clips',
         build: buildBloc,
         seed: () => const ClipEditorState(),
-        act: (bloc) => bloc.add(
-          const ClipEditorAllClipsVolumeChanged(volume: 0.0),
-        ),
+        act: (bloc) =>
+            bloc.add(const ClipEditorAllClipsVolumeChanged(volume: 0.0)),
         expect: () => <ClipEditorState>[],
       );
 
@@ -1245,9 +1244,8 @@ void main() {
         'is no-op when every clip already has the clamped target volume',
         build: buildBloc,
         seed: () => ClipEditorState(clips: twoClips),
-        act: (bloc) => bloc.add(
-          const ClipEditorAllClipsVolumeChanged(volume: 2.0),
-        ),
+        act: (bloc) =>
+            bloc.add(const ClipEditorAllClipsVolumeChanged(volume: 2.0)),
         expect: () => <ClipEditorState>[],
       );
     });
@@ -1649,6 +1647,9 @@ void main() {
 
       setUp(() {
         mockService = _MockAudioExtractionService();
+        when(
+          () => mockService.cleanupAudioFile(any()),
+        ).thenAnswer((_) async {});
       });
 
       blocTest<ClipEditorBloc, ClipEditorState>(
@@ -1670,7 +1671,12 @@ void main() {
       blocTest<ClipEditorBloc, ClipEditorState>(
         'emits isExtractingAudio then success with muted clip and correct endTime',
         build: () {
-          when(() => mockService.extractAudio(any())).thenAnswer(
+          when(
+            () => mockService.extractAudio(
+              videoPath: any(named: 'videoPath'),
+              speed: any(named: 'speed'),
+            ),
+          ).thenAnswer(
             (_) async => const AudioExtractionResult(
               audioFilePath: '/tmp/audio.m4a',
               duration: 5,
@@ -1704,18 +1710,79 @@ void main() {
           final result =
               bloc.state.lastAudioExtraction! as ClipAudioExtractionSuccess;
           final clip = _createClipWithFile();
-          // endTime must use trimmedDuration, not duration
-          expect(result.audioEvent.endTime, equals(clip.trimmedDuration));
+          // endTime must use playbackDuration, not raw duration.
+          expect(result.audioEvent.endTime, equals(clip.playbackDuration));
+          expect(result.audioEvent.duration, equals(5.0));
+          expect(result.audioEvent.startOffset, equals(clip.trimStart));
           // Extracted audio is anchored to its source clip by default.
           expect(result.audioEvent.anchorClipId, equals(clip.id));
           expect(result.audioEvent.isAnchored, isTrue);
+          verify(
+            () => mockService.extractAudio(
+              videoPath: '/path/clip-local.mp4',
+              speed: any(named: 'speed'),
+            ),
+          ).called(1);
+        },
+      );
+
+      blocTest<ClipEditorBloc, ClipEditorState>(
+        'uses playback duration and forwards speed for extracted source clip',
+        build: () {
+          when(
+            () => mockService.extractAudio(
+              videoPath: any(named: 'videoPath'),
+              speed: any(named: 'speed'),
+            ),
+          ).thenAnswer(
+            (_) async => const AudioExtractionResult(
+              audioFilePath: '/tmp/audio.m4a',
+              duration: 2.5,
+              fileSize: 12345,
+              sha256Hash: 'abc123',
+              mimeType: 'audio/mp4',
+            ),
+          );
+          return buildBloc(audioExtractionService: mockService);
+        },
+        seed: () =>
+            ClipEditorState(clips: [_createClipWithFile(playbackSpeed: 2.0)]),
+        act: (bloc) => bloc.add(
+          const ClipEditorAudioExtractionRequested(clipTitle: 'Test'),
+        ),
+        verify: (bloc) {
+          final result =
+              bloc.state.lastAudioExtraction! as ClipAudioExtractionSuccess;
+          final clip = _createClipWithFile(playbackSpeed: 2.0);
+          expect(result.audioEvent.startTime, equals(Duration.zero));
+          expect(result.audioEvent.endTime, equals(clip.playbackDuration));
+          expect(result.audioEvent.duration, equals(2.5));
+          expect(
+            result.audioEvent.startOffset,
+            equals(clip.sourceDurationToPlaybackDuration(clip.trimStart)),
+          );
+          expect(
+            result.audioEvent.endTime! - result.audioEvent.startTime,
+            equals(clip.playbackDuration),
+          );
+          verify(
+            () => mockService.extractAudio(
+              videoPath: '/path/clip-local.mp4',
+              speed: 2.0,
+            ),
+          ).called(1);
         },
       );
 
       blocTest<ClipEditorBloc, ClipEditorState>(
         'uses playback-time offsets when an extracted clip follows a slowed clip',
         build: () {
-          when(() => mockService.extractAudio(any())).thenAnswer(
+          when(
+            () => mockService.extractAudio(
+              videoPath: any(named: 'videoPath'),
+              speed: any(named: 'speed'),
+            ),
+          ).thenAnswer(
             (_) async => const AudioExtractionResult(
               audioFilePath: '/tmp/audio.m4a',
               duration: 5,
@@ -1759,11 +1826,72 @@ void main() {
         },
       );
 
+      test('discards extraction result when clip speed changes during '
+          'in-flight extraction', () async {
+        final completer = Completer<AudioExtractionResult>();
+        when(
+          () => mockService.extractAudio(
+            videoPath: any(named: 'videoPath'),
+            speed: any(named: 'speed'),
+          ),
+        ).thenAnswer((_) => completer.future);
+
+        final clip = _createClipWithFile(playbackSpeed: 2.0);
+        final bloc = buildBloc(audioExtractionService: mockService);
+
+        bloc.add(ClipEditorInitialized([clip]));
+        await Future<void>.delayed(Duration.zero);
+
+        bloc.add(const ClipEditorAudioExtractionRequested(clipTitle: 'Test'));
+        await Future<void>.delayed(Duration.zero);
+        expect(bloc.state.isExtractingAudio, isTrue);
+
+        bloc.add(
+          ClipEditorClipUpdated(
+            clipId: clip.id,
+            clip: clip.copyWith(playbackSpeed: 0.5),
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        completer.complete(
+          const AudioExtractionResult(
+            audioFilePath: '/tmp/stale-speed-audio.wav',
+            duration: 2.5,
+            fileSize: 12345,
+            sha256Hash: 'abc123',
+            mimeType: 'audio/wav',
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        expect(bloc.state.isExtractingAudio, isFalse);
+        expect(bloc.state.clips.single.volume, equals(1));
+        expect(
+          bloc.state.lastAudioExtraction,
+          isA<ClipAudioExtractionDiscarded>(),
+        );
+        verify(
+          () => mockService.extractAudio(
+            videoPath: '/path/clip-local.mp4',
+            speed: 2.0,
+          ),
+        ).called(1);
+        verify(
+          () => mockService.cleanupAudioFile('/tmp/stale-speed-audio.wav'),
+        ).called(1);
+
+        await bloc.close();
+      });
+
       blocTest<ClipEditorBloc, ClipEditorState>(
         'emits isExtractingAudio then ClipAudioExtractionFailure on AudioExtractionException',
         build: () {
           when(
-            () => mockService.extractAudio(any()),
+            () => mockService.extractAudio(
+              videoPath: any(named: 'videoPath'),
+              speed: any(named: 'speed'),
+            ),
           ).thenThrow(const AudioExtractionException('Extraction failed'));
           return buildBloc(audioExtractionService: mockService);
         },
@@ -1792,7 +1920,10 @@ void main() {
         'wraps unexpected extraction errors in Reportable with context',
         build: () {
           when(
-            () => mockService.extractAudio(any()),
+            () => mockService.extractAudio(
+              videoPath: any(named: 'videoPath'),
+              speed: any(named: 'speed'),
+            ),
           ).thenThrow(StateError('boom'));
           return buildBloc(audioExtractionService: mockService);
         },
@@ -1831,7 +1962,10 @@ void main() {
           'when source clip is removed during in-flight extraction', () async {
         final completer = Completer<AudioExtractionResult>();
         when(
-          () => mockService.extractAudio(any()),
+          () => mockService.extractAudio(
+            videoPath: any(named: 'videoPath'),
+            speed: any(named: 'speed'),
+          ),
         ).thenAnswer((_) => completer.future);
 
         final clip = _createClipWithFile();
@@ -1872,6 +2006,7 @@ void main() {
           bloc.state.lastAudioExtraction,
           isA<ClipAudioExtractionDiscarded>(),
         );
+        verify(() => mockService.cleanupAudioFile('/tmp/audio.m4a')).called(1);
 
         await bloc.close();
       });
