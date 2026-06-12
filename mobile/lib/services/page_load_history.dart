@@ -3,6 +3,11 @@
 
 import 'dart:collection';
 
+abstract final class PageLoadSource {
+  static const route = 'route';
+  static const surface = 'surface';
+}
+
 /// A single page load performance record.
 class PageLoadRecord {
   PageLoadRecord({
@@ -10,6 +15,8 @@ class PageLoadRecord {
     required this.timestamp,
     this.contentVisibleMs,
     this.dataLoadedMs,
+    this.result,
+    this.source = PageLoadSource.route,
     this.dataMetrics = const {},
   });
 
@@ -17,6 +24,8 @@ class PageLoadRecord {
   final DateTime timestamp;
   int? contentVisibleMs;
   int? dataLoadedMs;
+  final String? result;
+  final String source;
   final Map<String, dynamic> dataMetrics;
 
   /// Whether data load was slow (>3s).
@@ -48,7 +57,7 @@ class PageLoadHistory {
   /// it will be updated rather than creating a duplicate.
   void addOrUpdate(PageLoadRecord record) {
     // Check if there's a recent record for this screen that can be updated
-    final existing = _findRecentRecord(record.screenName);
+    final existing = _findRecentRecord(record);
     if (existing != null) {
       // Update the existing record
       if (record.contentVisibleMs != null) {
@@ -67,15 +76,23 @@ class PageLoadHistory {
   }
 
   /// Find a recent record for this screen that doesn't have dataLoadedMs yet.
-  PageLoadRecord? _findRecentRecord(String screenName) {
+  PageLoadRecord? _findRecentRecord(PageLoadRecord candidate) {
+    if (candidate.source != PageLoadSource.route) return null;
+
     // Search from newest to oldest (end of queue)
     for (final record in _records.toList().reversed) {
-      if (record.screenName == screenName && record.dataLoadedMs == null) {
-        return record;
+      if (record.source != candidate.source) {
+        continue;
       }
-      // Only look back ~5 seconds to avoid stale matches
+
+      // Only look back ~5 seconds to avoid stale matches.
       if (DateTime.now().difference(record.timestamp).inSeconds > 5) {
         break;
+      }
+
+      if (record.screenName == candidate.screenName &&
+          record.dataLoadedMs == null) {
+        return record;
       }
     }
     return null;

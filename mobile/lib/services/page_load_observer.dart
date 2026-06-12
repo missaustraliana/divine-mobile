@@ -2,11 +2,15 @@
 // ABOUTME: Records screen load start on push, content visible after frame render, and cleanup on pop
 
 import 'package:flutter/material.dart';
+import 'package:openvine/services/analytics_surface.dart';
 import 'package:openvine/services/screen_analytics_service.dart';
 import 'package:unified_logger/unified_logger.dart';
 
 class PageLoadObserver extends NavigatorObserver {
-  final ScreenAnalyticsService _analytics = ScreenAnalyticsService();
+  PageLoadObserver({ScreenAnalyticsService? analytics})
+    : _analytics = analytics ?? ScreenAnalyticsService();
+
+  final ScreenAnalyticsService _analytics;
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
@@ -16,8 +20,16 @@ class PageLoadObserver extends NavigatorObserver {
       return;
     }
 
-    final screenName = _screenName(route);
+    final routeName = _routeName(route);
+    final screenName = AnalyticsSurface.routeSurfaceName(route.settings.name);
     _analytics.startScreenLoad(screenName);
+    _analytics.trackScreenView(
+      screenName,
+      params: {
+        AnalyticsParam.routeName: routeName,
+        AnalyticsParam.entryPoint: 'navigation',
+      },
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _analytics.markContentVisible(screenName);
@@ -38,7 +50,7 @@ class PageLoadObserver extends NavigatorObserver {
       return;
     }
 
-    final screenName = _screenName(route);
+    final screenName = AnalyticsSurface.routeSurfaceName(route.settings.name);
     _analytics.endScreen(screenName);
 
     Log.debug(
@@ -48,7 +60,14 @@ class PageLoadObserver extends NavigatorObserver {
     );
   }
 
-  String _screenName(Route<dynamic> route) {
-    return route.settings.name ?? route.runtimeType.toString();
+  String _routeName(Route<dynamic> route) {
+    final routeName = route.settings.name;
+    if (routeName == null || routeName.isEmpty) {
+      return AnalyticsSurface.unknownRoute;
+    }
+    if (routeName.trim() == '/') {
+      return 'root';
+    }
+    return AnalyticsSurface.sanitizeName(routeName);
   }
 }
