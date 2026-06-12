@@ -340,6 +340,12 @@ ProfileDeepLinkNavAction resolveProfileDeepLinkNavAction({
 /// executor routes to it directly. Otherwise the video target is
 /// `referencedEventId` (the event acted upon), falling back to `eventId` (the
 /// source event) for follow/mention, which the executor walks to a root video.
+///
+/// At most one of `videoCoordinate` / `targetEventId` is non-null: a usable
+/// coordinate suppresses the event-id walk entirely, encoding the
+/// coordinate-over-walk precedence in the returned value rather than leaving
+/// it to the executor's branch order.
+///
 /// Extracted and `@visibleForTesting` so the push-side per-kind routing can be
 /// asserted without a navigator — mirrors [resolveVideoDeepLinkNavAction].
 @visibleForTesting
@@ -352,8 +358,9 @@ pushNotificationTapTarget({
   required String? senderPubkey,
 }) {
   final videoCoordinate = videoAddressableTarget(referencedAddress);
-  final targetEventId =
-      (referencedEventId != null && referencedEventId.isNotEmpty)
+  final targetEventId = videoCoordinate != null
+      ? null
+      : (referencedEventId != null && referencedEventId.isNotEmpty)
       ? referencedEventId
       : eventId;
   final hasVideoTarget =
@@ -381,6 +388,19 @@ pushNotificationTapTarget({
 /// mentions, which carry no `referencedEventId`. [senderPubkey] is the actor —
 /// it opens a profile for follows and is the safe fallback when a video target
 /// cannot be resolved.
+///
+/// Failure UX contract (decided in #5079): the profile/inbox fallback applies
+/// only to the event-id walk, where resolution happens *before* a route exists
+/// and can fail. A valid video coordinate is pushed without a pre-fetch; if
+/// the video is then unfetchable (deleted, moderated, offline), the user
+/// intentionally lands on [VideoDetailScreen]'s error state — same
+/// trust-the-coordinate contract as the in-app rows, which push immediately on
+/// an addressable id and surface fetch failure in place. Redirecting a "they
+/// interacted with your video" tap to the actor's profile would be
+/// misdirection, and a pre-push fetch would reintroduce the relay round-trip
+/// this path exists to avoid. Transient failures are already mitigated
+/// downstream: the route lookup tries cache → Funnelcake REST → relays, and
+/// the screen retries once when relays become ready on cold start.
 Future<void> _routeNotificationTap({
   required String? referencedAddress,
   required String? referencedEventId,

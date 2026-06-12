@@ -141,6 +141,7 @@ void main() {
 
       expect(result.target, const OpenVideoTarget(autoOpenComments: false));
       expect(result.videoCoordinate, equals(videoCoordinate));
+      expect(result.targetEventId, isNull);
     });
 
     test('a video coordinate alone is a video target (no event id)', () {
@@ -154,6 +155,28 @@ void main() {
 
       expect(result.target, const OpenVideoTarget(autoOpenComments: false));
       expect(result.videoCoordinate, equals(videoCoordinate));
+    });
+
+    test('a video coordinate wins over the actor-profile fallback even for '
+        'comment taps (unfetchable videos land on the detail error state — '
+        'intentional, #5079)', () {
+      // Pin of the #5079 decision: the routing decision is made purely from
+      // the payload shape, with no pre-push fetch. When a valid video
+      // coordinate is present it suppresses the event-id walk entirely
+      // (targetEventId comes back null even though referencedEventId is set),
+      // so the profile/inbox fallback never applies — an unfetchable video is
+      // discovered at, and surfaced by, the video detail screen by design.
+      final result = app.pushNotificationTapTarget(
+        referencedAddress: videoCoordinate,
+        referencedEventId: commentEvent,
+        eventId: null,
+        notificationType: 'comment',
+        senderPubkey: actor,
+      );
+
+      expect(result.target, const OpenVideoTarget(autoOpenComments: true));
+      expect(result.videoCoordinate, equals(videoCoordinate));
+      expect(result.targetEventId, isNull);
     });
 
     test('ignores a non-video addressable coordinate and falls back', () {
@@ -197,6 +220,22 @@ void main() {
       expect(result.target, const OpenProfileTarget(actor));
       expect(result.videoCoordinate, isNull);
     });
+
+    test('ignores a coordinate with empty pubkey and d-tag and falls '
+        'back', () {
+      // '34236::' parses to empty pubkey/d-tag components — not a routable
+      // video, so the tap must fall back instead of pushing a dead route.
+      final result = app.pushNotificationTapTarget(
+        referencedAddress: '34236::',
+        referencedEventId: null,
+        eventId: null,
+        notificationType: 'like',
+        senderPubkey: actor,
+      );
+
+      expect(result.target, const OpenProfileTarget(actor));
+      expect(result.videoCoordinate, isNull);
+    });
   });
 
   group('videoAddressableTarget', () {
@@ -221,6 +260,11 @@ void main() {
     test('returns null for a malformed coordinate', () {
       expect(videoAddressableTarget('34236:only-two-parts'), isNull);
       expect(videoAddressableTarget('not-a-coordinate'), isNull);
+    });
+
+    test('returns null for a coordinate with empty components', () {
+      expect(videoAddressableTarget('34236::'), isNull);
+      expect(videoAddressableTarget('34236:owner_hex:'), isNull);
     });
 
     test('returns null for empty or null input', () {

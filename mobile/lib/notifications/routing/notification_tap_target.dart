@@ -25,7 +25,12 @@ sealed class NotificationTapTarget extends Equatable {
 ///
 /// The executor owns resolving the concrete route id (preferring a stable
 /// NIP-33 addressable id, otherwise walking the target event to its root
-/// video) and the fallback when that resolution fails.
+/// video) and the fallback when that resolution fails. That fallback applies
+/// only to the event-id walk: a stable addressable id is routed to directly,
+/// and an unfetchable video then intentionally surfaces its failure at the
+/// destination rather than rerouting to profile/inbox — the video detail
+/// error state for push taps; for in-app row taps, which also navigate
+/// first, a snackbar over the empty fullscreen feed. See #5079.
 class OpenVideoTarget extends NotificationTapTarget {
   const OpenVideoTarget({required this.autoOpenComments});
 
@@ -107,10 +112,15 @@ NotificationKind? notificationKindFromPushType(String? type) {
 /// predicate guarantees a non-null result resolves to a video, so the executor
 /// can push it directly without a relay round-trip; non-video or malformed
 /// coordinates return null and the caller falls back to the event-id walk.
+/// Coordinates with an empty pubkey or d-tag (e.g. `34236::`) parse but cannot
+/// route to a video, so they also return null and fall back the same way.
 String? videoAddressableTarget(String? referencedAddress) {
   if (referencedAddress == null || referencedAddress.isEmpty) return null;
   final parsed = parseAddressableId(referencedAddress);
   if (parsed == null) return null;
+  // Push-service also rejects these before sending; keep the app guard as
+  // defense-in-depth for stale local payloads and future non-push callers.
+  if (parsed.pubkey.isEmpty || parsed.dTag.isEmpty) return null;
   return NIP71VideoKinds.isVideoKind(parsed.kind) ? referencedAddress : null;
 }
 
