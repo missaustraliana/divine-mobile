@@ -585,6 +585,16 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
       category: LogCategory.auth,
     );
 
+    // The refresh below runs unawaited across an async gap. If the user
+    // signs out or switches accounts while it is in flight, applying the
+    // result would attach the previous account's RPC signer to whichever
+    // identity is active by then.
+    final upgradeOwnerPubkey =
+        expectedOwnerPubkey ?? session?.userPubkey ?? currentPublicKeyHex;
+    bool upgradeContextStillCurrent() =>
+        _authState == AuthState.authenticated &&
+        currentPublicKeyHex == upgradeOwnerPubkey;
+
     _isRpcUpgradeInProgress = true;
     try {
       if (_oauthClient == null) {
@@ -595,6 +605,16 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
       final refreshed = await _refreshOAuthSession(
         expectedOwnerPubkey: expectedOwnerPubkey ?? session?.userPubkey,
       ).timeout(rpcRefreshTimeout);
+
+      if (!upgradeContextStillCurrent()) {
+        Log.warning(
+          'initialize: discarding stale background RPC refresh — '
+          'signed out or switched accounts while it was in flight',
+          name: 'AuthService',
+          category: LogCategory.auth,
+        );
+        return;
+      }
 
       if (refreshed != null) {
         Log.info(
@@ -630,6 +650,11 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
       // Nudge the auth stream so widgets re-evaluate whether the
       // session-expired sheet should be shown now that the upgrade has resolved.
       _authStateController.add(_authState);
+    }
+
+    // A late failure must not downgrade whichever account is active now.
+    if (!upgradeContextStillCurrent()) {
+      return;
     }
 
     _setRpcCapability(AuthRpcCapability.unavailable);
@@ -3601,6 +3626,7 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
 
       // Clean up Keycast RPC signer if active
       _keycastSigner = null;
+      _setRpcCapability(AuthRpcCapability.unavailable);
 
       try {
         if (_oauthClient != null) {
@@ -3768,6 +3794,7 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
       await _clearAmberInfo();
     } catch (_) {}
     _keycastSigner = null;
+    _setRpcCapability(AuthRpcCapability.unavailable);
     _keyStorage.clearCache();
 
     try {
@@ -4496,6 +4523,7 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
     // This prevents a Keycast RPC signer from a previous Divine OAuth session
     // from being used when signing events for an anonymous/imported-key account.
     if (source != AuthenticationSource.divineOAuth) {
+      _setRpcCapability(AuthRpcCapability.unavailable);
       if (_keycastSigner != null) {
         Log.info(
           '_setupUserSession: clearing stale Keycast signer '
@@ -5187,7 +5215,14 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
     try {
       if (_oauthClient == null || _keycastSigner == null) return;
 
+      final resumeOwnerPubkey = currentPublicKeyHex;
+      if (resumeOwnerPubkey == null) return;
+      bool resumeContextStillCurrent() =>
+          _authState == AuthState.authenticated &&
+          currentPublicKeyHex == resumeOwnerPubkey;
+
       final session = await _oauthClient.getSession();
+      if (!resumeContextStillCurrent()) return;
       if (session != null) return;
 
       Log.info(
@@ -5195,7 +5230,17 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
         name: 'AuthService',
         category: LogCategory.auth,
       );
-      final refreshed = await _refreshOAuthSession();
+      final refreshed = await _refreshOAuthSession(
+        expectedOwnerPubkey: resumeOwnerPubkey,
+      );
+      if (!resumeContextStillCurrent()) {
+        Log.warning(
+          '📱 App resumed - discarding stale OAuth refresh result',
+          name: 'AuthService',
+          category: LogCategory.auth,
+        );
+        return;
+      }
       if (refreshed != null) {
         _keycastSigner = KeycastRpc.fromSession(
           _oauthConfig,
