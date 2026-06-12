@@ -75,10 +75,12 @@ class ContentDeletion {
     required this.originalEventId,
     required this.reason,
     required this.deletedAt,
+    this.addressableId,
     this.additionalContext,
   });
   final String deleteEventId;
   final String originalEventId;
+  final String? addressableId;
   final String reason;
   final DateTime deletedAt;
   final String? additionalContext;
@@ -86,6 +88,7 @@ class ContentDeletion {
   Map<String, dynamic> toJson() => {
     'deleteEventId': deleteEventId,
     'originalEventId': originalEventId,
+    if (addressableId != null) 'addressableId': addressableId,
     'reason': reason,
     'deletedAt': deletedAt.toIso8601String(),
     'additionalContext': additionalContext,
@@ -94,6 +97,7 @@ class ContentDeletion {
   static ContentDeletion fromJson(Map<String, dynamic> json) => ContentDeletion(
     deleteEventId: json['deleteEventId'] as String,
     originalEventId: json['originalEventId'] as String,
+    addressableId: json['addressableId'] as String?,
     reason: json['reason'] as String,
     deletedAt: DateTime.parse(json['deletedAt'] as String),
     additionalContext: json['additionalContext'] as String?,
@@ -181,10 +185,13 @@ class ContentDeletionService {
         );
       }
 
+      final addressableId = _addressableDeletionTarget(video);
+
       // Create NIP-09 delete event (kind 5)
       // OpenVine only uses kind 34236 (addressable short videos)
       final deleteOutcome = await _createDeleteEvent(
         originalEventId: video.id,
+        addressableId: addressableId,
         originalEventKind: NIP71VideoKinds.getPreferredKind(),
         reason: reason,
         additionalContext: additionalContext,
@@ -223,6 +230,7 @@ class ContentDeletionService {
       final deletion = ContentDeletion(
         deleteEventId: deleteEvent.id,
         originalEventId: video.id,
+        addressableId: addressableId,
         reason: reason,
         deletedAt: DateTime.now(),
         additionalContext: additionalContext,
@@ -282,14 +290,23 @@ class ContentDeletionService {
   }
 
   /// Check if content has been deleted by user
-  bool hasBeenDeleted(String eventId) =>
-      _deletionHistory.any((deletion) => deletion.originalEventId == eventId);
+  bool hasBeenDeleted(String eventId, {String? addressableId}) =>
+      _deletionHistory.any(
+        (deletion) =>
+            deletion.originalEventId == eventId ||
+            (addressableId != null && deletion.addressableId == addressableId),
+      );
 
   /// Get deletion record for event
-  ContentDeletion? getDeletionForEvent(String eventId) {
+  ContentDeletion? getDeletionForEvent(
+    String eventId, {
+    String? addressableId,
+  }) {
     try {
       return _deletionHistory.firstWhere(
-        (deletion) => deletion.originalEventId == eventId,
+        (deletion) =>
+            deletion.originalEventId == eventId ||
+            (addressableId != null && deletion.addressableId == addressableId),
       );
     } catch (e) {
       return null;
@@ -325,6 +342,7 @@ class ContentDeletionService {
     required String originalEventId,
     required int originalEventKind,
     required String reason,
+    String? addressableId,
     String? additionalContext,
   }) async {
     try {
@@ -337,10 +355,12 @@ class ContentDeletionService {
         return (event: null, failureKind: DeleteFailureKind.notAuthenticated);
       }
 
-      // Build NIP-09 compliant tags (kind 5)
-      // Per NIP-09: 'e' tag references event to delete, 'k' tag specifies event kind
+      // Build NIP-09 compliant tags (kind 5). Addressable videos need an
+      // `a` tag so every replacement for the same d-tag is tombstoned.
       final tags = <List<String>>[
         ['e', originalEventId], // Event being deleted
+        if (addressableId != null && addressableId.isNotEmpty)
+          ['a', addressableId],
         [
           'k',
           originalEventKind.toString(),
@@ -417,6 +437,14 @@ class ContentDeletionService {
     final userPubkey = _authService.currentPublicKeyHex;
 
     return video.pubkey == userPubkey;
+  }
+
+  String? _addressableDeletionTarget(VideoEvent video) {
+    final vineId = video.vineId;
+    if (vineId == null || vineId.isEmpty || vineId == video.id) {
+      return null;
+    }
+    return video.addressableId;
   }
 
   /// Get delete reason text for common cases
