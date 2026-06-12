@@ -1,5 +1,5 @@
 // ABOUTME: Tests for notification refresh coalescing on app resume.
-// ABOUTME: Guards against duplicate authoritative refresh requests.
+// ABOUTME: Guards cooldown consumption and failure routing semantics.
 
 import 'dart:async';
 
@@ -15,13 +15,19 @@ void main() {
   group(NotificationRefreshCoordinator, () {
     late _MockNotificationRepository repository;
     late DateTime now;
+    late List<({Object error, String? reason})> reportedErrors;
 
     setUp(() {
       repository = _MockNotificationRepository();
       now = DateTime.utc(2026, 6, 9, 12);
+      reportedErrors = [];
       when(
-        () => repository.refresh(),
-      ).thenAnswer((_) async => NotificationPage.empty);
+        () => repository.refreshApplied(),
+      ).thenAnswer((_) async => true);
+      when(() => repository.isClosed).thenReturn(false);
+      when(
+        () => repository.hasPaginatedBeyondFirstPage,
+      ).thenReturn(false);
     });
 
     NotificationRefreshCoordinator buildCoordinator({
@@ -31,12 +37,16 @@ void main() {
         repository: repository,
         cooldown: cooldown,
         now: () => now,
+        errorReporter: (error, stackTrace, {reason}) =>
+            reportedErrors.add((error: error, reason: reason)),
       );
     }
 
     test('coalesces concurrent refresh requests', () async {
-      final completer = Completer<NotificationPage>();
-      when(() => repository.refresh()).thenAnswer((_) => completer.future);
+      final completer = Completer<bool>();
+      when(
+        () => repository.refreshApplied(),
+      ).thenAnswer((_) => completer.future);
       final coordinator = buildCoordinator();
 
       final first = coordinator.refresh(
@@ -46,8 +56,8 @@ void main() {
         reason: NotificationRefreshReason.appResume,
       );
 
-      verify(() => repository.refresh()).called(1);
-      completer.complete(NotificationPage.empty);
+      verify(() => repository.refreshApplied()).called(1);
+      completer.complete(true);
       await Future.wait([first, second]);
     });
 
@@ -58,7 +68,7 @@ void main() {
       now = now.add(const Duration(seconds: 10));
       await coordinator.refresh(reason: NotificationRefreshReason.appResume);
 
-      verify(() => repository.refresh()).called(1);
+      verify(() => repository.refreshApplied()).called(1);
     });
 
     test('allows refresh after cooldown window', () async {
@@ -68,7 +78,98 @@ void main() {
       now = now.add(const Duration(seconds: 31));
       await coordinator.refresh(reason: NotificationRefreshReason.appResume);
 
-      verify(() => repository.refresh()).called(2);
+      verify(() => repository.refreshApplied()).called(2);
+    });
+
+    test('failed refresh does not consume the cooldown', () async {
+      when(() => repository.refreshApplied()).thenThrow(Exception('timeout'));
+      final coordinator = buildCoordinator();
+
+      await coordinator.refresh(reason: NotificationRefreshReason.appResume);
+      now = now.add(const Duration(seconds: 1));
+      when(
+        () => repository.refreshApplied(),
+      ).thenAnswer((_) async => true);
+      await coordinator.refresh(reason: NotificationRefreshReason.appResume);
+
+      verify(() => repository.refreshApplied()).called(2);
+    });
+
+    test('successful refresh after a failure restores the cooldown', () async {
+      when(() => repository.refreshApplied()).thenThrow(Exception('timeout'));
+      final coordinator = buildCoordinator();
+
+      await coordinator.refresh(reason: NotificationRefreshReason.appResume);
+      when(
+        () => repository.refreshApplied(),
+      ).thenAnswer((_) async => true);
+      await coordinator.refresh(reason: NotificationRefreshReason.appResume);
+      now = now.add(const Duration(seconds: 10));
+      await coordinator.refresh(reason: NotificationRefreshReason.appResume);
+
+      verify(() => repository.refreshApplied()).called(2);
+    });
+
+    test('superseded refresh does not consume the cooldown', () async {
+      when(
+        () => repository.refreshApplied(),
+      ).thenAnswer((_) async => false);
+      final coordinator = buildCoordinator();
+
+      await coordinator.refresh(reason: NotificationRefreshReason.appResume);
+      now = now.add(const Duration(seconds: 1));
+      when(
+        () => repository.refreshApplied(),
+      ).thenAnswer((_) async => true);
+      await coordinator.refresh(reason: NotificationRefreshReason.appResume);
+
+      verify(() => repository.refreshApplied()).called(2);
+    });
+
+    test('$Exception failure is not reported to the crash reporter', () async {
+      when(() => repository.refreshApplied()).thenThrow(Exception('timeout'));
+      final coordinator = buildCoordinator();
+
+      await coordinator.refresh(reason: NotificationRefreshReason.appResume);
+
+      expect(reportedErrors, isEmpty);
+    });
+
+    test('$Error failure is reported to the crash reporter', () async {
+      final error = StateError('invariant violated');
+      when(() => repository.refreshApplied()).thenThrow(error);
+      final coordinator = buildCoordinator();
+
+      await coordinator.refresh(reason: NotificationRefreshReason.appResume);
+
+      expect(reportedErrors, hasLength(1));
+      expect(reportedErrors.single.error, same(error));
+      expect(
+        reportedErrors.single.reason,
+        equals('NotificationRefreshCoordinator.appResume'),
+      );
+    });
+
+    test('skips refresh while the snapshot is paginated beyond the first '
+        'page', () async {
+      when(() => repository.hasPaginatedBeyondFirstPage).thenReturn(true);
+      final coordinator = buildCoordinator();
+
+      await coordinator.refresh(reason: NotificationRefreshReason.appResume);
+
+      verifyNever(() => repository.refreshApplied());
+    });
+
+    test('closed-repository $StateError is not reported', () async {
+      when(() => repository.refreshApplied()).thenThrow(
+        StateError('You cannot add new events after calling close'),
+      );
+      when(() => repository.isClosed).thenReturn(true);
+      final coordinator = buildCoordinator();
+
+      await coordinator.refresh(reason: NotificationRefreshReason.appResume);
+
+      expect(reportedErrors, isEmpty);
     });
   });
 }

@@ -91,12 +91,13 @@ void main() {
       when(() => mockNotificationRepo.refresh()).thenAnswer(
         (_) async => NotificationPage.empty,
       );
-      when(() => mockNotificationRepo.getNotifications()).thenAnswer(
+      when(() => mockNotificationRepo.loadNextPage()).thenAnswer(
         (_) async => NotificationPage.empty,
       );
       when(
         () => mockNotificationRepo.markAsRead(any()),
       ).thenAnswer((_) async {});
+      when(() => mockNotificationRepo.resetPaginationDepth()).thenReturn(null);
     });
 
     tearDown(() async {
@@ -107,6 +108,14 @@ void main() {
       notificationRepository: mockNotificationRepo,
       followRepository: mockFollowRepo,
     );
+
+    test('resets pagination depth when the feed closes', () async {
+      final bloc = createBloc();
+
+      await bloc.close();
+
+      verify(() => mockNotificationRepo.resetPaginationDepth()).called(1);
+    });
 
     group('snapshot projection', () {
       blocTest<NotificationFeedBloc, NotificationFeedState>(
@@ -301,12 +310,12 @@ void main() {
         act: (bloc) => bloc.add(NotificationFeedLoadMore()),
         expect: () => <NotificationFeedState>[],
         verify: (_) {
-          verifyNever(() => mockNotificationRepo.getNotifications());
+          verifyNever(() => mockNotificationRepo.loadNextPage());
         },
       );
 
       blocTest<NotificationFeedBloc, NotificationFeedState>(
-        'flips isLoadingMore on/off and forwards to getNotifications',
+        'flips isLoadingMore on/off and forwards to loadNextPage',
         build: createBloc,
         seed: () => NotificationFeedState(
           status: NotificationFeedStatus.loaded,
@@ -325,15 +334,15 @@ void main() {
           ),
         ],
         verify: (_) {
-          verify(() => mockNotificationRepo.getNotifications()).called(1);
+          verify(() => mockNotificationRepo.loadNextPage()).called(1);
         },
       );
 
       blocTest<NotificationFeedBloc, NotificationFeedState>(
-        'recovers isLoadingMore on getNotifications failure',
+        'recovers isLoadingMore on loadNextPage failure',
         setUp: () {
           when(
-            () => mockNotificationRepo.getNotifications(),
+            () => mockNotificationRepo.loadNextPage(),
           ).thenThrow(Exception('boom'));
         },
         build: createBloc,
@@ -357,11 +366,11 @@ void main() {
       );
 
       blocTest<NotificationFeedBloc, NotificationFeedState>(
-        'wraps unexpected Error from getNotifications as Reportable and '
+        'wraps unexpected Error from loadNextPage as Reportable and '
         'recovers isLoadingMore',
         setUp: () {
           when(
-            () => mockNotificationRepo.getNotifications(),
+            () => mockNotificationRepo.loadNextPage(),
           ).thenThrow(StateError('invariant'));
         },
         build: createBloc,

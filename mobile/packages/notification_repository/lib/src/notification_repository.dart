@@ -116,12 +116,19 @@ class NotificationRepository {
   String? _lastCursor;
   String? _lastCursorId;
 
+  /// Monotonic token bumped by [refresh] so in-flight page fetches from a
+  /// replaced pagination stream skip their post-await writes.
+  int _fetchGeneration = 0;
+
+  /// Count of page fetches applied since the last first-page emission.
+  int _pagesLoaded = 0;
+
   /// Reactive snapshot of the enriched, grouped notification feed.
   ///
   /// Single source of truth for the feed bloc (list rendering) and the
   /// badge cubit (badge count). Every mutation — [getNotifications],
-  /// [refresh], [markAsRead], [markAllAsRead], [acceptRealtime] —
-  /// updates this subject so consumers can never diverge.
+  /// [refresh], [markAsRead], [markAllAsRead] — updates this subject so
+  /// consumers can never diverge.
   final BehaviorSubject<NotificationPage> _snapshot =
       BehaviorSubject<NotificationPage>.seeded(NotificationPage.empty);
 
@@ -150,6 +157,32 @@ class NotificationRepository {
   /// when a new repository instance replaces this one).
   Future<void> close() => _snapshot.close();
 
+  /// Whether [close] has been called on this repository.
+  ///
+  /// After an auth flip the provider closes the outgoing instance while a
+  /// long-lived consumer (e.g. the refresh coordinator) may still hold it
+  /// across an in-flight call. Such callers use this to classify the
+  /// resulting [StateError] as expected account-switch noise.
+  bool get isClosed => _snapshot.isClosed;
+
+  /// Whether the snapshot currently holds more than the first page.
+  ///
+  /// Resume-driven liveness triggers consult this to avoid collapsing a
+  /// user-visible paginated feed back to page 1. An explicit [refresh]
+  /// (pull-to-refresh, page mount) still replaces the snapshot and resets
+  /// this to `false`.
+  bool get hasPaginatedBeyondFirstPage => _pagesLoaded > 1;
+
+  /// Releases the current page-depth guard after the feed UI is gone.
+  ///
+  /// While the notifications screen is visible, app-resume refreshes skip
+  /// over a paginated snapshot so they do not collapse the list under the
+  /// user. Once the feed BLoC closes, no visible list can collapse; resetting
+  /// the depth lets out-of-screen liveness refresh the badge again.
+  void resetPaginationDepth() {
+    _pagesLoaded = _snapshot.value.items.isEmpty ? 0 : 1;
+  }
+
   /// Fetches the next page of notifications.
   ///
   /// Pass [cursor] to override the stored pagination cursor. On success,
@@ -165,10 +198,23 @@ class NotificationRepository {
   /// items visible alongside an inline error affordance, and the typed
   /// [FunnelcakeException] is rethrown after structured logging so
   /// callers can also drive a hard-failure UI when the cache is empty.
+  ///
+  /// A [refresh] issued while this call is in flight supersedes it: the
+  /// late completion neither updates the stored cursor nor touches the
+  /// snapshot, and returns the current snapshot unchanged.
   Future<NotificationPage> getNotifications({
     String? cursor,
     String? cursorId,
+  }) async => (await _getNotificationsResult(
+    cursor: cursor,
+    cursorId: cursorId,
+  )).page;
+
+  Future<({NotificationPage page, bool applied})> _getNotificationsResult({
+    String? cursor,
+    String? cursorId,
   }) async {
+    final generation = _fetchGeneration;
     final effectiveCursor = cursor ?? _lastCursor;
     final effectiveCursorId = cursor != null
         ? cursorId
@@ -185,11 +231,17 @@ class NotificationRepository {
               cursor: effectiveCursor,
               cursorId: effectiveCursorId,
             );
+      if (generation != _fetchGeneration) {
+        return (page: _snapshot.value, applied: false);
+      }
 
       _lastCursor = response.nextCursor;
       _lastCursorId = response.nextCursorId;
 
       final items = await _enrichAndGroup(response.notifications);
+      if (generation != _fetchGeneration) {
+        return (page: _snapshot.value, applied: false);
+      }
 
       final page = NotificationPage(
         items: items,
@@ -198,12 +250,13 @@ class NotificationRepository {
         nextCursorId: response.nextCursorId,
         hasMore: response.hasMore,
       );
+      _pagesLoaded = isFirstPage ? 1 : _pagesLoaded + 1;
       _emitSnapshotForPage(page, isFirstPage: isFirstPage);
 
       if (isFirstPage) {
         unawaited(_persistSnapshot(items));
       }
-      return page;
+      return (page: page, applied: true);
     } on Exception catch (e, s) {
       Log.error(
         'Failed to fetch notifications: $e',
@@ -212,7 +265,7 @@ class NotificationRepository {
         error: e,
         stackTrace: s,
       );
-      if (isFirstPage) {
+      if (isFirstPage && generation == _fetchGeneration) {
         _markRefreshError();
       }
       rethrow;
@@ -517,9 +570,38 @@ class NotificationRepository {
   static final math.Random _jitter = math.Random();
 
   /// Refreshes notifications from the beginning (no cursor).
+  ///
+  /// Starts a new pagination stream: bumps the fetch generation so any
+  /// in-flight page fetch from the previous stream completes without
+  /// touching the cursor or snapshot, then clears the stored cursor.
   Future<NotificationPage> refresh() {
+    return _refreshResult().then((result) => result.page);
+  }
+
+  /// Refreshes notifications and reports whether this call applied a snapshot.
+  ///
+  /// App-resume refresh coordination uses this to avoid consuming its cooldown
+  /// when the refresh was superseded by another first-page fetch before it
+  /// could apply.
+  Future<bool> refreshApplied() {
+    return _refreshResult().then((result) => result.applied);
+  }
+
+  Future<({NotificationPage page, bool applied})> _refreshResult() {
+    _fetchGeneration++;
     _lastCursor = null;
     _lastCursorId = null;
+    return _getNotificationsResult();
+  }
+
+  /// Fetches the page after the last one applied to the snapshot.
+  ///
+  /// Returns `null` without issuing a request when no pagination cursor
+  /// is stored — before the first page resolves, or immediately after
+  /// [refresh] reset the stream — so a racing load-more can never turn
+  /// into a duplicate first-page fetch.
+  Future<NotificationPage?> loadNextPage() async {
+    if (_lastCursor == null) return null;
     return getNotifications();
   }
 
@@ -535,6 +617,7 @@ class NotificationRepository {
 
     final idSet = ids.toSet();
     final before = _snapshot.value;
+    final pagesLoadedBefore = _pagesLoaded;
     _snapshot.add(before.copyWith(items: _flipIsRead(before.items, idSet)));
     final notificationIds = _expandServerNotificationIds(before.items, idSet);
 
@@ -562,6 +645,7 @@ class NotificationRepository {
         await _notificationsDao.markAsRead(id);
       }
     } catch (_) {
+      _pagesLoaded = pagesLoadedBefore;
       _snapshot.add(before);
       rethrow;
     }
@@ -577,6 +661,7 @@ class NotificationRepository {
   Future<void> markAllAsRead() async {
     final before = _snapshot.value;
     if (before.items.every((n) => n.isRead)) return;
+    final pagesLoadedBefore = _pagesLoaded;
 
     _snapshot.add(before.copyWith(items: _flipAllRead(before.items)));
 
@@ -596,115 +681,10 @@ class NotificationRepository {
 
       await _notificationsDao.markAllAsRead();
     } catch (_) {
+      _pagesLoaded = pagesLoadedBefore;
       _snapshot.add(before);
       rethrow;
     }
-  }
-
-  /// Accepts a real-time WebSocket notification and merges it into the
-  /// snapshot.
-  ///
-  /// Enriches the raw relay event via [_enrichAndGroup], applies the
-  /// block filter, deduplicates by `id`, and then either:
-  ///
-  /// * merges into an existing matching [VideoNotification] group (same
-  ///   `videoEventId` + `type`) by prepending the new actor, incrementing
-  ///   `totalCount`, flipping `isRead` back to false, and bumping
-  ///   `timestamp` — the merged row stays at its existing position; or
-  /// * prepends the new item when no matching group exists.
-  ///
-  /// The merge step preserves the pre-snapshot bloc-layer behavior
-  /// (deleted in `ead8114f8`) so a second realtime like/comment/repost on
-  /// a video that already has a grouped row updates the existing row's
-  /// count rather than creating a duplicate.
-  Future<void> acceptRealtime(RelayNotification raw) async {
-    if (_snapshotContainsSourceEventId(raw.id)) return;
-
-    final enriched = await _enrichAndGroup([raw]);
-    if (enriched.isEmpty) return;
-
-    final current = _snapshot.value;
-    // Re-check against the post-await snapshot so concurrent refresh/page
-    // updates can neither be clobbered nor bypass the cross-path dedupe.
-    if (_snapshotContainsSourceEventId(raw.id)) return;
-
-    final newItem = enriched.first;
-    // Final by-id dedupe gate (the deliberate WS → WS guard). The
-    // `_snapshotContainsSourceEventId` checks above match on the
-    // snapshot's `sourceEventIds` set; this catches the residual
-    // same-id arrival whose `id` isn't represented in any existing
-    // row's `sourceEventIds`. Preserves the original by-id contract.
-    if (current.items.any((n) => n.id == newItem.id)) return;
-
-    if (newItem is VideoNotification) {
-      final merged = _mergeIntoExistingVideoGroup(current.items, newItem);
-      if (merged != null) {
-        _snapshot.add(current.copyWith(items: merged));
-        return;
-      }
-    }
-
-    _snapshot.add(current.copyWith(items: [newItem, ...current.items]));
-  }
-
-  bool _snapshotContainsSourceEventId(String sourceEventId) {
-    if (sourceEventId.isEmpty) return false;
-    return _snapshot.value.items.any(
-      (n) => n.sourceEventIds.contains(sourceEventId),
-    );
-  }
-
-  /// If [items] contains a [VideoNotification] matching [incoming] by
-  /// `videoEventId` and `type`, returns a new list with that row replaced
-  /// by the merged group; otherwise returns null.
-  ///
-  /// Merge semantics (mirror the pre-snapshot bloc handler): add the
-  /// incoming actor, reapply the grouped-row actor ordering, increment
-  /// `totalCount`, flip `isRead` to false, bump `timestamp` to the
-  /// incoming arrival, and union the underlying `sourceEventIds` so the
-  /// merged row carries every Nostr event it represents. The row stays
-  /// at its existing index — no re-sort, so the visible list doesn't
-  /// jump.
-  static List<NotificationItem>? _mergeIntoExistingVideoGroup(
-    List<NotificationItem> items,
-    VideoNotification incoming,
-  ) {
-    final result = <NotificationItem>[];
-    var merged = false;
-    for (final existing in items) {
-      if (!merged &&
-          existing is VideoNotification &&
-          existing.videoEventId == incoming.videoEventId &&
-          existing.type == incoming.type) {
-        final incomingActor = incoming.actors.first;
-        final mergedActors = _orderVideoGroupActors([
-          incomingActor,
-          ...existing.actors.where((a) => a.pubkey != incomingActor.pubkey),
-        ]).take(_maxGroupActors).toList();
-        final mergedSourceEventIds = <String>{
-          ...existing.sourceEventIds,
-          ...incoming.sourceEventIds,
-        }.toList();
-        final mergedNotificationIds = <String>{
-          ...existing.notificationIds,
-          ...incoming.notificationIds,
-        }.toList();
-        result.add(
-          existing.copyWith(
-            actors: mergedActors,
-            totalCount: existing.totalCount + 1,
-            isRead: false,
-            timestamp: incoming.timestamp,
-            sourceEventIds: mergedSourceEventIds,
-            notificationIds: mergedNotificationIds,
-          ),
-        );
-        merged = true;
-      } else {
-        result.add(existing);
-      }
-    }
-    return merged ? result : null;
   }
 
   /// Updates [_snapshot] with [page]'s contents.
@@ -719,22 +699,19 @@ class NotificationRepository {
   /// 1. **`(videoEventId, type)` overlap (VideoNotification only)** —
   ///    when an incoming group matches an existing snapshot group, the
   ///    existing row is replaced in place by
-  ///    [_mergeAppendedVideoGroup] (richer REST data folded into the
-  ///    existing WS-built row, preserving its position).
+  ///    [_mergeAppendedVideoGroup] (richer page data folded into the
+  ///    existing row, preserving its position).
   /// 2. **`sourceEventIds` overlap** — when an incoming item's
   ///    underlying Nostr event ids overlap the rendered snapshot's set,
-  ///    the incoming item is skipped as a cross-path duplicate. Same
-  ///    logical-event identity that [acceptRealtime] queries against the
-  ///    current snapshot (Nostr event id).
+  ///    the incoming item is skipped as a cross-page duplicate (the
+  ///    server can deliver the same logical Nostr event as distinct
+  ///    rows across pages).
   /// 3. **`id` equality fallback** — defensive against the rare case of
   ///    items with empty `sourceEventIds` (server returned a notification
-  ///    without `source_event_id`). Preserves the original
-  ///    `_emitSnapshotForPage` contract; PR #4247's REST→WS guard relied
-  ///    only on (1)+(2) and is untouched.
+  ///    without `source_event_id`).
   ///
-  /// Closes the symmetric gap to PR #4247: WS-first arrival followed by
-  /// a REST pagination that returns the same Nostr event(s) no longer
-  /// duplicates the row (#4264).
+  /// Together these keep a logical event that reappears on a later page
+  /// from duplicating its existing row (#4264).
   void _emitSnapshotForPage(
     NotificationPage page, {
     required bool isFirstPage,
@@ -796,12 +773,8 @@ class NotificationRepository {
   }
 
   /// Merges [incoming] (from a REST pagination page) into [existing] (a
-  /// snapshot row, typically WS-built) without changing the row's
-  /// position in the snapshot.
-  ///
-  /// Mirror of [_mergeIntoExistingVideoGroup] in the opposite direction
-  /// (incoming group → existing single, instead of incoming single →
-  /// existing group). Semantics:
+  /// row already in the snapshot) without changing the row's position in
+  /// the snapshot. Semantics:
   ///
   /// - `sourceEventIds` = set union of both sides (preserves uniqueness).
   /// - `totalCount` = size of the union (so the count reflects unique
@@ -1213,101 +1186,6 @@ class NotificationRepository {
     return result;
   }
 
-  /// Enriches a single raw [RelayNotification] for realtime insertion.
-  ///
-  /// Fetches the actor's profile and (if applicable) the referenced
-  /// video's stats in parallel. Returns null if the notification cannot
-  /// be turned into a [NotificationItem] (e.g. a video-anchored type
-  /// missing a `referencedEventId`).
-  Future<NotificationItem?> enrichOne(RelayNotification raw) async {
-    final kind = _mapNotificationKind(raw);
-    final referenced = _videoAnchorEventId(kind, raw);
-    final isVideoAnchored =
-        kind == NotificationKind.like ||
-        kind == NotificationKind.comment ||
-        kind == NotificationKind.repost;
-
-    final profilesFuture = _profileRepository.fetchBatchProfiles(
-      pubkeys: [raw.sourcePubkey],
-    );
-    final videoFuture = (referenced != null && referenced.isNotEmpty)
-        ? _fetchVideoMetadata([referenced])
-        : Future<Map<String, VideoStats>>.value(const {});
-
-    final (profiles, videosById) = await (profilesFuture, videoFuture).wait;
-
-    final actor = _buildActor(raw.sourcePubkey, profiles);
-
-    if (isVideoAnchored) {
-      if (referenced == null || referenced.isEmpty) return null;
-      final video = videosById[referenced];
-      if (_hasKnownReferencedVideoOwnerMismatch(
-        referencedVideoEventId: referenced,
-        videosById: videosById,
-      )) {
-        _logReclassifiedOwnerMismatch(
-          notificationId: raw.id,
-          sourcePubkey: raw.sourcePubkey,
-          referencedVideoEventId: referenced,
-          referencedVideoOwnerPubkey: video?.pubkey,
-        );
-        // Reclassify as actor-anchored instead of dropping (#4813).
-        final reclassifiedKind = _reclassifiedMisattributedKind(kind);
-        if (reclassifiedKind == null) return null;
-        return _buildActorNotification(
-          raw,
-          type: reclassifiedKind,
-          profiles: profiles,
-          targetEventId: _reclassifiedMisattributedTargetEventId(
-            reclassifiedKind,
-            raw,
-          ),
-        );
-      }
-      final addressableId = _recipientOwnedVideoAddressableId(
-        dTag: raw.referencedDTag,
-        video: video,
-      );
-      return VideoNotification(
-        id: raw.dedupeKey,
-        type: kind,
-        videoEventId: referenced,
-        videoAddressableId: addressableId,
-        videoThumbnailUrl:
-            _nonEmpty(raw.referencedVideoThumbnail) ??
-            _nonEmpty(video?.thumbnail),
-        videoTitle:
-            _nonEmpty(raw.referencedVideoTitle) ?? _nonEmpty(video?.title),
-        actors: [actor],
-        totalCount: 1,
-        timestamp: raw.createdAt,
-        isRead: raw.read,
-        commentText: kind == NotificationKind.comment
-            ? _truncateComment(raw.content, kind)
-            : null,
-        sourceEventIds: raw.sourceEventId.isNotEmpty
-            ? [raw.sourceEventId]
-            : const [],
-        notificationIds: raw.dedupeKey.isNotEmpty ? [raw.dedupeKey] : const [],
-      );
-    }
-
-    final mapped =
-        (kind == NotificationKind.follow ||
-            kind == NotificationKind.mention ||
-            kind == NotificationKind.system ||
-            kind == NotificationKind.likeComment ||
-            kind == NotificationKind.reply)
-        ? kind
-        : NotificationKind.system;
-    return _buildActorNotification(
-      raw,
-      type: mapped,
-      profiles: profiles,
-      commentKind: kind,
-    );
-  }
-
   ActorNotification _buildActorNotification(
     RelayNotification notification, {
     required NotificationKind type,
@@ -1367,8 +1245,7 @@ class NotificationRepository {
   ///   the user; same resolver path).
   /// - Everything else → null.
   ///
-  /// Used by both the page-load path ([_mapActorAnchored]) and the
-  /// realtime path ([enrichOne]) to stay in lockstep.
+  /// Used by the page-load path ([_mapActorAnchored]).
   static String? _actorTargetEventId(
     NotificationKind mapped,
     RelayNotification n,
@@ -1406,7 +1283,7 @@ class NotificationRepository {
   /// Known gaps (deferred, see #4730): the stable route is lost on a metadata
   /// miss for the recipient's own *edited* video; and the page-load path
   /// fetches only `referenced_event_id` metadata, so `root_event_id`-anchored
-  /// comments confirm ownership on the realtime path only.
+  /// comments can't confirm ownership.
   String? _recipientOwnedVideoAddressableId({
     required String? dTag,
     required VideoStats? video,
@@ -1424,8 +1301,7 @@ class NotificationRepository {
   /// Only populated for `likeComment` and `reply` — the tap handler uses
   /// it to navigate directly to the video without a relay round-trip.
   ///
-  /// Used by both the page-load path ([_mapActorAnchored]) and the
-  /// realtime path ([enrichOne]) to stay in lockstep.
+  /// Used by the page-load path ([_mapActorAnchored]).
   String? _actorVideoAddressableId(
     NotificationKind mapped,
     RelayNotification notification,
@@ -1467,18 +1343,15 @@ class NotificationRepository {
   /// Consolidates follow notifications — keeps the most recent per pubkey.
   ///
   /// Kind 3 (contact list) is a replaceable event: a single follower can
-  /// produce several follow notifications over time (re-publishes, plus
-  /// the same logical follow arriving via both the REST page and the
-  /// realtime bridge). Collapsing them to one row per `sourcePubkey` keeps
-  /// the Follows tab from showing the same person repeatedly.
+  /// produce several follow notifications over time (re-publishes).
+  /// Collapsing them to one row per `sourcePubkey` keeps the Follows tab
+  /// from showing the same person repeatedly.
   ///
   /// The surviving row must carry the *latest* `createdAt`, not the
   /// earliest. The feed sorts newest-first and paginates, so stamping a
   /// recent follow with a stale timestamp sinks it below older
   /// notifications — potentially off the first page entirely, which
   /// surfaces as an empty "Follows" tab even though the follow exists.
-  /// Keeping the most recent timestamp also matches the realtime path,
-  /// which inserts new follows at the top of the snapshot.
   List<RelayNotification> _consolidateFollows(List<RelayNotification> raw) {
     final followsByPubkey = <String, RelayNotification>{};
     final result = <RelayNotification>[];

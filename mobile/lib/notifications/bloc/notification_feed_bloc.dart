@@ -168,10 +168,10 @@ class NotificationFeedBloc
     emit(state.copyWith(isLoadingMore: true));
 
     try {
-      await _notificationRepository.getNotifications();
+      await _notificationRepository.loadNextPage();
       emit(state.copyWith(isLoadingMore: false));
     } on Exception catch (e, s) {
-      // `NotificationRepository.getNotifications` (single-attempt
+      // `NotificationRepository.loadNextPage` (single-attempt
       // paginate-load-more) propagates typed `FunnelcakeException`
       // (4xx/5xx/timeout). Per .claude/rules/error_handling.md they
       // are NOT Reportable — the BLoC recovers `isLoadingMore: false`.
@@ -302,6 +302,7 @@ class NotificationFeedBloc
   @override
   Future<void> close() async {
     await _snapshotSubscription.cancel();
+    _notificationRepository.resetPaginationDepth();
     return super.close();
   }
 }
