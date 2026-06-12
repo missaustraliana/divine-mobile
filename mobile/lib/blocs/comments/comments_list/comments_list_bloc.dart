@@ -112,7 +112,6 @@ class CommentsListBloc extends Bloc<CommentsListEvent, CommentsListState> {
         isBackfillComplete: false,
       ),
     );
-    _startWatchingComments();
 
     try {
       final thread = await _commentsRepository.loadComments(
@@ -142,6 +141,7 @@ class CommentsListBloc extends Bloc<CommentsListEvent, CommentsListState> {
           replyCountsByCommentId: computeReplyCounts(commentsById),
         ),
       );
+      _startWatchingComments();
     } on CommentsRepositoryException catch (e, stackTrace) {
       // *FailedException + relay timeouts are matrix-NO (API/domain +
       // Network/IO). addError logs without flagging Reportable so they stay
@@ -419,9 +419,9 @@ class CommentsListBloc extends Bloc<CommentsListEvent, CommentsListState> {
 
   /// Starts the real-time comment subscription.
   ///
-  /// Called from [_onLoadRequested] after the initial load so the `since`
-  /// timestamp aligns with that load. Routes incoming comments through
-  /// [NewCommentReceived].
+  /// Called from [_onLoadRequested] after the initial load so the REST-backed
+  /// first paint is not blocked by relay backfill. Routes incoming comments
+  /// through [NewCommentReceived].
   void _startWatchingComments() {
     _commentStreamSubscription?.cancel();
 
