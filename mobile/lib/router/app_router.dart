@@ -228,6 +228,12 @@ bool _isAuthEntryLocation(String location) {
       location == MinorAccountReviewUnder13Screen.path;
 }
 
+@visibleForTesting
+int homeInitialIndexFromPathParameters(Map<String, String> pathParameters) {
+  final rawIndex = int.tryParse(pathParameters['index'] ?? '') ?? 0;
+  return rawIndex < 0 ? 0 : rawIndex;
+}
+
 final goRouterProvider = Provider<GoRouter>((ref) {
   // Use ref.read to avoid recreating the router on auth state changes
   final authService = ref.read(authServiceProvider);
@@ -431,7 +437,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      // Shell keeps tab navigators alive
+      // Shell owns the shared scaffold and bottom navigation. Individual tab
+      // route state that must survive a child swap is restored explicitly from
+      // route params or tab-position providers.
       ShellRoute(
         builder: (context, state, child) {
           final location = state.uri.toString();
@@ -443,16 +451,23 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: VideoFeedPage.pathWithIndex,
             name: VideoFeedPage.routeName,
-            pageBuilder: (ctx, st) => NoTransitionPage(
-              key: st.pageKey,
-              child: Navigator(
-                key: NavigatorKeys.home,
-                onGenerateRoute: (r) => MaterialPageRoute(
-                  builder: (_) => const VideoFeedPage(),
-                  settings: const RouteSettings(name: VideoFeedPage.routeName),
+            pageBuilder: (ctx, st) {
+              final initialIndex = homeInitialIndexFromPathParameters(
+                st.pathParameters,
+              );
+              return NoTransitionPage(
+                key: st.pageKey,
+                child: Navigator(
+                  key: NavigatorKeys.home,
+                  onGenerateRoute: (r) => MaterialPageRoute(
+                    builder: (_) => VideoFeedPage(initialIndex: initialIndex),
+                    settings: const RouteSettings(
+                      name: VideoFeedPage.routeName,
+                    ),
+                  ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
 
           // EXPLORE tab - grid mode (no index)

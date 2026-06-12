@@ -36,10 +36,17 @@ class VideoFeedPage extends ConsumerWidget {
   /// Build path for a specific index.
   static String pathForIndex(int index) => '/home/$index';
 
-  const VideoFeedPage({this.initialMode = FeedMode.forYou, super.key});
+  const VideoFeedPage({
+    this.initialMode = FeedMode.forYou,
+    this.initialIndex = 0,
+    super.key,
+  });
 
   /// The feed mode to start with. Defaults to [FeedMode.forYou].
   final FeedMode initialMode;
+
+  /// The video index restored from the Home route or last-tab position.
+  final int initialIndex;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -58,9 +65,7 @@ class VideoFeedPage extends ConsumerWidget {
     final blocklistRepository = ref.watch(contentBlocklistRepositoryProvider);
 
     return MultiBlocProvider(
-      key: ValueKey(
-        'video-feed-$showDivineHostedOnly-$contentFilterVersion',
-      ),
+      key: ValueKey('video-feed-$showDivineHostedOnly-$contentFilterVersion'),
       providers: [
         BlocProvider(
           create: (_) => VideoFeedBloc(
@@ -77,14 +82,17 @@ class VideoFeedPage extends ConsumerWidget {
         ),
         BlocProvider(create: (_) => VideoPlaybackStatusCubit()),
       ],
-      child: const VideoFeedView(),
+      child: VideoFeedView(initialIndex: initialIndex),
     );
   }
 }
 
 @visibleForTesting
 class VideoFeedView extends ConsumerStatefulWidget {
-  const VideoFeedView({super.key});
+  const VideoFeedView({this.initialIndex = 0, super.key});
+
+  /// The video index to show when the feed first mounts.
+  final int initialIndex;
 
   @override
   ConsumerState<VideoFeedView> createState() => _VideoFeedViewState();
@@ -110,6 +118,9 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
   /// Tracks the current fractional page position for scroll-driven overlay opacity.
   late final ValueNotifier<double> _pagePosition;
 
+  /// Tracks the active Home video without forcing route updates while swiping.
+  late int _currentIndex;
+
   /// Feed-scoped Auto playback state. Owned by this state so tests can drive
   /// the screen without also wiring the cubit externally; exposed to children
   /// via `BlocProvider.value` in [build] so the rail control and feed items
@@ -119,8 +130,14 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
   @override
   void initState() {
     super.initState();
-    _pagePosition = ValueNotifier<double>(0);
+    _currentIndex = widget.initialIndex < 0 ? 0 : widget.initialIndex;
+    _pagePosition = ValueNotifier<double>(_currentIndex.toDouble());
     WidgetsBinding.instance.addObserver(this);
+  }
+
+  int _clampIndexForItemCount(int index, int itemCount) {
+    if (itemCount == 0) return 0;
+    return index.clamp(0, itemCount - 1);
   }
 
   @override
@@ -147,9 +164,9 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
 
   @override
   Widget build(BuildContext context) {
-    // Pause/resume when navigating away from/back to home tab.
-    // The home navigator's GlobalKey keeps this widget alive across
-    // tab switches, so we must explicitly pause on tab change.
+    // Pause/resume when navigating away from/back to home tab. Some pushed
+    // routes keep this widget mounted, so playback must follow route context
+    // instead of assuming disposal handles every transition.
     ref.listen(pageContextProvider, (_, next) {
       final routeType = next.asData?.value.type;
       if (routeType == null) return;
@@ -209,7 +226,11 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
             BlocListener<VideoFeedBloc, VideoFeedBlocState>(
               listenWhen: (previous, current) => previous.mode != current.mode,
               listener: (_, _) {
+                _currentIndex = 0;
                 _pagePosition.value = 0;
+                ref
+                    .read(lastTabPositionProvider.notifier)
+                    .recordPosition(RouteType.home, 0);
               },
             ),
             // Mark UI ready when videos first become available.
@@ -228,6 +249,28 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
           ],
           child: BlocBuilder<VideoFeedBloc, VideoFeedBlocState>(
             builder: (context, state) {
+              final itemCount = state.videos.length;
+              final clampedIndex = _clampIndexForItemCount(
+                _currentIndex,
+                itemCount,
+              );
+              if (clampedIndex != _currentIndex) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted) return;
+                  if (_currentIndex >= 0 && _currentIndex < itemCount) return;
+                  final normalized = _clampIndexForItemCount(
+                    _currentIndex,
+                    itemCount,
+                  );
+                  if (_currentIndex == normalized) return;
+                  _currentIndex = normalized;
+                  _pagePosition.value = normalized.toDouble();
+                  ref
+                      .read(lastTabPositionProvider.notifier)
+                      .recordPosition(RouteType.home, normalized);
+                });
+              }
+
               // Loading state (including initial state before first load)
               if (state.isLoading) {
                 return const Center(child: BrandedLoadingIndicator());
@@ -235,7 +278,10 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
 
               // Error state
               if (state.status == VideoFeedStatus.failure) {
-                return _FeedErrorWidget(error: state.error);
+                return _FeedErrorWidget(
+                  error: state.error,
+                  onRetry: () => _refreshFeed(context),
+                );
               }
 
               // Empty state
@@ -260,11 +306,16 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
                     FeedVideos(
                       videos: state.videos,
                       contextTitle: state.feedContextTitle,
+                      currentIndex: clampedIndex,
                       isActive: _isNewFeedActive,
                       hasMore: state.hasMore,
                       isLoadingMore: state.isLoadingMore,
                       trafficSource: ViewTrafficSource.home,
                       onActiveVideoChanged: (video, index) {
+                        _currentIndex = index;
+                        ref
+                            .read(lastTabPositionProvider.notifier)
+                            .recordPosition(RouteType.home, index);
                         _resumeAutoAdvanceAfterSwipe();
                         FeedPerformanceTracker().startVideoSwipeTracking(
                           video.id,
@@ -303,6 +354,11 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
   /// last known state via `orElse`.
   Future<void> _refreshFeed(BuildContext context) async {
     final bloc = context.read<VideoFeedBloc>();
+    _currentIndex = 0;
+    _pagePosition.value = 0;
+    ref
+        .read(lastTabPositionProvider.notifier)
+        .recordPosition(RouteType.home, 0);
     bloc.add(const VideoFeedRefreshRequested());
     await bloc.stream.firstWhere(
       (s) =>
@@ -314,9 +370,10 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
 }
 
 class _FeedErrorWidget extends StatelessWidget {
-  const _FeedErrorWidget({this.error});
+  const _FeedErrorWidget({required this.onRetry, this.error});
 
   final VideoFeedError? error;
+  final Future<void> Function() onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -343,9 +400,7 @@ class _FeedErrorWidget extends StatelessWidget {
           ],
           const SizedBox(height: 24),
           ElevatedButton(
-            onPressed: () => context.read<VideoFeedBloc>().add(
-              const VideoFeedRefreshRequested(),
-            ),
+            onPressed: () => unawaited(onRetry()),
             child: Text(context.l10n.feedRetry),
           ),
         ],

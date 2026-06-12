@@ -766,12 +766,11 @@ class VideosRepository {
     List<String> preferredLanguages = const [],
     String? viewerCountry,
   }) async {
-    final cacheKey =
-        'popular:v2:${variant.name}'
-        '${_popularPreferenceCacheSuffix(
-          preferredLanguages: preferredLanguages,
-          viewerCountry: viewerCountry,
-        )}';
+    final preferenceCacheSuffix = _popularPreferenceCacheSuffix(
+      preferredLanguages: preferredLanguages,
+      viewerCountry: viewerCountry,
+    );
+    final cacheKey = 'popular:v2:${variant.name}$preferenceCacheSuffix';
     if (!skipCache && until == null && cursor == null) {
       final cached = _inMemoryFeedCache?.get(cacheKey);
       if (cached != null) {
@@ -929,12 +928,12 @@ class VideosRepository {
     List<String> preferredLanguages = const [],
     String? viewerCountry,
   }) async {
+    final preferenceCacheSuffix = _popularPreferenceCacheSuffix(
+      preferredLanguages: preferredLanguages,
+      viewerCountry: viewerCountry,
+    );
     final cacheKey = variant != null
-        ? 'popular:v2:${variant.name}'
-              '${_popularPreferenceCacheSuffix(
-                preferredLanguages: preferredLanguages,
-                viewerCountry: viewerCountry,
-              )}'
+        ? 'popular:v2:${variant.name}$preferenceCacheSuffix'
         : period == null
         ? _popularCacheKey
         : 'popular:${period.wireValue}';
@@ -2405,6 +2404,18 @@ class VideosRepository {
     final effectiveUserPubkey =
         userPubkey ??
         (_nostrClient.publicKey.isNotEmpty ? _nostrClient.publicKey : null);
+    final preferenceCacheSuffix = _popularPreferenceCacheSuffix(
+      preferredLanguages: preferredLanguages,
+      viewerCountry: viewerCountry,
+    );
+    final cacheKey =
+        'recommended:${effectiveUserPubkey ?? 'anonymous'}'
+        '$preferenceCacheSuffix';
+    if (!skipCache && until == null && cursor == null) {
+      final cached = _inMemoryFeedCache?.get(cacheKey);
+      if (cached != null) return cached;
+    }
+
     if (effectiveUserPubkey == null ||
         _funnelcakeApiClient == null ||
         !_funnelcakeApiClient.isAvailable) {
@@ -2447,12 +2458,16 @@ class VideosRepository {
       );
     }
 
-    return HomeFeedResult(
+    final result = HomeFeedResult(
       videos: videos,
       paginationCursor: response.nextCursor,
       hasMore: response.hasMore,
       rawResponseBody: response.rawBody,
     );
+    if (until == null && cursor == null) {
+      _inMemoryFeedCache?.set(cacheKey, result);
+    }
+    return result;
   }
 
   /// Fetches personalized video recommendations.
