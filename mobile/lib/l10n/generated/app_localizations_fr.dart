@@ -3183,7 +3183,25 @@ class AppLocalizationsFr extends AppLocalizations {
   String get shareSheetAddToClips => 'Ajouter aux clips';
 
   @override
-  String get shareSheetAddedToClips => 'Ajouté aux clips';
+  String get shareSheetNameClipTitle => 'Name this clip';
+
+  @override
+  String get shareSheetNameClipSubtitle =>
+      'Pick a name you\'ll recognize in your library.';
+
+  @override
+  String get shareSheetClipTitleLabel => 'Clip title';
+
+  @override
+  String get shareSheetSaveClip => 'Save clip';
+
+  @override
+  String shareSheetSavedClipToClips(String title) {
+    return 'Saved \"$title\" to clips';
+  }
+
+  @override
+  String get shareSheetUntitledClip => 'Untitled clip';
 
   @override
   String get shareSheetAddToClipsFailed => 'Impossible d\'ajouter aux clips';

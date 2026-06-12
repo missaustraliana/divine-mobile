@@ -25,21 +25,26 @@ models.VideoEvent _video({
   String? dimensions = '480x480',
   Map<String, String> rawTags = const {'platform': 'vine'},
   String? vineId = _defaultVineId,
+  String? title,
+  String content = 'classic vine',
+  String? textTrackContent,
 }) {
   return models.VideoEvent(
     id: id,
     pubkey: 'classic-vine-author-pubkey',
     createdAt: 1451606400,
-    content: 'classic vine',
+    content: content,
     timestamp: DateTime.fromMillisecondsSinceEpoch(
       1451606400 * 1000,
       isUtc: true,
     ),
+    title: title,
     videoUrl: videoUrl,
     duration: duration,
     dimensions: dimensions,
     rawTags: rawTags,
     vineId: vineId,
+    textTrackContent: textTrackContent,
   );
 }
 
@@ -131,6 +136,7 @@ void main() {
     expect(success.clip.thumbnailPath, endsWith('thumb.jpg'));
     expect(success.clip.ghostFramePath, endsWith('ghost.jpg'));
     expect(success.clip.video.file!.path, startsWith(docsDir.path));
+    expect(success.clip.libraryTitle, 'classic vine');
     expect(
       File(success.clip.video.file!.path).readAsBytesSync(),
       sourceVideo.readAsBytesSync(),
@@ -142,6 +148,88 @@ void main() {
             ).captured.single
             as DivineVideoClip;
     expect(captured.id, success.clip.id);
+  });
+
+  test('uses an explicit user title when importing to the library', () async {
+    final service = buildService();
+
+    final result = await service.importToLibrary(
+      _video(title: 'Published title'),
+      libraryTitle: 'My local cut',
+    );
+
+    final success = result as VideoClipImportSuccess;
+    expect(success.clip.libraryTitle, 'My local cut');
+  });
+
+  test('derives the default library title from post title first', () async {
+    final service = buildService();
+
+    final result = await service.importToLibrary(
+      _video(title: 'Published title', content: 'Published description'),
+    );
+
+    final success = result as VideoClipImportSuccess;
+    expect(success.clip.libraryTitle, 'Published title');
+  });
+
+  test(
+    'derives the default library title from description when title is empty',
+    () async {
+      final service = buildService();
+
+      final result = await service.importToLibrary(
+        _video(title: '  ', content: 'A useful description'),
+      );
+
+      final success = result as VideoClipImportSuccess;
+      expect(success.clip.libraryTitle, 'A useful description');
+    },
+  );
+
+  test('derives the default library title from embedded subtitles', () async {
+    final service = buildService();
+
+    final result = await service.importToLibrary(
+      _video(
+        title: '',
+        content: '',
+        textTrackContent: '''
+WEBVTT
+
+00:00.000 --> 00:02.000
+First useful caption
+''',
+      ),
+    );
+
+    final success = result as VideoClipImportSuccess;
+    expect(success.clip.libraryTitle, 'First useful caption');
+  });
+
+  test('uses a timestamp fallback when metadata has no title text', () {
+    final title = VideoClipImportService.defaultLibraryTitleFor(
+      _video(title: '', content: '', textTrackContent: ''),
+      fallbackTime: DateTime(2026, 6, 13, 15, 45),
+    );
+
+    expect(title, 'Clip Jun 13, 3:45 PM');
+  });
+
+  test('normalizes whitespace and truncates long library titles', () {
+    final title = VideoClipImportService.defaultLibraryTitleFor(
+      _video(
+        title:
+            '  This title has     extra spaces and it keeps going past the eighty character limit for local clip names  ',
+        content: 'fallback description',
+      ),
+    );
+
+    expect(title, hasLength(80));
+    expect(
+      title,
+      'This title has extra spaces and it keeps going past the eighty character limi...',
+    );
   });
 
   test('imports an own (non-classic) video as a saved library clip', () async {

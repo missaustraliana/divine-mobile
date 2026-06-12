@@ -3182,7 +3182,25 @@ class AppLocalizationsBg extends AppLocalizations {
   String get shareSheetAddToClips => 'Добави към клипове';
 
   @override
-  String get shareSheetAddedToClips => 'Добавен към клипове';
+  String get shareSheetNameClipTitle => 'Name this clip';
+
+  @override
+  String get shareSheetNameClipSubtitle =>
+      'Pick a name you\'ll recognize in your library.';
+
+  @override
+  String get shareSheetClipTitleLabel => 'Clip title';
+
+  @override
+  String get shareSheetSaveClip => 'Save clip';
+
+  @override
+  String shareSheetSavedClipToClips(String title) {
+    return 'Saved \"$title\" to clips';
+  }
+
+  @override
+  String get shareSheetUntitledClip => 'Untitled clip';
 
   @override
   String get shareSheetAddToClipsFailed => 'Не можа да се добави към клипове';
