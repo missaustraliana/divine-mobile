@@ -1,6 +1,7 @@
 // ABOUTME: Tests for KeycastOAuth client - OAuth flow handling
 // ABOUTME: Verifies URL building, callback parsing, token exchange (mocked HTTP)
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -1135,6 +1136,58 @@ void main() {
         );
         expect(saved.userPubkey, 'abc123pubkey');
       });
+
+      test(
+        'does not save a refresh response that completes after logout',
+        () async {
+          final storage = MemoryKeycastStorage();
+          await storage.write('keycast_refresh_token', 'old_refresh_token');
+
+          final refreshResponse = Completer<http.Response>();
+          var refreshRequestStarted = false;
+          final mockClient = MockClient((request) async {
+            if (request.url.path == '/api/oauth/token') {
+              refreshRequestStarted = true;
+              return refreshResponse.future;
+            }
+            if (request.url.path == '/api/auth/logout') {
+              return http.Response('', 204);
+            }
+            fail('Unexpected request to ${request.url}');
+          });
+
+          final oauth = KeycastOAuth(
+            config: config,
+            httpClient: mockClient,
+            storage: storage,
+          );
+
+          final refresh = oauth.refreshSession();
+          while (!refreshRequestStarted) {
+            await Future<void>.delayed(Duration.zero);
+          }
+
+          await oauth.logout();
+          refreshResponse.complete(
+            http.Response(
+              jsonEncode({
+                'bunker_url': 'bunker://refreshed',
+                'access_token': 'new_access_token',
+                'token_type': 'Bearer',
+                'expires_in': 86400,
+                'refresh_token': 'new_refresh_token',
+                'authorization_handle': 'new_handle',
+              }),
+              200,
+            ),
+          );
+
+          expect(await refresh, isNull);
+          expect(await storage.read('keycast_session'), isNull);
+          expect(await storage.read('keycast_refresh_token'), isNull);
+          expect(await storage.read('keycast_auth_handle'), isNull);
+        },
+      );
     });
 
     group('getSessionOrRefresh', () {
@@ -1222,6 +1275,140 @@ void main() {
         final result = await oauth.getSessionOrRefresh();
 
         expect(result, isNull);
+      });
+    });
+
+    group('request timeouts', () {
+      /// HTTP client whose requests never complete — simulates a dead
+      /// socket (e.g. Android Doze killing the connection).
+      MockClient hangingClient() =>
+          MockClient((request) => Completer<http.Response>().future);
+
+      const shortTimeout = Duration(milliseconds: 50);
+
+      test(
+        'refreshSession fails within the timeout and preserves the '
+        'refresh token',
+        () async {
+          final storage = MemoryKeycastStorage();
+          await storage.write('keycast_refresh_token', 'my_refresh_token');
+
+          final oauth = KeycastOAuth(
+            config: config,
+            httpClient: hangingClient(),
+            storage: storage,
+            requestTimeout: shortTimeout,
+          );
+
+          final result = await oauth.refreshSession();
+
+          expect(result, isNull);
+          // CRITICAL: a timeout is a network failure, not an auth
+          // rejection — the refresh token must survive so the next
+          // attempt can retry.
+          expect(
+            await storage.read('keycast_refresh_token'),
+            'my_refresh_token',
+          );
+        },
+      );
+
+      test('exchangeCode throws TimeoutException on hung request', () async {
+        final oauth = KeycastOAuth(
+          config: config,
+          httpClient: hangingClient(),
+          requestTimeout: shortTimeout,
+        );
+
+        await expectLater(
+          oauth.exchangeCode(code: 'code', verifier: 'verifier'),
+          throwsA(isA<TimeoutException>()),
+        );
+      });
+
+      test(
+        'headlessLogin returns timeout error result on hung request',
+        () async {
+          final oauth = KeycastOAuth(
+            config: config,
+            httpClient: hangingClient(),
+            requestTimeout: shortTimeout,
+          );
+
+          final (result, verifier) = await oauth.headlessLogin(
+            email: 'test@example.com',
+            password: 'password123',
+          );
+
+          expect(result.success, isFalse);
+          expect(result.error, 'timeout');
+          expect(verifier, isNotEmpty);
+        },
+      );
+
+      test(
+        'headlessRegister returns timeout error result on hung request',
+        () async {
+          final oauth = KeycastOAuth(
+            config: config,
+            httpClient: hangingClient(),
+            requestTimeout: shortTimeout,
+          );
+
+          final (result, verifier) = await oauth.headlessRegister(
+            email: 'test@example.com',
+            password: 'password123',
+          );
+
+          expect(result.success, isFalse);
+          expect(result.errorCode, 'timeout');
+          expect(verifier, isNotEmpty);
+        },
+      );
+
+      test('pollForCode returns error result on hung request', () async {
+        final oauth = KeycastOAuth(
+          config: config,
+          httpClient: hangingClient(),
+          requestTimeout: shortTimeout,
+        );
+
+        final result = await oauth.pollForCode('device123');
+
+        expect(result.status, PollStatus.error);
+        expect(result.error, contains('TimeoutException'));
+      });
+
+      test(
+        'sendPasswordResetEmail returns error result on hung request',
+        () async {
+          final oauth = KeycastOAuth(
+            config: config,
+            httpClient: hangingClient(),
+            requestTimeout: shortTimeout,
+          );
+
+          final result = await oauth.sendPasswordResetEmail('test@example.com');
+
+          expect(result.success, isFalse);
+          expect(result.error, contains('TimeoutException'));
+        },
+      );
+
+      test('resetPassword returns error result on hung request', () async {
+        final oauth = KeycastOAuth(
+          config: config,
+          httpClient: hangingClient(),
+          requestTimeout: shortTimeout,
+        );
+
+        final result = await oauth.resetPassword(
+          token: 'reset-token',
+          newPassword: 'new-password',
+        );
+
+        expect(result.success, isFalse);
+        expect(result.message, contains('TimeoutException'));
       });
     });
 
