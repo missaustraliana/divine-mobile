@@ -1038,13 +1038,24 @@ class UploadManager {
             category: LogCategory.video,
           );
         } else {
-          Log.warning(
-            '❌ Failed to upload thumbnail to CDN',
+          Log.error(
+            '❌ Failed to upload required thumbnail to CDN',
             name: 'UploadManager',
             category: LogCategory.video,
           );
         }
+      }
 
+      if (result.success &&
+          !_hasHttpThumbnailUrl(
+            result: result,
+            generatedThumbnailUrl: thumbnailCdnUrl,
+            existingThumbnailUrl: upload.thumbnailPath,
+          )) {
+        throw StateError('Thumbnail upload failed');
+      }
+
+      if (result.success) {
         _updateUploadProgress(upload.id, 1.0);
         onProgress?.call(1.0);
       }
@@ -1265,6 +1276,12 @@ class UploadManager {
 
     // Fall back to string matching for non-HTTP errors
     final errorStr = error.toString().toLowerCase();
+
+    // A missing required thumbnail already exhausted the image upload's own
+    // retry path; retrying here would re-upload the full video.
+    if (errorStr.contains('thumbnail upload failed')) {
+      return false;
+    }
 
     // Network and timeout errors are retriable
     if (errorStr.contains('timeout') ||
@@ -2110,15 +2127,7 @@ class UploadManager {
 
   /// Create successful upload with metadata
   PendingUpload _createSuccessfulUpload(PendingUpload upload, dynamic result) {
-    // Handle both BlossomUploadResult and DirectUploadResult structures
-    String? resultThumbnailUrl;
-    try {
-      // Get thumbnailUrl from upload result (both services should provide it)
-      resultThumbnailUrl = result.thumbnailUrl as String?;
-    } catch (e) {
-      // Fallback if thumbnailUrl is not available
-      resultThumbnailUrl = null;
-    }
+    final resultThumbnailUrl = _resultThumbnailUrl(result);
 
     final existingThumbnailUrl = upload.thumbnailPath;
     String? thumbnailUrl;
@@ -2232,8 +2241,29 @@ class UploadManager {
 
   /// Check if a URL is a valid HTTP/HTTPS URL (not a local file path)
   static bool _isHttpUrl(String? url) {
-    if (url == null || url.isEmpty) return false;
-    return url.startsWith('http://') || url.startsWith('https://');
+    final value = url?.trim();
+    if (value == null || value.isEmpty) return false;
+    final uri = Uri.tryParse(value);
+    if (uri == null || uri.host.isEmpty) return false;
+    return uri.scheme == 'http' || uri.scheme == 'https';
+  }
+
+  static String? _resultThumbnailUrl(dynamic result) {
+    try {
+      return result.thumbnailUrl as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _hasHttpThumbnailUrl({
+    required dynamic result,
+    required String? generatedThumbnailUrl,
+    required String? existingThumbnailUrl,
+  }) {
+    return _isHttpUrl(_resultThumbnailUrl(result)) ||
+        _isHttpUrl(generatedThumbnailUrl) ||
+        _isHttpUrl(existingThumbnailUrl);
   }
 
   /// Create success metrics with calculated values
@@ -2584,17 +2614,13 @@ Upload Timeout Failure:
 
       _updateUploadProgress(upload.id, 0.85);
 
-      // Upload thumbnail to Blossom server.
-      //
-      // `maxAttempts: 1` opts out of `BlossomUploadService.uploadImage`'s
-      // service-level retry (added for #3862). UploadManager already wraps
-      // the entire video+thumbnail pipeline in `AsyncUtils.retryWithBackoff`
-      // (see `_uploadHandler` retry config), so retrying again at the
-      // service layer would compound delays without benefit.
+      // Upload thumbnail to Blossom server. Divine relay publishing requires
+      // a CDN thumbnail, so keep the image upload's own retry enabled here.
+      // If no HTTP thumbnail URL is available after that, the outer video
+      // pipeline treats it as terminal to avoid re-uploading the whole video.
       final uploadResult = await _blossomService.uploadImage(
         imageFile: thumbnailFile,
         nostrPubkey: nostrPubkey,
-        maxAttempts: 1,
         onProgress: (progress) {
           // Map thumbnail progress to 85%-100% of total upload
           _updateUploadProgress(upload.id, 0.85 + (progress * 0.15));
