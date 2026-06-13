@@ -18,9 +18,17 @@ final class DivineVideoPlayerInstance: NSObject, FlutterStreamHandler {
     private var timeObserver: Any?
     private var currentItemObservation: NSKeyValueObservation?
     private var statusObservation: NSKeyValueObservation?
+    private var bufferingObservation: NSKeyValueObservation?
+    private var likelyToKeepUpObservation: NSKeyValueObservation?
     /// One-shot KVO that defers `preroll(atRate:)` until `player.status`
     /// is `.readyToPlay`; calling earlier throws `NSInvalidArgumentException`.
     private var pendingPrerollObservation: NSKeyValueObservation?
+    private var setClipsTimeoutWorkItem: DispatchWorkItem?
+    private var bufferingWatchdogWorkItem: DispatchWorkItem?
+    private var bufferingStallReported = false
+
+    private static let setClipsTimeoutMs = 10_000
+    private static let bufferingStallMs = 8_000
 
     // MARK: - Texture rendering
 
@@ -151,6 +159,8 @@ final class DivineVideoPlayerInstance: NSObject, FlutterStreamHandler {
             return
         }
 
+        armSetClipsTimeout()
+
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -206,11 +216,24 @@ final class DivineVideoPlayerInstance: NSObject, FlutterStreamHandler {
                 self.safePreroll(at: startTime)
 
                 self.currentStatus = "ready"
+                self.clearSetClipsTimeout()
+                DivineVideoPlayerLog.shared.info(
+                    "Player \(self.playerId) ready: \(self.clipCount) clip(s), "
+                        + "totalMs=\(Int(self.totalDuration * 1000))",
+                    name: "DivineVideoPlayer.Load"
+                )
                 self.sendStateUpdate()
                 result(nil)
             } catch {
                 self.currentStatus = "error"
                 self.errorMessage = error.localizedDescription
+                self.clearSetClipsTimeout()
+                self.clearBufferingWatchdog(resetReported: true)
+                DivineVideoPlayerLog.shared.error(
+                    "Player \(self.playerId) composition failed: "
+                        + "\(error.localizedDescription)",
+                    name: "DivineVideoPlayer.Load"
+                )
                 self.sendStateUpdate()
                 result(
                     FlutterError(
@@ -246,7 +269,13 @@ final class DivineVideoPlayerInstance: NSObject, FlutterStreamHandler {
         var clipVolumes: [Float] = []
 
         for clipMap in clipsRaw {
-            guard let uri = clipMap["uri"] as? String else { continue }
+            guard let uri = clipMap["uri"] as? String else {
+                DivineVideoPlayerLog.shared.warning(
+                    "Player \(playerId) skipped a clip: missing uri",
+                    name: "DivineVideoPlayer.Load"
+                )
+                continue
+            }
             let startMs = (clipMap["startMs"] as? NSNumber)?.int64Value ?? 0
             let endMs = clipMap["endMs"] as? NSNumber
             let clipVol = (clipMap["volume"] as? NSNumber)?.floatValue ?? 1.0
@@ -259,6 +288,10 @@ final class DivineVideoPlayerInstance: NSObject, FlutterStreamHandler {
             } else if let parsed = URL(string: uri) {
                 url = parsed
             } else {
+                DivineVideoPlayerLog.shared.warning(
+                    "Player \(playerId) skipped a clip: unparseable uri",
+                    name: "DivineVideoPlayer.Load"
+                )
                 continue
             }
 
@@ -270,12 +303,24 @@ final class DivineVideoPlayerInstance: NSObject, FlutterStreamHandler {
             let assetVideoTracks = try await asset.loadTracks(withMediaType: .video)
             let assetAudioTracks = try await asset.loadTracks(withMediaType: .audio)
 
-            guard let sourceVideoTrack = assetVideoTracks.first else { continue }
+            guard let sourceVideoTrack = assetVideoTracks.first else {
+                DivineVideoPlayerLog.shared.warning(
+                    "Player \(playerId) skipped a clip: no video track",
+                    name: "DivineVideoPlayer.Load"
+                )
+                continue
+            }
             let (naturalSize, transform) = try await sourceVideoTrack.load(
                 .naturalSize, .preferredTransform
             )
             let displaySize = naturalSize.applying(transform).absoluteSize
-            guard displaySize.isPositive else { continue }
+            guard displaySize.isPositive else {
+                DivineVideoPlayerLog.shared.warning(
+                    "Player \(playerId) skipped a clip: non-positive display size",
+                    name: "DivineVideoPlayer.Load"
+                )
+                continue
+            }
             let standardizedTransform = transform.standardized(for: naturalSize)
 
             let startTime = CMTime(value: startMs, timescale: 1000)
@@ -287,7 +332,13 @@ final class DivineVideoPlayerInstance: NSObject, FlutterStreamHandler {
             }
             let timeRange = CMTimeRange(start: startTime, end: endTime)
             let clipDuration = CMTimeSubtract(endTime, startTime)
-            guard CMTimeCompare(clipDuration, .zero) > 0 else { continue }
+            guard CMTimeCompare(clipDuration, .zero) > 0 else {
+                DivineVideoPlayerLog.shared.warning(
+                    "Player \(playerId) skipped a clip: non-positive duration",
+                    name: "DivineVideoPlayer.Load"
+                )
+                continue
+            }
 
             if offsets.isEmpty {
                 composition.naturalSize = displaySize
@@ -460,6 +511,8 @@ final class DivineVideoPlayerInstance: NSObject, FlutterStreamHandler {
 
     private func handleStop(result: @escaping FlutterResult) {
         audioOverlayManager.pauseAndDeactivateAll()
+        clearSetClipsTimeout()
+        clearBufferingWatchdog(resetReported: true)
         // Pause and clear media so the surface goes blank.
         player?.pause()
         playerLooper = nil
@@ -487,6 +540,10 @@ final class DivineVideoPlayerInstance: NSObject, FlutterStreamHandler {
             return
         }
         audioOverlayManager.setTracks(from: tracksRaw)
+        DivineVideoPlayerLog.shared.info(
+            "Player \(playerId) set \(tracksRaw.count) audio overlay track(s)",
+            name: "DivineVideoPlayer.Audio"
+        )
         syncAudioOverlays()
         result(nil)
     }
@@ -660,6 +717,7 @@ final class DivineVideoPlayerInstance: NSObject, FlutterStreamHandler {
         guard let item = player?.currentItem else { return }
         textureOutput?.attach(to: item)
         observeStatus(for: item)
+        observeBuffering(for: item)
         observeEnd(for: item)
     }
 
@@ -669,17 +727,114 @@ final class DivineVideoPlayerInstance: NSObject, FlutterStreamHandler {
             \.status,
             options: [.new]
         ) { [weak self] item, _ in
-            switch item.status {
-            case .readyToPlay:
-                self?.currentStatus = "ready"
-                self?.updateVideoSize(from: item)
-            case .failed:
-                self?.currentStatus = "error"
-                self?.errorMessage = item.error?.localizedDescription
-            default:
-                break
+            DispatchQueue.main.async { [weak self] in
+                guard let self, item === self.player?.currentItem else { return }
+                switch item.status {
+                case .readyToPlay:
+                    self.clearSetClipsTimeout()
+                    self.currentStatus = "ready"
+                    self.updateVideoSize(from: item)
+                case .failed:
+                    self.clearSetClipsTimeout()
+                    self.clearBufferingWatchdog(resetReported: true)
+                    self.currentStatus = "error"
+                    self.errorMessage = item.error?.localizedDescription
+                    DivineVideoPlayerLog.shared.error(
+                        "Player \(self.playerId) item failed: "
+                            + "\(item.error?.localizedDescription ?? "unknown")",
+                        name: "DivineVideoPlayer.Playback"
+                    )
+                default:
+                    break
+                }
+                self.sendStateUpdate()
             }
-            self?.sendStateUpdate()
+        }
+    }
+
+    private func observeBuffering(for item: AVPlayerItem) {
+        bufferingObservation?.invalidate()
+        likelyToKeepUpObservation?.invalidate()
+        bufferingObservation = nil
+        likelyToKeepUpObservation = nil
+        clearBufferingWatchdog(resetReported: true)
+
+        bufferingObservation = item.observe(
+            \.isPlaybackBufferEmpty,
+            options: [.initial, .new]
+        ) { [weak self] observedItem, _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self, observedItem === self.player?.currentItem else { return }
+                if observedItem.isPlaybackBufferEmpty && observedItem.status != .failed {
+                    self.armBufferingWatchdog()
+                } else {
+                    self.clearBufferingWatchdog(resetReported: true)
+                }
+                self.sendStateUpdate()
+            }
+        }
+
+        likelyToKeepUpObservation = item.observe(
+            \.isPlaybackLikelyToKeepUp,
+            options: [.new]
+        ) { [weak self] observedItem, _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self, observedItem === self.player?.currentItem else { return }
+                if observedItem.isPlaybackLikelyToKeepUp {
+                    self.clearBufferingWatchdog(resetReported: true)
+                }
+                self.sendStateUpdate()
+            }
+        }
+    }
+
+    private func armSetClipsTimeout() {
+        clearSetClipsTimeout()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            DivineVideoPlayerLog.shared.warning(
+                "Player \(self.playerId) load froze: never reached ready within "
+                    + "\(Self.setClipsTimeoutMs)ms",
+                name: "DivineVideoPlayer.Freeze"
+            )
+            self.setClipsTimeoutWorkItem = nil
+        }
+        setClipsTimeoutWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + .milliseconds(Self.setClipsTimeoutMs),
+            execute: workItem
+        )
+    }
+
+    private func clearSetClipsTimeout() {
+        setClipsTimeoutWorkItem?.cancel()
+        setClipsTimeoutWorkItem = nil
+    }
+
+    private func armBufferingWatchdog() {
+        guard !bufferingStallReported, bufferingWatchdogWorkItem == nil else { return }
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.bufferingStallReported = true
+            self.bufferingWatchdogWorkItem = nil
+            DivineVideoPlayerLog.shared.warning(
+                "Player \(self.playerId) appears frozen: still buffering after "
+                    + "\(Self.bufferingStallMs)ms",
+                name: "DivineVideoPlayer.Freeze"
+            )
+        }
+        bufferingWatchdogWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + .milliseconds(Self.bufferingStallMs),
+            execute: workItem
+        )
+    }
+
+    private func clearBufferingWatchdog(resetReported: Bool) {
+        bufferingWatchdogWorkItem?.cancel()
+        bufferingWatchdogWorkItem = nil
+        if resetReported {
+            bufferingStallReported = false
         }
     }
 
@@ -907,10 +1062,16 @@ final class DivineVideoPlayerInstance: NSObject, FlutterStreamHandler {
         }
         statusObservation?.invalidate()
         statusObservation = nil
+        bufferingObservation?.invalidate()
+        bufferingObservation = nil
+        likelyToKeepUpObservation?.invalidate()
+        likelyToKeepUpObservation = nil
         currentItemObservation?.invalidate()
         currentItemObservation = nil
         pendingPrerollObservation?.invalidate()
         pendingPrerollObservation = nil
+        clearSetClipsTimeout()
+        clearBufferingWatchdog(resetReported: true)
         NotificationCenter.default.removeObserver(self)
         textureOutput?.dispose()
         textureOutput = nil
