@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:dm_repository/dm_repository.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:models/models.dart' show AudioEvent, VideoCategory, VideoEvent;
@@ -43,6 +44,7 @@ import 'package:openvine/screens/curated_list_feed_screen.dart';
 import 'package:openvine/screens/developer_options_screen.dart';
 import 'package:openvine/screens/discover_lists_screen.dart';
 import 'package:openvine/screens/explore_screen.dart';
+import 'package:openvine/screens/feed/home_feed_retap_cubit.dart';
 import 'package:openvine/screens/feed/pooled_fullscreen_video_feed_screen.dart';
 import 'package:openvine/screens/feed/video_feed_page.dart';
 import 'package:openvine/screens/hashtag_feed_screen.dart';
@@ -455,12 +457,15 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               );
               return NoTransitionPage(
                 key: st.pageKey,
-                child: Navigator(
-                  key: NavigatorKeys.home,
-                  onGenerateRoute: (r) => MaterialPageRoute(
-                    builder: (_) => VideoFeedPage(initialIndex: initialIndex),
-                    settings: const RouteSettings(
-                      name: VideoFeedPage.routeName,
+                child: BlocProvider<HomeFeedRetapCubit>(
+                  create: (_) => HomeFeedRetapCubit(),
+                  child: Navigator(
+                    key: NavigatorKeys.home,
+                    onGenerateRoute: (r) => MaterialPageRoute(
+                      builder: (_) => VideoFeedPage(initialIndex: initialIndex),
+                      settings: const RouteSettings(
+                        name: VideoFeedPage.routeName,
+                      ),
                     ),
                   ),
                 ),
