@@ -1,6 +1,8 @@
 // ABOUTME: Shared bottom navigation bar widget for app shell and profile screens
 // ABOUTME: Provides consistent bottom nav across screens with/without shell
 
+import 'dart:async';
+import 'dart:math' show pi;
 import 'dart:ui' show ImageFilter;
 
 import 'package:divine_ui/divine_ui.dart';
@@ -15,6 +17,7 @@ import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/user_profile_providers.dart';
 import 'package:openvine/router/router.dart';
 import 'package:openvine/screens/explore/explore_screen.dart';
+import 'package:openvine/screens/feed/home_feed_retap_cubit.dart';
 import 'package:openvine/screens/feed/video_feed_page.dart';
 import 'package:openvine/screens/inbox/inbox_page.dart';
 import 'package:openvine/screens/profile_screen_router.dart';
@@ -25,11 +28,44 @@ import 'package:openvine/widgets/vine_cached_image.dart';
 import 'package:unified_logger/unified_logger.dart';
 
 /// Shared bottom navigation bar used by AppShell and standalone profile screens.
-class VineBottomNav extends ConsumerWidget {
+class VineBottomNav extends ConsumerStatefulWidget {
   const VineBottomNav({required this.currentIndex, super.key});
 
   /// Currently selected tab index (0-3), or -1 if no tab is selected.
   final int currentIndex;
+
+  @override
+  ConsumerState<VineBottomNav> createState() => _VineBottomNavState();
+}
+
+class _VineBottomNavState extends ConsumerState<VineBottomNav> {
+  int get currentIndex => widget.currentIndex;
+
+  StreamSubscription<HomeFeedRetapState>? _retapSubscription;
+  HomeFeedRetapState _retapState = const HomeFeedRetapState();
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToRetapCubit();
+  }
+
+  @override
+  void dispose() {
+    _retapSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _subscribeToRetapCubit() {
+    final homeCtx = NavigatorKeys.home.currentContext;
+    if (homeCtx == null) return;
+    final cubit = homeCtx.read<HomeFeedRetapCubit>();
+    _retapSubscription?.cancel();
+    _retapState = cubit.state;
+    _retapSubscription = cubit.stream.listen((state) {
+      if (mounted) setState(() => _retapState = state);
+    });
+  }
 
   /// Maps tab index to RouteType
   RouteType _routeTypeForTab(int index) {
@@ -55,6 +91,14 @@ class VineBottomNav extends ConsumerWidget {
       name: 'Navigation',
       category: LogCategory.ui,
     );
+
+    // Tapping home while already on home scrolls to the top and refreshes.
+    // The cubit lives inside the home navigator's subtree, so we reach it
+    // via NavigatorKeys.home rather than the shell's BuildContext.
+    if (tabIndex == 0 && currentIndex == 0) {
+      NavigatorKeys.home.currentContext?.read<HomeFeedRetapCubit>().request();
+      return;
+    }
 
     // Pop any pushed routes first
     final navigator = Navigator.of(context);
@@ -100,7 +144,8 @@ class VineBottomNav extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    if (_retapSubscription == null) _subscribeToRetapCubit();
     return ColoredBox(
       color: VineTheme.surfaceBackground,
       // The bottom nav has no Container padding — all four edges of the
@@ -128,11 +173,10 @@ class VineBottomNav extends ConsumerWidget {
 
             return Row(
               children: [
-                _IconTabButton(
-                  semanticIdentifier: 'home_tab',
+                _HomeTabButton(
                   semanticLabel: context.l10n.navHome,
-                  icon: DivineIconName.houseSimple,
                   isSelected: currentIndex == 0,
+                  isRefreshing: _retapState.isRefreshing,
                   onTap: () => _handleTabTap(context, ref, 0),
                   tapTargetWidth: _kHorizontalEdgePad + iconWidth + halfGap,
                   iconAlignment: AlignmentDirectional.centerStart,
@@ -226,6 +270,174 @@ const double _kHorizontalEdgePad = 16;
 //     unselected differ only in the outer border (2 px white vs 1 px
 //     `onSurfaceDisabled`); no filter / opacity / shadow on the avatar
 //     itself.
+
+/// Home tab button that animates between the house icon and a spinning
+/// refresh arrow while the feed is reloading after a retap.
+///
+/// On retap: house zooms out and fades, arrow fades in, zooms in, and spins.
+/// On load complete: arrow fades out and shrinks back, house fades in and
+/// zooms back to full size. Rotation always completes its current turn.
+class _HomeTabButton extends StatefulWidget {
+  const _HomeTabButton({
+    required this.semanticLabel,
+    required this.isSelected,
+    required this.isRefreshing,
+    required this.onTap,
+    required this.tapTargetWidth,
+    required this.iconAlignment,
+    required this.edgePadding,
+  });
+
+  final String semanticLabel;
+  final bool isSelected;
+  final bool isRefreshing;
+  final VoidCallback onTap;
+  final double tapTargetWidth;
+  final AlignmentGeometry iconAlignment;
+  final EdgeInsetsGeometry edgePadding;
+
+  @override
+  State<_HomeTabButton> createState() => _HomeTabButtonState();
+}
+
+class _HomeTabButtonState extends State<_HomeTabButton>
+    with TickerProviderStateMixin {
+  // Controls house ↔ arrow cross-fade and scale (0 = house, 1 = arrow).
+  late final AnimationController _swapController;
+  // Controls continuous rotation of the arrow icon.
+  late final AnimationController _rotationController;
+
+  late final Animation<double> _houseOpacity;
+  late final Animation<double> _houseScale;
+  late final Animation<double> _arrowOpacity;
+  late final Animation<double> _arrowScale;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _swapController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+
+    _rotationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+
+    // House: full size + opaque at 0, scaled down + transparent at 1.
+    _houseOpacity = Tween<double>(begin: 1, end: 0).animate(
+      CurvedAnimation(parent: _swapController, curve: Curves.easeInOut),
+    );
+    _houseScale = Tween<double>(begin: 1, end: 0.5).animate(
+      CurvedAnimation(parent: _swapController, curve: Curves.easeInOut),
+    );
+
+    // Arrow: transparent + small at 0, full size + opaque at 1.
+    _arrowOpacity = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _swapController, curve: Curves.easeInOut),
+    );
+    _arrowScale = Tween<double>(begin: 0.5, end: 1).animate(
+      CurvedAnimation(parent: _swapController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _swapController.dispose();
+    _rotationController.dispose();
+    super.dispose();
+  }
+
+  void _startRefreshAnimation() {
+    _swapController.forward();
+    _rotationController.repeat();
+  }
+
+  void _stopRefreshAnimation() {
+    // Let the current rotation complete before stopping.
+    _rotationController.forward(from: _rotationController.value).then((_) {
+      if (mounted) _rotationController.stop();
+    });
+    _swapController.reverse();
+  }
+
+  @override
+  void didUpdateWidget(_HomeTabButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isRefreshing && !oldWidget.isRefreshing) {
+      _startRefreshAnimation();
+    } else if (!widget.isRefreshing && oldWidget.isRefreshing) {
+      _stopRefreshAnimation();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final iconBox = SizedBox.square(
+      dimension: kMinInteractiveDimension,
+      child: Center(
+        child: Opacity(
+          opacity: widget.isSelected ? 1.0 : 0.32,
+          child: AnimatedBuilder(
+            animation: Listenable.merge([_swapController, _rotationController]),
+            builder: (context, _) {
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  // House icon — fades out and shrinks on refresh.
+                  Opacity(
+                    opacity: _houseOpacity.value,
+                    child: Transform.scale(
+                      scale: _houseScale.value,
+                      child: _ShadowedNavIcon(
+                        icon: DivineIconName.houseSimple,
+                        showShadow: widget.isSelected,
+                      ),
+                    ),
+                  ),
+                  // Refresh arrow — fades in, scales up, and rotates.
+                  Opacity(
+                    opacity: _arrowOpacity.value,
+                    child: Transform.scale(
+                      scale: _arrowScale.value,
+                      child: Transform.rotate(
+                        angle: _rotationController.value * 2 * pi,
+                        child: const DivineIcon(
+                          icon: DivineIconName.arrowClockwise,
+                          color: VineTheme.whiteText,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    return Semantics(
+      identifier: 'home_tab',
+      button: true,
+      label: widget.semanticLabel,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: SizedBox(
+          width: widget.tapTargetWidth,
+          height: _kTabSlotHeight,
+          child: Padding(
+            padding: widget.edgePadding,
+            child: Align(alignment: widget.iconAlignment, child: iconBox),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// Tap target + Semantics wrapper shared by the three icon tabs.
 ///

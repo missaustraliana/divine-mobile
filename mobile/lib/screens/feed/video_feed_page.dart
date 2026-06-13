@@ -21,6 +21,7 @@ import 'package:openvine/router/router.dart';
 import 'package:openvine/screens/feed/feed_auto_advance_cubit.dart';
 import 'package:openvine/screens/feed/feed_mode_switch.dart';
 import 'package:openvine/screens/feed/feed_tuning_snackbar.dart';
+import 'package:openvine/screens/feed/home_feed_retap_cubit.dart';
 import 'package:openvine/screens/feed/video_feed_page/feed_empty_widget.dart';
 import 'package:openvine/screens/feed/video_feed_page/feed_error_widget.dart';
 import 'package:openvine/services/startup_performance_service.dart';
@@ -323,6 +324,22 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
         innerColor: VineTheme.backgroundColor,
         child: MultiBlocListener(
           listeners: [
+            // Refresh and scroll to top when the user taps the home tab while
+            // already on it (TikTok-style re-tap behaviour). The signal is a
+            // counter incremented by VineBottomNav; any change means "refresh
+            // and go to top".
+            BlocListener<HomeFeedRetapCubit, HomeFeedRetapState>(
+              listenWhen: (previous, current) =>
+                  !previous.isRefreshing && current.isRefreshing,
+              listener: (context, _) async {
+                await _refreshFeed(context);
+                if (!context.mounted) return;
+                await _feedVideosKey.currentState?.animateToPage(0);
+                if (context.mounted) {
+                  context.read<HomeFeedRetapCubit>().completeRefresh();
+                }
+              },
+            ),
             // Reset page position when mode changes.
             BlocListener<VideoFeedBloc, VideoFeedBlocState>(
               listenWhen: (previous, current) => previous.mode != current.mode,
