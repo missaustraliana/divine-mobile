@@ -24,7 +24,9 @@ part 'for_you_provider.g.dart';
 /// Currently only enabled on staging environment for testing.
 @Riverpod(keepAlive: true)
 class ForYouFeed extends _$ForYouFeed {
-  int _currentLimit = 50;
+  static const int _pageSize = 50;
+
+  String? _nextCursor;
 
   @override
   Future<VideoFeedState> build() async {
@@ -97,10 +99,13 @@ class ForYouFeed extends _$ForYouFeed {
       return const VideoFeedState(videos: [], hasMoreContent: false);
     }
 
-    return _fetchRecommendations(limit: _currentLimit);
+    _nextCursor = null;
+    return _fetchRecommendations();
   }
 
-  Future<VideoFeedState> _fetchRecommendations({required int limit}) async {
+  Future<VideoFeedState> _fetchRecommendations({
+    bool preserveExistingOnError = false,
+  }) async {
     try {
       final authService = ref.read(authServiceProvider);
       final currentUserPubkey = authService.currentPublicKeyHex;
@@ -112,7 +117,7 @@ class ForYouFeed extends _$ForYouFeed {
       final hints = await readFeedViewerPreferenceHints(ref.read);
       final response = await client.getRecommendations(
         pubkey: currentUserPubkey,
-        limit: limit,
+        limit: _pageSize,
         preferredLanguages: hints.preferredLanguages,
         viewerCountry: hints.viewerCountry,
       );
@@ -135,9 +140,12 @@ class ForYouFeed extends _$ForYouFeed {
             .toList(),
       );
 
+      _nextCursor = response.nextCursor;
+      final hasMore = response.hasMore && _nextCursor != null;
+
       return VideoFeedState(
         videos: filteredVideos,
-        hasMoreContent: filteredVideos.length >= 20,
+        hasMoreContent: hasMore,
         lastUpdated: DateTime.now(),
       );
     } catch (e) {
@@ -146,6 +154,7 @@ class ForYouFeed extends _$ForYouFeed {
         name: 'ForYouFeedProvider',
         category: LogCategory.video,
       );
+      if (preserveExistingOnError) rethrow;
       return VideoFeedState(
         videos: const [],
         hasMoreContent: false,
@@ -180,11 +189,18 @@ class ForYouFeed extends _$ForYouFeed {
       }
 
       final client = ref.read(funnelcakeApiClientProvider);
-      final newLimit = _currentLimit + 30;
+      final cursor = _nextCursor;
+      if (cursor == null) {
+        state = AsyncData(
+          currentState.copyWith(isLoadingMore: false, hasMoreContent: false),
+        );
+        return;
+      }
       final hints = await readFeedViewerPreferenceHints(ref.read);
       final response = await client.getRecommendations(
         pubkey: currentUserPubkey,
-        limit: newLimit,
+        limit: _pageSize,
+        cursor: cursor,
         preferredLanguages: hints.preferredLanguages,
         viewerCountry: hints.viewerCountry,
       );
@@ -200,21 +216,27 @@ class ForYouFeed extends _$ForYouFeed {
             .where((v) => !blocklistRepository.shouldFilterFromFeeds(v.pubkey))
             .toList(),
       );
-      final newEventsLoaded =
-          filteredVideos.length - currentState.videos.length;
+      final existingIds = currentState.videos
+          .map((video) => video.id.toLowerCase())
+          .toSet();
+      final newVideos = filteredVideos
+          .where((video) => existingIds.add(video.id.toLowerCase()))
+          .toList();
+      final mergedVideos = [...currentState.videos, ...newVideos];
+      final newEventsLoaded = newVideos.length;
 
       Log.info(
-        '🎯 ForYouFeed: Loaded $newEventsLoaded more recommendations (total: ${filteredVideos.length})',
+        '🎯 ForYouFeed: Loaded $newEventsLoaded more recommendations (total: ${mergedVideos.length})',
         name: 'ForYouFeedProvider',
         category: LogCategory.video,
       );
 
-      _currentLimit = newLimit;
+      _nextCursor = response.nextCursor;
 
       state = AsyncData(
         VideoFeedState(
-          videos: filteredVideos,
-          hasMoreContent: newEventsLoaded > 0,
+          videos: mergedVideos,
+          hasMoreContent: response.hasMore && _nextCursor != null,
           lastUpdated: DateTime.now(),
         ),
       );
@@ -225,8 +247,6 @@ class ForYouFeed extends _$ForYouFeed {
         category: LogCategory.video,
       );
 
-      if (!ref.mounted) return;
-      final currentState = await future;
       if (!ref.mounted) return;
       state = AsyncData(
         currentState.copyWith(isLoadingMore: false, error: e.toString()),
@@ -242,13 +262,11 @@ class ForYouFeed extends _$ForYouFeed {
       category: LogCategory.video,
     );
 
-    _currentLimit = 50; // Reset limit on refresh
-
     await staleWhileRevalidate(
       getCurrentState: () => state,
       isMounted: () => ref.mounted,
       setState: (s) => state = s,
-      fetchFresh: () => _fetchRecommendations(limit: _currentLimit),
+      fetchFresh: () => _fetchRecommendations(preserveExistingOnError: true),
     );
   }
 }
