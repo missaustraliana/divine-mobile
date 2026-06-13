@@ -3,6 +3,7 @@
 
 import 'dart:async';
 
+import 'package:cache_sync/cache_sync.dart';
 import 'package:db_client/db_client.dart' hide Filter;
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,6 +14,8 @@ import 'package:models/models.dart';
 import 'package:nostr_client/nostr_client.dart';
 import 'package:nostr_sdk/nostr_sdk.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../../cache_sync/test/fake_cache_dao.dart';
 
 class _MockNostrClient extends Mock implements NostrClient {}
 
@@ -79,10 +82,18 @@ class _FakeRelay extends RelayBase {
 
 class _FakeContactList extends Fake implements ContactList {}
 
+/// A [FakeCacheDao] whose [delete] always throws, to exercise the non-fatal
+/// cache-invalidation failure path in `_invalidateMyFollowingCache`.
+class _ThrowingDeleteCacheDao extends FakeCacheDao {
+  @override
+  Future<void> delete(String key) async => throw Exception('delete failed');
+}
+
 void main() {
   group('FollowRepository', () {
     late FollowRepository repository;
     late _MockNostrClient mockNostrClient;
+    late FakeCacheDao cacheDao;
     late bool cacheIsInitialized;
     late List<Event> Function(int kind) getCachedEventsByKind;
     late List<Event> cachedUserEvents;
@@ -103,6 +114,9 @@ void main() {
 
     setUp(() async {
       SharedPreferences.setMockInitialValues({});
+
+      cacheDao = FakeCacheDao();
+      await CacheSync.init(dao: cacheDao);
 
       mockNostrClient = _MockNostrClient();
       cacheIsInitialized = false;
@@ -595,6 +609,139 @@ void main() {
             ),
           ),
         );
+      });
+    });
+
+    group('CacheSync invalidation on mutation (#5144)', () {
+      String myFollowingKey(String pubkey) => '$pubkey:my_following';
+
+      void stubBroadcastSuccess() {
+        final mockEvent = _MockEvent();
+        when(() => mockEvent.id).thenReturn(testCurrentUserPubkey);
+        when(() => mockEvent.content).thenReturn('');
+        when(
+          () => mockNostrClient.sendContactList(
+            any(),
+            any(),
+            tempRelays: any(named: 'tempRelays'),
+            targetRelays: any(named: 'targetRelays'),
+          ),
+        ).thenAnswer((_) async => mockEvent);
+      }
+
+      test('follow() invalidates the my_following cache entry', () async {
+        stubBroadcastSuccess();
+        await cacheDao.write(
+          key: myFollowingKey(testCurrentUserPubkey),
+          payload: const FollowingSnapshot(
+            pubkeys: [testTargetPubkey2],
+            count: 1,
+          ).toJson(),
+        );
+        expect(
+          await cacheDao.read(myFollowingKey(testCurrentUserPubkey)),
+          isNotNull,
+        );
+
+        await repository.follow(testTargetPubkey);
+
+        expect(
+          await cacheDao.read(myFollowingKey(testCurrentUserPubkey)),
+          isNull,
+        );
+      });
+
+      test('unfollow() invalidates the my_following cache entry', () async {
+        SharedPreferences.setMockInitialValues({
+          'following_list_$testCurrentUserPubkey': '["$testTargetPubkey"]',
+        });
+        repository = FollowRepository(
+          nostrClient: mockNostrClient,
+          isCacheInitialized: () => cacheIsInitialized,
+          getCachedEventsByKind: (kind) => getCachedEventsByKind(kind),
+          cacheUserEvent: cachedUserEvents.add,
+          indexerRelayUrls: const [],
+        );
+        await repository.initialize();
+        stubBroadcastSuccess();
+        await cacheDao.write(
+          key: myFollowingKey(testCurrentUserPubkey),
+          payload: const FollowingSnapshot(
+            pubkeys: [testTargetPubkey],
+            count: 1,
+          ).toJson(),
+        );
+
+        await repository.unfollow(testTargetPubkey);
+
+        expect(
+          await cacheDao.read(myFollowingKey(testCurrentUserPubkey)),
+          isNull,
+        );
+      });
+
+      test(
+        'cross-device Kind 3 update invalidates the my_following cache entry',
+        () async {
+          final realTimeStreamController = StreamController<Event>.broadcast();
+          addTearDown(() async {
+            await repository.dispose();
+            await realTimeStreamController.close();
+          });
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              tempRelays: any(named: 'tempRelays'),
+              targetRelays: any(named: 'targetRelays'),
+              relayTypes: any(named: 'relayTypes'),
+              sendAfterAuth: any(named: 'sendAfterAuth'),
+              onEose: any(named: 'onEose'),
+            ),
+          ).thenAnswer((_) => realTimeStreamController.stream);
+
+          await repository.initialize();
+          await cacheDao.write(
+            key: myFollowingKey(testCurrentUserPubkey),
+            payload: const FollowingSnapshot(
+              pubkeys: [testTargetPubkey2],
+              count: 1,
+            ).toJson(),
+          );
+          expect(
+            await cacheDao.read(myFollowingKey(testCurrentUserPubkey)),
+            isNotNull,
+          );
+
+          // A newer Kind 3 event arrives from another device.
+          realTimeStreamController.add(
+            Event(
+              testCurrentUserPubkey,
+              3,
+              [
+                ['p', testTargetPubkey],
+              ],
+              '',
+              createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000 + 100,
+            ),
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+
+          expect(repository.followingPubkeys, contains(testTargetPubkey));
+          expect(
+            await cacheDao.read(myFollowingKey(testCurrentUserPubkey)),
+            isNull,
+          );
+        },
+      );
+
+      test('follow() succeeds even when cache invalidation throws', () async {
+        await CacheSync.init(dao: _ThrowingDeleteCacheDao());
+        stubBroadcastSuccess();
+
+        await repository.follow(testTargetPubkey);
+
+        expect(repository.followingPubkeys, contains(testTargetPubkey));
       });
     });
 
