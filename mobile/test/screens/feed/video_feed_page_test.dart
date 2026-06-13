@@ -231,6 +231,47 @@ void main() {
       await tester.pump();
     });
 
+    testWidgets('requests auto-refresh when app resumes', (tester) async {
+      final video = createTestVideoEvent();
+      final state = VideoFeedBlocState(
+        status: VideoFeedStatus.success,
+        videos: [video],
+      );
+      when(() => videoFeedBloc.state).thenReturn(state);
+      whenListen(
+        videoFeedBloc,
+        const Stream<VideoFeedBlocState>.empty(),
+        initialState: state,
+      );
+
+      await tester.pumpWidget(
+        testMaterialApp(
+          home: MultiBlocProvider(
+            providers: [
+              BlocProvider<VideoFeedBloc>.value(value: videoFeedBloc),
+              BlocProvider<VideoPlaybackStatusCubit>(
+                create: (_) => VideoPlaybackStatusCubit(),
+              ),
+              BlocProvider<VideoVolumeCubit>.value(value: videoVolumeCubit),
+            ],
+            child: const VideoFeedView(),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+
+      verify(
+        () => videoFeedBloc.add(const VideoFeedAutoRefreshRequested()),
+      ).called(1);
+
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    });
+
     testWidgets('passes restored home index to FeedVideos', (tester) async {
       final videos = [
         createTestVideoEvent(id: 'video-0'),
@@ -266,6 +307,12 @@ void main() {
 
       final feedVideos = tester.widget<FeedVideos>(find.byType(FeedVideos));
       expect(feedVideos.currentIndex, 2);
+
+      // Drain the player-window preload grace timer before the tree is
+      // disposed so no timer is pending at test teardown.
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
     });
 
     testWidgets('clamps restored home index to loaded videos', (tester) async {
@@ -303,6 +350,12 @@ void main() {
 
       final feedVideos = tester.widget<FeedVideos>(find.byType(FeedVideos));
       expect(feedVideos.currentIndex, 2);
+
+      // Drain the player-window preload grace timer before the tree is
+      // disposed so no timer is pending at test teardown.
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
     });
 
     testWidgets('records active video index for home tab restoration', (
@@ -349,6 +402,12 @@ void main() {
         container.read(lastTabPositionProvider)[RouteType.home],
         equals(1),
       );
+
+      // Drain the player-window preload grace timer before the tree is
+      // disposed so no timer is pending at test teardown.
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
     });
 
     testWidgets('home route emissions do not clobber recorded home index', (
