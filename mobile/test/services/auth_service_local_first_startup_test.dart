@@ -133,7 +133,7 @@ void main() {
       );
     }
 
-    AuthService createAuthService() {
+    AuthService createAuthService({Duration? startupNetworkOperationTimeout}) {
       final keyStorage = SecureKeyStorage(
         securityConfig: const SecurityConfig(requireHardwareBacked: false),
       );
@@ -141,6 +141,7 @@ void main() {
         userDataCleanupService: mockCleanupService,
         keyStorage: keyStorage,
         oauthClient: mockOAuthClient,
+        startupNetworkOperationTimeout: startupNetworkOperationTimeout,
       );
     }
 
@@ -531,5 +532,84 @@ void main() {
         },
       );
     });
+
+    test('no local key + hanging refresh reaches unauthenticated', () async {
+      SharedPreferences.setMockInitialValues({
+        'authentication_source': 'divineOAuth',
+        'tos_accepted': true,
+      });
+
+      final expiredSession = KeycastSession(
+        bunkerUrl: 'https://login.divine.video/api/nostr',
+        accessToken: 'expired_token',
+        expiresAt: DateTime.now().subtract(const Duration(hours: 1)),
+      );
+      secureStorage['keycast_session'] = jsonEncode(expiredSession.toJson());
+
+      when(
+        () => mockOAuthClient.refreshSession(
+          userPubkey: any(named: 'userPubkey'),
+        ),
+      ).thenAnswer((_) => Completer<KeycastSession?>().future);
+
+      final authService = createAuthService(
+        startupNetworkOperationTimeout: const Duration(milliseconds: 1),
+      );
+
+      await runZonedGuarded(
+        () async {
+          await authService.initialize();
+
+          expect(authService.authState, equals(AuthState.unauthenticated));
+          expect(authService.hasExpiredOAuthSession, isTrue);
+        },
+        (error, stack) {
+          // Ignore background errors
+        },
+      );
+    });
+
+    test(
+      'startup refresh timeout keeps OAuth refresh single-flight occupied',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          'authentication_source': 'divineOAuth',
+          'tos_accepted': true,
+        });
+
+        final expiredSession = KeycastSession(
+          bunkerUrl: 'https://login.divine.video/api/nostr',
+          accessToken: 'expired_token',
+          expiresAt: DateTime.now().subtract(const Duration(hours: 1)),
+        );
+        secureStorage['keycast_session'] = jsonEncode(expiredSession.toJson());
+
+        final refreshCompleter = Completer<KeycastSession?>();
+        when(
+          () => mockOAuthClient.refreshSession(
+            userPubkey: any(named: 'userPubkey'),
+          ),
+        ).thenAnswer((_) => refreshCompleter.future);
+
+        final authService = createAuthService(
+          startupNetworkOperationTimeout: const Duration(milliseconds: 1),
+        );
+
+        await authService.initialize();
+        expect(authService.authState, equals(AuthState.unauthenticated));
+
+        final retry = authService.tryRefreshExpiredSession();
+        await Future<void>.delayed(Duration.zero);
+
+        verify(
+          () => mockOAuthClient.refreshSession(
+            userPubkey: any(named: 'userPubkey'),
+          ),
+        ).called(1);
+
+        refreshCompleter.complete(null);
+        expect(await retry, isFalse);
+      },
+    );
   });
 }

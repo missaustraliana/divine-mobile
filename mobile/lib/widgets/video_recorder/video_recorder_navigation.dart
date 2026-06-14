@@ -5,12 +5,15 @@
 
 import 'dart:async';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:openvine/blocs/video_recorder/video_recorder_bloc.dart';
+import 'package:openvine/l10n/l10n.dart';
+import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/video_editor_provider.dart';
+import 'package:openvine/screens/auth/welcome_screen.dart';
 import 'package:openvine/screens/feed/video_feed_page.dart';
 import 'package:openvine/screens/library_screen.dart';
 import 'package:openvine/screens/video_editor/video_editor_screen.dart';
@@ -39,6 +42,9 @@ Future<void> openVideoEditorFromRecorder(
   BuildContext context,
   WidgetRef ref,
 ) async {
+  if (!await _ensureAuthenticatedForRecorderExit(context, ref)) return;
+  if (!context.mounted) return;
+
   final bloc = context.read<VideoRecorderBloc>();
   final recorderMode = bloc.state.recorderMode;
 
@@ -60,7 +66,10 @@ Future<void> openVideoEditorFromRecorder(
 
 /// Navigates to the clips-only library, releasing the camera during the
 /// transition and re-initializing it on return.
-Future<void> openRecorderLibrary(BuildContext context) async {
+Future<void> openRecorderLibrary(BuildContext context, WidgetRef ref) async {
+  if (!await _ensureAuthenticatedForRecorderExit(context, ref)) return;
+  if (!context.mounted) return;
+
   final bloc = context.read<VideoRecorderBloc>();
 
   final navigation = context.pushNamed(LibraryScreen.clipsOnlyRouteName);
@@ -71,6 +80,51 @@ Future<void> openRecorderLibrary(BuildContext context) async {
   await navigation;
   if (!context.mounted) return;
   bloc.add(const VideoRecorderInitializeRequested());
+}
+
+Future<bool> _ensureAuthenticatedForRecorderExit(
+  BuildContext context,
+  WidgetRef ref,
+) async {
+  final authGate = ref.read(recorderExitAuthGateProvider);
+  final showedRestoreSnackbar = authGate.isRestoring;
+  if (showedRestoreSnackbar && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.l10n.authSigningYouIn),
+        duration: authGate.restoreTimeout,
+      ),
+    );
+  }
+
+  final authenticated = await authGate.waitForAuthenticatedOrTerminal();
+  if (showedRestoreSnackbar) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    }
+  }
+
+  if (authenticated) return true;
+
+  final saved = await ref
+      .read(videoEditorProvider.notifier)
+      .saveAsDraft(enforceCreateNewDraft: true);
+  if (!context.mounted) return false;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        saved
+            ? context.l10n.uploadFailureSheetSavedToDraftsSnackbar
+            : context.l10n.videoMetadataFailedToSaveSnackbar,
+      ),
+    ),
+  );
+
+  if (saved) {
+    context.go(WelcomeScreen.path);
+  }
+  return false;
 }
 
 /// Waits for the current route's push transition to finish before returning.

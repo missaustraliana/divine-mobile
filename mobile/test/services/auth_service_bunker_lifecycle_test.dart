@@ -1,6 +1,9 @@
 // ABOUTME: Tests for AuthService bunker lifecycle management
 // ABOUTME: Tests clearError, pause/resume, dispose with bunker signer
 
+import 'dart:async';
+
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -37,6 +40,9 @@ void main() {
     when(() => mockKeyStorage.initialize()).thenAnswer((_) async {});
     when(() => mockKeyStorage.hasKeys()).thenAnswer((_) async => false);
     when(() => mockKeyStorage.dispose()).thenReturn(null);
+    when(
+      () => mockFlutterSecureStorage.read(key: any(named: 'key')),
+    ).thenAnswer((_) async => null);
 
     authService = AuthService(
       userDataCleanupService: mockCleanupService,
@@ -160,6 +166,94 @@ void main() {
         expect(true, isTrue); // Documentation test
       },
     );
+
+    test('startup restore times out unreachable bunker signer', () async {
+      await authService.dispose();
+
+      SharedPreferences.setMockInitialValues({
+        'authentication_source': 'bunker',
+      });
+      const bunkerUrl =
+          'bunker://deadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678'
+          '?relay=wss://relay.example.com';
+
+      when(
+        () => mockFlutterSecureStorage.read(key: any(named: 'key')),
+      ).thenAnswer((_) async => bunkerUrl);
+      when(
+        () => mockBunkerSigner.connect(sendConnectRequest: false),
+      ).thenAnswer((_) => Future<String?>.delayed(const Duration(hours: 1)));
+
+      authService = AuthService(
+        userDataCleanupService: mockCleanupService,
+        keyStorage: mockKeyStorage,
+        flutterSecureStorage: mockFlutterSecureStorage,
+        remoteSignerFactory: (_, _) => mockBunkerSigner,
+        startupNetworkOperationTimeout: const Duration(milliseconds: 1),
+      );
+
+      await authService.initialize();
+
+      expect(authService.authState, AuthState.unauthenticated);
+      verify(
+        () => mockBunkerSigner.connect(sendConnectRequest: false),
+      ).called(1);
+      verify(() => mockBunkerSigner.close()).called(1);
+    });
+
+    test('interactive signInForAccount reconnect is unbounded for an '
+        'unreachable bunker signer', () async {
+      await authService.dispose();
+
+      const pubkeyHex =
+          'deadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678';
+      const bunkerUrl = 'bunker://$pubkeyHex?relay=wss://relay.example.com';
+
+      when(
+        () => mockFlutterSecureStorage.read(key: any(named: 'key')),
+      ).thenAnswer((_) async => bunkerUrl);
+      when(
+        () => mockFlutterSecureStorage.write(
+          key: any(named: 'key'),
+          value: any(named: 'value'),
+        ),
+      ).thenAnswer((_) async {});
+
+      // connect() never resolves: the bunker relay is unreachable.
+      final neverResolves = Completer<String?>();
+      when(
+        () => mockBunkerSigner.connect(sendConnectRequest: false),
+      ).thenAnswer((_) => neverResolves.future);
+
+      authService = AuthService(
+        userDataCleanupService: mockCleanupService,
+        keyStorage: mockKeyStorage,
+        flutterSecureStorage: mockFlutterSecureStorage,
+        remoteSignerFactory: (_, _) => mockBunkerSigner,
+      );
+
+      fakeAsync((async) {
+        var completed = false;
+        unawaited(
+          authService
+              .signInForAccount(pubkeyHex, AuthenticationSource.bunker)
+              .then((_) => completed = true)
+              .catchError((Object _) => completed = true),
+        );
+
+        // Unlike the bounded startup path, the interactive reconnect applies
+        // no startup timeout: even after twice the startup budget elapses the
+        // call is still pending.
+        async.elapse(
+          AuthService.defaultStartupNetworkOperationTimeout * 2,
+        );
+
+        expect(completed, isFalse);
+        verify(
+          () => mockBunkerSigner.connect(sendConnectRequest: false),
+        ).called(1);
+      });
+    });
   });
 
   group('AuthService dispose cleanup', () {

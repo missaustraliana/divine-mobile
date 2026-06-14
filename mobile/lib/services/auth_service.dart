@@ -9,7 +9,6 @@ import 'dart:convert';
 import 'package:cache_sync/cache_sync.dart';
 import 'package:content_blocklist_repository/content_blocklist_repository.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:keycast_flutter/keycast_flutter.dart';
 import 'package:nostr_client/nostr_client.dart' show Nip89ClientTag;
@@ -158,6 +157,11 @@ typedef BootstrapRelayListCallback =
 /// Callback invoked before AuthService clears the outgoing session identity.
 typedef BeforeSessionTeardownCallback = Future<void> Function();
 
+/// Factory for NIP-46 remote signers. Injected in tests so startup restore can
+/// exercise unreachable signer behavior without opening relay sockets.
+typedef RemoteSignerFactory =
+    NostrRemoteSigner Function(int relayMode, NostrRemoteSignerInfo info);
+
 /// SharedPreferences key prefix for the per-pubkey one-shot flag that records
 /// whether we have already published a bootstrap kind:10002 on this device.
 const _kBootstrapKind10002Prefix = 'bootstrap_kind10002_published_';
@@ -188,8 +192,10 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
     String? primaryRelayUrl,
     RelayDiscoveryService? relayDiscoveryService,
     Nip07Service? nip07ServiceForTest,
+    RemoteSignerFactory? remoteSignerFactory,
     Duration oauthRefreshTimeout = defaultOAuthRefreshTimeout,
     Duration expiredSessionRefreshTimeout = defaultExpiredSessionRefreshTimeout,
+    Duration? startupNetworkOperationTimeout,
   }) : _keyStorage = keyStorage ?? SecureKeyStorage(),
        _nostrKeyManager = nostrKeyManager,
        _userDataCleanupService = userDataCleanupService,
@@ -205,8 +211,12 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
            oauthConfig ??
            const OAuthConfig(serverUrl: '', clientId: '', redirectUri: ''),
        _injectedNip07ServiceForTest = nip07ServiceForTest,
+       _remoteSignerFactory = remoteSignerFactory ?? NostrRemoteSigner.new,
        _oauthRefreshTimeout = oauthRefreshTimeout,
-       _expiredSessionRefreshTimeout = expiredSessionRefreshTimeout;
+       _expiredSessionRefreshTimeout = expiredSessionRefreshTimeout,
+       _startupNetworkOperationTimeout =
+           startupNetworkOperationTimeout ??
+           defaultStartupNetworkOperationTimeout;
   final SecureKeyStorage _keyStorage;
   final NostrKeyManager? _nostrKeyManager;
   final UserDataCleanupService _userDataCleanupService;
@@ -214,6 +224,8 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
   final FlutterSecureStorage? _flutterSecureStorage;
   final PreFetchFollowingCallback? _preFetchFollowing;
   final String? _profileCheckIndexerUrl;
+  final RemoteSignerFactory _remoteSignerFactory;
+  final Duration _startupNetworkOperationTimeout;
 
   /// Bound applied to the single-flight OAuth token refresh stored in
   /// [_pendingOAuthRefresh]. Injectable so tests can use a short bound.
@@ -436,6 +448,16 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
   /// bound so the outer flow does not detach from a live refresh.
   @visibleForTesting
   static const defaultExpiredSessionRefreshTimeout = Duration(seconds: 40);
+
+  /// Default upper bound for one startup network operation while restoring a
+  /// saved remote auth session. A bunker restore can do connect + pubkey pull,
+  /// so callers that need an end-to-end budget should use
+  /// [startupAuthRestoreTimeout].
+  @visibleForTesting
+  static const defaultStartupNetworkOperationTimeout = Duration(seconds: 10);
+
+  /// Worst-case auth restore budget used by app startup splash handling.
+  static const startupAuthRestoreTimeout = Duration(seconds: 21);
 
   /// Local-first Divine OAuth initialization.
   ///
@@ -727,9 +749,22 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
       category: LogCategory.auth,
     );
     if (_oauthClient != null) {
-      final refreshed = await _refreshOAuthSession(
-        expectedOwnerPubkey: session?.userPubkey,
-      );
+      final KeycastSession? refreshed;
+      try {
+        refreshed = await _refreshOAuthSession(
+          expectedOwnerPubkey: session?.userPubkey,
+        ).timeout(_startupNetworkOperationTimeout);
+      } on TimeoutException {
+        Log.warning(
+          'initialize: synchronous refresh timed out '
+          '(${_startupNetworkOperationTimeout.inSeconds}s)',
+          name: 'AuthService',
+          category: LogCategory.auth,
+        );
+        _hasExpiredOAuthSession = true;
+        _setAuthState(AuthState.unauthenticated);
+        return;
+      }
 
       if (refreshed != null) {
         // Apply the same cross-account guard to the refreshed session.
@@ -1197,7 +1232,7 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
           );
           final bunkerInfo = await _loadBunkerInfo();
           if (bunkerInfo != null) {
-            await _reconnectBunker(bunkerInfo);
+            await _reconnectBunker(bunkerInfo, boundedByStartupTimeout: true);
             return;
           }
           // Bunker info not found — fall back to unauthenticated
@@ -1270,13 +1305,6 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
 
       // Set state synchronously to prevent loading screen deadlock
       _setAuthState(AuthState.unauthenticated);
-    } finally {
-      // Release the native splash that was preserved at startup. This is
-      // idempotent — safe if the 5s timeout guard in main.dart fires first.
-      // Calling remove() here (synchronously after the terminal auth state is
-      // set) ensures GoRouter's refreshListenable has already been notified,
-      // so the next frame the platform sees is the correct route. See #2749.
-      FlutterNativeSplash.remove();
     }
   }
 
@@ -2414,7 +2442,10 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
   }
 
   /// Reconnect to a bunker using saved connection info
-  Future<void> _reconnectBunker(NostrRemoteSignerInfo info) async {
+  Future<void> _reconnectBunker(
+    NostrRemoteSignerInfo info, {
+    bool boundedByStartupTimeout = false,
+  }) async {
     Log.info(
       'Reconnecting to bunker...',
       name: 'AuthService',
@@ -2427,9 +2458,14 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
       // Create and connect the remote signer
       // Don't send a new connect request - the bunker already authorized us
       // during the initial connection. We just need to reconnect to the relay.
-      _bunkerSigner = NostrRemoteSigner(RelayMode.baseMode, info);
+      _bunkerSigner = _remoteSignerFactory(RelayMode.baseMode, info);
       _setupBunkerAuthCallback();
-      await _bunkerSigner!.connect(sendConnectRequest: false);
+      final connect = _bunkerSigner!.connect(sendConnectRequest: false);
+      if (boundedByStartupTimeout) {
+        await connect.timeout(_startupNetworkOperationTimeout);
+      } else {
+        await connect;
+      }
 
       // Use saved public key if available, otherwise request it from bunker
       var userPubkey = info.userPubkey;
@@ -2439,7 +2475,10 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
           name: 'AuthService',
           category: LogCategory.auth,
         );
-        userPubkey = await _bunkerSigner!.pullPubkey();
+        final pullPubkey = _bunkerSigner!.pullPubkey();
+        userPubkey = boundedByStartupTimeout
+            ? await pullPubkey.timeout(_startupNetworkOperationTimeout)
+            : await pullPubkey;
       } else {
         Log.info(
           'Using saved userPubkey: $userPubkey',
@@ -2483,6 +2522,7 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
         name: 'AuthService',
         category: LogCategory.auth,
       );
+      _bunkerSigner?.close();
       _bunkerSigner = null;
       _setAuthState(AuthState.unauthenticated);
     }
@@ -2994,7 +3034,7 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
         category: LogCategory.auth,
       );
 
-      _bunkerSigner = NostrRemoteSigner(RelayMode.baseMode, bunkerInfo);
+      _bunkerSigner = _remoteSignerFactory(RelayMode.baseMode, bunkerInfo);
       _setupBunkerAuthCallback();
 
       String? connectResult;
@@ -3237,7 +3277,7 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
       // Create and connect the NostrRemoteSigner
       // Note: Don't send connect request since we're already connected via
       // nostrconnect://
-      _bunkerSigner = NostrRemoteSigner(RelayMode.baseMode, result.info);
+      _bunkerSigner = _remoteSignerFactory(RelayMode.baseMode, result.info);
       _setupBunkerAuthCallback();
       await _bunkerSigner!.connect(sendConnectRequest: false);
 
