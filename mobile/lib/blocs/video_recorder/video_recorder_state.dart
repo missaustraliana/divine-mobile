@@ -11,6 +11,8 @@ class VideoRecorderBlocState extends Equatable {
     this.recorderMode = VideoRecorderMode.capture,
     this.recordingState = VideoRecorderState.idle,
     this.zoomLevel = 1.0,
+    this.minZoomLevel = 1.0,
+    this.maxZoomLevel = 1.0,
     this.cameraSensorAspectRatio = 1.0,
     this.focusPoint = Offset.zero,
     this.canRecord = false,
@@ -40,6 +42,7 @@ class VideoRecorderBlocState extends Equatable {
     this.snappedTo1x = false,
     this.lastRawZoom = 1.0,
     this.snapTime,
+    this.showZoomIndicator = false,
   });
 
   /// Recorder mode from the camera.
@@ -60,8 +63,17 @@ class VideoRecorderBlocState extends Equatable {
   /// Whether the camera has flash capability.
   final bool hasFlash;
 
-  /// Current zoom level.
+  /// Current zoom level (user-facing, e.g. 0.5× ultra-wide, 1.0× wide).
   final double zoomLevel;
+
+  /// Minimum zoom level supported by the active camera.
+  ///
+  /// With auto lens switching this is < 1.0 on devices with an ultra-wide
+  /// lens (e.g. 0.5×); otherwise it equals 1.0.
+  final double minZoomLevel;
+
+  /// Maximum zoom level supported by the active camera.
+  final double maxZoomLevel;
 
   /// Aspect ratio of the camera sensor.
   final double cameraSensorAspectRatio;
@@ -141,6 +153,13 @@ class VideoRecorderBlocState extends Equatable {
   /// hold duration before releasing back to free-scrubbing.
   final DateTime? snapTime;
 
+  /// Whether the Android-style zoom ruler should be visible.
+  ///
+  /// Driven by pinch activity: set true while zooming and for a short
+  /// hold afterwards, then cleared by the auto-hide timer so the ruler
+  /// only shows up while the user is actively changing the zoom.
+  final bool showZoomIndicator;
+
   /// Whether currently recording.
   bool get isRecording => recordingState == VideoRecorderState.recording;
 
@@ -161,6 +180,8 @@ class VideoRecorderBlocState extends Equatable {
     VideoRecorderMode? recorderMode,
     VideoRecorderState? recordingState,
     double? zoomLevel,
+    double? minZoomLevel,
+    double? maxZoomLevel,
     double? cameraSensorAspectRatio,
     Offset? focusPoint,
     bool? canRecord,
@@ -185,11 +206,14 @@ class VideoRecorderBlocState extends Equatable {
     bool? snappedTo1x,
     double? lastRawZoom,
     DateTime? snapTime,
+    bool? showZoomIndicator,
   }) {
     return VideoRecorderBlocState(
       recorderMode: recorderMode ?? this.recorderMode,
       recordingState: recordingState ?? this.recordingState,
       zoomLevel: zoomLevel ?? this.zoomLevel,
+      minZoomLevel: minZoomLevel ?? this.minZoomLevel,
+      maxZoomLevel: maxZoomLevel ?? this.maxZoomLevel,
       cameraSensorAspectRatio:
           cameraSensorAspectRatio ?? this.cameraSensorAspectRatio,
       focusPoint: focusPoint ?? this.focusPoint,
@@ -221,6 +245,7 @@ class VideoRecorderBlocState extends Equatable {
       snappedTo1x: snappedTo1x ?? this.snappedTo1x,
       lastRawZoom: lastRawZoom ?? this.lastRawZoom,
       snapTime: snapTime ?? this.snapTime,
+      showZoomIndicator: showZoomIndicator ?? this.showZoomIndicator,
     );
   }
 
@@ -229,6 +254,8 @@ class VideoRecorderBlocState extends Equatable {
     recorderMode,
     recordingState,
     zoomLevel,
+    minZoomLevel,
+    maxZoomLevel,
     cameraSensorAspectRatio,
     focusPoint,
     canRecord,
@@ -253,5 +280,6 @@ class VideoRecorderBlocState extends Equatable {
     snappedTo1x,
     lastRawZoom,
     snapTime,
+    showZoomIndicator,
   ];
 }
