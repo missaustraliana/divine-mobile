@@ -27,6 +27,7 @@ class VideoEditorScope extends InheritedWidget {
     required this.onOpenMusicLibrary,
     required this.originalClipAspectRatio,
     required this.bodySizeNotifier,
+    required this.zoomMatrixNotifier,
     required this.fromLibrary,
     this.editorOverride,
     super.child = const SizedBox.shrink(),
@@ -65,6 +66,12 @@ class VideoEditorScope extends InheritedWidget {
 
   /// Notifier for the body size, updated by [_CanvasFitter].
   final ValueNotifier<Size> bodySizeNotifier;
+
+  /// Notifier for the current editor zoom transform (identity = not zoomed),
+  /// driven by the editor's zoom matrix. The letterbox scrim applies the same
+  /// transform so the bars move/scale with the magnified frame instead of
+  /// dimming it.
+  final ValueNotifier<Matrix4> zoomMatrixNotifier;
 
   /// Callback to open the text editor.
   final Future<TextLayer?> Function([TextLayer? layer]) onAddEditTextLayer;
@@ -139,5 +146,6 @@ class VideoEditorScope extends InheritedWidget {
   @override
   bool updateShouldNotify(VideoEditorScope oldWidget) =>
       editorKey != oldWidget.editorKey ||
-      removeAreaKey != oldWidget.removeAreaKey;
+      removeAreaKey != oldWidget.removeAreaKey ||
+      zoomMatrixNotifier != oldWidget.zoomMatrixNotifier;
 }
