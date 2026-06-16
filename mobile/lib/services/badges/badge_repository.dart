@@ -20,6 +20,38 @@ class BadgeDashboardData {
   final List<IssuedBadgeViewData> issued;
 }
 
+class ProfileBadgeViewData {
+  const ProfileBadgeViewData({
+    required this.badge,
+    this.definition,
+    this.award,
+  });
+
+  final Nip58ProfileBadgeRef badge;
+  final Nip58BadgeDefinition? definition;
+  final Nip58BadgeAward? award;
+
+  String get awardEventId => badge.awardEventId;
+  String get definitionCoordinate => badge.definitionCoordinate;
+  String get displayName =>
+      definition?.name ?? _definitionNameFromCoordinate(definitionCoordinate);
+  String? get description => definition?.description;
+  String? get imageUrl =>
+      definition?.imageUrl ??
+      (definition?.thumbnails.isNotEmpty == true
+          ? definition!.thumbnails.first
+          : null);
+  String? get issuerPubkey => award?.event.pubkey;
+  List<String> get recipientPubkeys => award?.recipientPubkeys ?? const [];
+  List<String> get uniqueRecipientPubkeys {
+    final seen = <String>{};
+    return [
+      for (final pubkey in recipientPubkeys)
+        if (pubkey.isNotEmpty && seen.add(pubkey)) pubkey,
+    ];
+  }
+}
+
 class BadgeAwardViewData {
   const BadgeAwardViewData({
     required this.award,
@@ -105,11 +137,35 @@ class BadgeRepository {
     }
 
     viewData.sort(
-      (left, right) => right.award.event.createdAt.compareTo(
-        left.award.event.createdAt,
-      ),
+      (left, right) =>
+          right.award.event.createdAt.compareTo(left.award.event.createdAt),
     );
     return List<BadgeAwardViewData>.unmodifiable(viewData);
+  }
+
+  Future<List<ProfileBadgeViewData>> loadAcceptedBadgesForProfile(
+    String pubkey,
+  ) async {
+    if (pubkey.isEmpty) return const [];
+
+    final profileBadges = await _latestProfileBadges(pubkey);
+    final refs = profileBadges?.badges ?? const <Nip58ProfileBadgeRef>[];
+    if (refs.isEmpty) return const [];
+
+    final viewData = await Future.wait(
+      refs.map((ref) async {
+        final definitionFuture = _loadDefinition(ref.definitionCoordinate);
+        final awardFuture = _loadAward(ref.awardEventId);
+
+        return ProfileBadgeViewData(
+          badge: ref,
+          definition: await definitionFuture,
+          award: await awardFuture,
+        );
+      }),
+    );
+
+    return List<ProfileBadgeViewData>.unmodifiable(viewData);
   }
 
   Future<List<IssuedBadgeViewData>> loadIssuedBadges({
@@ -151,9 +207,8 @@ class BadgeRepository {
     }
 
     issued.sort(
-      (left, right) => right.award.event.createdAt.compareTo(
-        left.award.event.createdAt,
-      ),
+      (left, right) =>
+          right.award.event.createdAt.compareTo(left.award.event.createdAt),
     );
     return List<IssuedBadgeViewData>.unmodifiable(issued);
   }
@@ -258,6 +313,19 @@ class BadgeRepository {
     final sorted = events.toList()
       ..sort((left, right) => right.createdAt.compareTo(left.createdAt));
     return Nip58BadgeParser.parseDefinition(sorted.first);
+  }
+
+  Future<Nip58BadgeAward?> _loadAward(String eventId) async {
+    if (eventId.isEmpty) return null;
+
+    final events = await _nostrClient.queryEvents([
+      Filter(ids: [eventId], kinds: [EventKind.badgeAward], limit: 1),
+    ]);
+    if (events.isEmpty) return null;
+
+    final sorted = events.toList()
+      ..sort((left, right) => right.createdAt.compareTo(left.createdAt));
+    return Nip58BadgeParser.parseAward(sorted.first);
   }
 
   Future<void> _publishProfileBadges(List<Nip58ProfileBadgeRef> refs) async {
