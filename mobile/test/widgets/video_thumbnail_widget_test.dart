@@ -1,8 +1,11 @@
+import 'dart:ui' as ui;
+
 import 'package:blurhash_service/blurhash_service.dart';
 import 'package:divine_ui/divine_ui.dart';
+import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:models/models.dart';
+import 'package:models/models.dart' hide AspectRatio;
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/widgets/blurhash_display.dart';
 import 'package:openvine/widgets/video_thumbnail_widget.dart';
@@ -14,6 +17,36 @@ import '../test_data/video_test_data.dart';
 
 Finder _divineIcon(DivineIconName name) =>
     find.byWidgetPredicate((w) => w is DivineIcon && w.icon == name);
+
+double _thumbnailAspectRatio(WidgetTester tester) =>
+    tester.widget<AspectRatio>(find.byType(AspectRatio)).aspectRatio;
+
+/// An [ImageProvider] that synchronously yields a pre-built [ui.Image] so a
+/// widget test can drive the image stream without an async decode.
+class _SyncImageProvider extends ImageProvider<_SyncImageProvider> {
+  _SyncImageProvider(this.image);
+
+  final ui.Image image;
+
+  @override
+  Future<_SyncImageProvider> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture<_SyncImageProvider>(this);
+
+  @override
+  ImageStreamCompleter loadImage(
+    _SyncImageProvider key,
+    ImageDecoderCallback decode,
+  ) => OneFrameImageStreamCompleter(
+    SynchronousFuture<ImageInfo>(ImageInfo(image: image)),
+  );
+}
+
+/// Creates a [ui.Image] of exactly [width] x [height] without an async decode.
+ui.Image _syncImage(int width, int height) {
+  final recorder = ui.PictureRecorder();
+  ui.Canvas(recorder);
+  return recorder.endRecording().toImageSync(width, height);
+}
 
 void main() {
   group('VideoThumbnailWidget', () {
@@ -77,6 +110,116 @@ void main() {
     });
 
     testWidgets(
+      'updates missing metadata aspect ratio from the displayed cached image',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: VideoThumbnailWidget(
+                video: videoWithThumbnail,
+                width: 200,
+                height: 200,
+              ),
+            ),
+          ),
+        );
+
+        expect(_thumbnailAspectRatio(tester), equals(2 / 3));
+
+        final cachedImage = tester.widget<VineCachedImage>(
+          find.byType(VineCachedImage),
+        );
+        cachedImage.onImageDimensionsResolved!(640, 360);
+        await tester.pump();
+
+        expect(_thumbnailAspectRatio(tester), equals(640 / 360));
+      },
+    );
+
+    testWidgets(
+      'updates partial metadata aspect ratio from the displayed cached image',
+      (tester) async {
+        final videoWithPartialDimensions = createTestVideoEvent(
+          id: 'test-partial-dimensions',
+          thumbnailUrl: 'https://example.com/thumb-partial.jpg',
+          dimensions: '640x',
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: VideoThumbnailWidget(
+                video: videoWithPartialDimensions,
+                width: 200,
+                height: 200,
+              ),
+            ),
+          ),
+        );
+
+        expect(_thumbnailAspectRatio(tester), equals(2 / 3));
+
+        final cachedImage = tester.widget<VineCachedImage>(
+          find.byType(VineCachedImage),
+        );
+        cachedImage.onImageDimensionsResolved!(640, 360);
+        await tester.pump();
+
+        expect(_thumbnailAspectRatio(tester), equals(640 / 360));
+      },
+    );
+
+    testWidgets('ignores stale image dimensions after thumbnail URL changes', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(
+            body: VideoThumbnailWidget(
+              video: videoWithThumbnail,
+              width: 200,
+              height: 200,
+            ),
+          ),
+        ),
+      );
+
+      final staleCallback = tester
+          .widget<VineCachedImage>(find.byType(VineCachedImage))
+          .onImageDimensionsResolved!;
+
+      final nextVideo = createTestVideoEvent(
+        id: 'test-next',
+        thumbnailUrl: 'https://example.com/thumb-next.jpg',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(
+            body: VideoThumbnailWidget(
+              video: nextVideo,
+              width: 200,
+              height: 200,
+            ),
+          ),
+        ),
+      );
+
+      staleCallback(640, 360);
+      await tester.pump();
+
+      expect(_thumbnailAspectRatio(tester), equals(2 / 3));
+    });
+
+    testWidgets(
       'uses Image.network for Divine-hosted thumbnails to avoid cache-manager stalls',
       (tester) async {
         final divineHostedVideo = createTestVideoEvent(
@@ -101,6 +244,92 @@ void main() {
 
         expect(find.byType(Image), findsOneWidget);
         expect(find.byType(VineCachedImage), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'resolves aspect ratio via the Image.network path for Divine thumbnails',
+      (tester) async {
+        final divineHostedVideo = createTestVideoEvent(
+          id: 'test-divine-dims',
+          thumbnailUrl:
+              'https://media.divine.video/72d7eda61074b17e077fb9f4a8b48166cdeb65cb07e053aafa6e69d5fa165995.jpg',
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: VideoThumbnailWidget(
+                video: divineHostedVideo,
+                width: 200,
+                height: 200,
+              ),
+            ),
+          ),
+        );
+
+        expect(_thumbnailAspectRatio(tester), equals(2 / 3));
+
+        // The Image.network path has no built-in dimension callback, so it
+        // wraps the image in an ImageWithDimensionsListener to recover the
+        // aspect ratio from the displayed image.
+        final listener = tester.widget<ImageWithDimensionsListener>(
+          find.byType(ImageWithDimensionsListener),
+        );
+        listener.onImageDimensionsResolved!(640, 360);
+        await tester.pump();
+
+        expect(_thumbnailAspectRatio(tester), equals(640 / 360));
+      },
+    );
+
+    testWidgets(
+      'ImageWithDimensionsListener reports decoded image dimensions',
+      (
+        tester,
+      ) async {
+        final image = _syncImage(640, 360);
+        addTearDown(image.dispose);
+
+        int? width;
+        int? height;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ImageWithDimensionsListener(
+              imageProvider: _SyncImageProvider(image),
+              onImageDimensionsResolved: (w, h) {
+                width = w;
+                height = h;
+              },
+              child: const SizedBox.shrink(),
+            ),
+          ),
+        );
+
+        expect(width, equals(640));
+        expect(height, equals(360));
+      },
+    );
+
+    testWidgets(
+      'ImageWithDimensionsListener defers synchronous parent state updates',
+      (tester) async {
+        final image = _syncImage(640, 360);
+        addTearDown(image.dispose);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: _DimensionCallbackParent(
+              imageProvider: _SyncImageProvider(image),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('640x360'), findsOneWidget);
       },
     );
 
@@ -441,4 +670,33 @@ void main() {
       expect(find.byType(VineCachedImage), findsNothing);
     });
   });
+}
+
+class _DimensionCallbackParent extends StatefulWidget {
+  const _DimensionCallbackParent({required this.imageProvider});
+
+  final ImageProvider<Object> imageProvider;
+
+  @override
+  State<_DimensionCallbackParent> createState() =>
+      _DimensionCallbackParentState();
+}
+
+class _DimensionCallbackParentState extends State<_DimensionCallbackParent> {
+  int? _width;
+  int? _height;
+
+  @override
+  Widget build(BuildContext context) {
+    return ImageWithDimensionsListener(
+      imageProvider: widget.imageProvider,
+      onImageDimensionsResolved: (width, height) {
+        setState(() {
+          _width = width;
+          _height = height;
+        });
+      },
+      child: Text('${_width ?? 0}x${_height ?? 0}'),
+    );
+  }
 }
