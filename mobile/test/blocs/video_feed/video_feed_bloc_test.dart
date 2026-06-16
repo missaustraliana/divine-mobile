@@ -6,6 +6,7 @@
 import 'dart:async';
 
 import 'package:bloc_test/bloc_test.dart';
+import 'package:cache_sync/cache_sync.dart';
 import 'package:curated_list_repository/curated_list_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:follow_repository/follow_repository.dart';
@@ -33,6 +34,38 @@ class _MockProfileRepository extends Mock implements ProfileRepository {}
 
 class _MockHomeFeedCache extends Mock implements HomeFeedCache {}
 
+/// No-op cache DAO so the bloc tests never touch the shared on-disk
+/// [CacheSync] database. Under CI's parallel test isolates the
+/// path_provider-mocked `/tmp/documents` DB is shared, so the cold-start serve
+/// path cross-contaminates between tests and fails non-deterministically.
+/// Wiring [CacheSync] to a no-op DAO in `setUp` keeps every bloc — whatever
+/// factory built it — on the deterministic fresh-load path. Cache-serve
+/// behaviour is covered separately by the 'cache-first home feed' group, which
+/// injects its own [HomeFeedCache] mock.
+class _FakeCacheDao implements CacheDao {
+  @override
+  Future<String?> read(String key) async => null;
+
+  @override
+  Future<void> write({
+    required String key,
+    required String payload,
+    Duration? ttl,
+  }) async {}
+
+  @override
+  Future<void> delete(String key) async {}
+
+  @override
+  Future<void> deletePrefix(String prefix) async {}
+
+  @override
+  Future<int> totalPayloadBytes() async => 0;
+
+  @override
+  Future<void> evictOldest(int bytesToFree) async {}
+}
+
 class _FakeSharedPreferences extends Fake implements SharedPreferences {}
 
 void main() {
@@ -45,7 +78,11 @@ void main() {
     late StreamController<List<CuratedList>> curatedListsController;
     late VideoFeedBloc savedModeBloc;
 
-    setUp(() {
+    setUp(() async {
+      // Route the disk cache to a no-op DAO so no bloc — whatever factory
+      // creates it — reads or writes the shared on-disk CacheSync DB.
+      await CacheSync.init(dao: _FakeCacheDao());
+
       mockVideosRepository = _MockVideosRepository();
       mockFollowRepository = _MockFollowRepository();
       mockCuratedListRepository = _MockCuratedListRepository();
@@ -3086,6 +3123,28 @@ void main() {
           (invocation) =>
               invocation.positionalArguments.first as List<VideoEvent>,
         );
+
+        // Default cache stubs: empty cache, no-op writes. Tests override the
+        // reads to exercise the serve / splice / restore paths.
+        when(
+          () => mockCache.readVideos(
+            pubkey: any(named: 'pubkey'),
+            mode: any(named: 'mode'),
+          ),
+        ).thenAnswer((_) async => null);
+        when(
+          () => mockCache.writeVideos(
+            pubkey: any(named: 'pubkey'),
+            mode: any(named: 'mode'),
+            videos: any(named: 'videos'),
+          ),
+        ).thenAnswer((_) async {});
+        when(
+          () => mockCache.clearVideos(
+            pubkey: any(named: 'pubkey'),
+            mode: any(named: 'mode'),
+          ),
+        ).thenAnswer((_) async {});
       });
 
       tearDown(() {
@@ -3101,166 +3160,70 @@ void main() {
         homeFeedCache: mockCache,
       );
 
-      blocTest<VideoFeedBloc, VideoFeedBlocState>(
-        'emits cached videos then fresh videos on cold start',
-        setUp: () {
-          final cachedVideos = createTestVideos(2, idPrefix: 'cached');
-          final freshVideos = createTestVideos(3, idPrefix: 'fresh');
-
-          when(
-            () => mockCache.read(sharedPreferences),
-          ).thenReturn(HomeFeedResult(videos: cachedVideos));
-          when(() => mockCache.write(any(), any())).thenAnswer((_) async {});
-          when(() => mockFollowRepository.followingPubkeys).thenReturn([]);
-          when(
-            () => mockVideosRepository.getHomeFeedVideos(
-              authors: any(named: 'authors'),
-              videoRefs: any(named: 'videoRefs'),
-              userPubkey: any(named: 'userPubkey'),
-              limit: any(named: 'limit'),
-              until: any(named: 'until'),
-              skipCache: any(named: 'skipCache'),
-            ),
-          ).thenAnswer(
-            (_) async => HomeFeedResult(
-              videos: freshVideos,
-              rawResponseBody: '{"videos":[]}',
-            ),
-          );
-        },
-        build: createBlocWithCache,
-        act: (bloc) =>
-            bloc.add(const VideoFeedStarted(mode: FeedMode.following)),
-        expect: () => [
-          // 1. Loading state from _onStarted
-          const VideoFeedBlocState(mode: FeedMode.following),
-          // 2. Cached videos served immediately
-          isA<VideoFeedBlocState>()
-              .having((s) => s.status, 'status', VideoFeedStatus.success)
-              .having((s) => s.videos.length, 'cached count', 2)
-              .having((s) => s.videos[0].id, 'first cached id', 'cached-0'),
-          // 3. Fresh videos replace cached
-          isA<VideoFeedBlocState>()
-              .having((s) => s.status, 'status', VideoFeedStatus.success)
-              .having((s) => s.videos.length, 'fresh count', 3)
-              .having((s) => s.videos[0].id, 'first fresh id', 'fresh-0'),
-        ],
-        verify: (_) {
-          verify(() => mockCache.read(sharedPreferences)).called(1);
-        },
-      );
+      void stubFollowingFetch(List<VideoEvent> videos) {
+        when(
+          () => mockVideosRepository.getHomeFeedVideos(
+            authors: any(named: 'authors'),
+            videoRefs: any(named: 'videoRefs'),
+            userPubkey: any(named: 'userPubkey'),
+            limit: any(named: 'limit'),
+            until: any(named: 'until'),
+            skipCache: any(named: 'skipCache'),
+          ),
+        ).thenAnswer((_) async => HomeFeedResult(videos: videos));
+      }
 
       blocTest<VideoFeedBloc, VideoFeedBlocState>(
-        'skips cache when no SharedPreferences provided',
+        'serves cached videos then splices fresh after the active video',
         setUp: () {
-          final videos = createTestVideos(3);
-          when(() => mockFollowRepository.followingPubkeys).thenReturn([]);
           when(
-            () => mockVideosRepository.getHomeFeedVideos(
-              authors: any(named: 'authors'),
-              videoRefs: any(named: 'videoRefs'),
-              userPubkey: any(named: 'userPubkey'),
-              limit: any(named: 'limit'),
-              until: any(named: 'until'),
-              skipCache: any(named: 'skipCache'),
+            () => mockCache.readVideos(
+              pubkey: any(named: 'pubkey'),
+              mode: any(named: 'mode'),
             ),
-          ).thenAnswer((_) async => HomeFeedResult(videos: videos));
-        },
-        build: () => VideoFeedBloc(
-          videosRepository: mockVideosRepository,
-          followRepository: mockFollowRepository,
-          curatedListRepository: mockCuratedListRepository,
-          homeFeedCache: mockCache,
-          // No sharedPreferences — cache should be skipped
-        ),
-        act: (bloc) =>
-            bloc.add(const VideoFeedStarted(mode: FeedMode.following)),
-        expect: () => [
-          const VideoFeedBlocState(mode: FeedMode.following),
-          isA<VideoFeedBlocState>()
-              .having((s) => s.status, 'status', VideoFeedStatus.success)
-              .having((s) => s.videos.length, 'count', 3),
-        ],
-        verify: (_) {
-          verifyNever(() => mockCache.read(any()));
-        },
-      );
-
-      blocTest<VideoFeedBloc, VideoFeedBlocState>(
-        'skips cache when cache returns null',
-        setUp: () {
-          final videos = createTestVideos(3);
-          when(() => mockCache.read(sharedPreferences)).thenReturn(null);
-          when(() => mockCache.write(any(), any())).thenAnswer((_) async {});
-          when(() => mockFollowRepository.followingPubkeys).thenReturn([]);
-          when(
-            () => mockVideosRepository.getHomeFeedVideos(
-              authors: any(named: 'authors'),
-              videoRefs: any(named: 'videoRefs'),
-              userPubkey: any(named: 'userPubkey'),
-              limit: any(named: 'limit'),
-              until: any(named: 'until'),
-              skipCache: any(named: 'skipCache'),
-            ),
-          ).thenAnswer(
-            (_) async => HomeFeedResult(
-              videos: videos,
-              rawResponseBody: '{"videos":[]}',
-            ),
-          );
+          ).thenAnswer((_) async => createTestVideos(5, idPrefix: 'cached'));
+          stubFollowingFetch(createTestVideos(3, idPrefix: 'fresh'));
         },
         build: createBlocWithCache,
         act: (bloc) =>
             bloc.add(const VideoFeedStarted(mode: FeedMode.following)),
         expect: () => [
           const VideoFeedBlocState(mode: FeedMode.following),
+          // Cached window served instantly at index 0.
           isA<VideoFeedBlocState>()
               .having((s) => s.status, 'status', VideoFeedStatus.success)
-              .having((s) => s.videos.length, 'count', 3),
+              .having((s) => s.videos.length, 'cached count', 5)
+              .having((s) => s.currentIndex, 'served index', 0)
+              .having((s) => s.videos.first.id, 'first cached id', 'cached-0'),
+          // Splice: keep [0 .. currentIndex + 1] (cached-0, cached-1) then
+          // fresh, so fresh appears right after the active video:
+          // [cached-0, cached-1, fresh-0, fresh-1, fresh-2].
+          isA<VideoFeedBlocState>()
+              .having((s) => s.status, 'status', VideoFeedStatus.success)
+              .having((s) => s.videos.length, 'spliced count', 5)
+              .having((s) => s.videos[0].id, 'kept head id', 'cached-0')
+              .having((s) => s.videos[1].id, 'kept lookahead id', 'cached-1')
+              .having((s) => s.videos[2].id, 'first fresh id', 'fresh-0'),
         ],
-      );
-
-      blocTest<VideoFeedBloc, VideoFeedBlocState>(
-        'writes raw response body to cache after fresh fetch',
-        setUp: () {
-          final videos = createTestVideos(3);
-          when(() => mockCache.read(sharedPreferences)).thenReturn(null);
-          when(() => mockCache.write(any(), any())).thenAnswer((_) async {});
-          when(() => mockFollowRepository.followingPubkeys).thenReturn([]);
-          when(
-            () => mockVideosRepository.getHomeFeedVideos(
-              authors: any(named: 'authors'),
-              videoRefs: any(named: 'videoRefs'),
-              userPubkey: any(named: 'userPubkey'),
-              limit: any(named: 'limit'),
-              until: any(named: 'until'),
-              skipCache: any(named: 'skipCache'),
-            ),
-          ).thenAnswer(
-            (_) async => HomeFeedResult(
-              videos: videos,
-              rawResponseBody: '{"videos":[{"id":"v1"}]}',
-            ),
-          );
-        },
-        build: createBlocWithCache,
-        act: (bloc) =>
-            bloc.add(const VideoFeedStarted(mode: FeedMode.following)),
         verify: (_) {
           verify(
-            () =>
-                mockCache.write(sharedPreferences, '{"videos":[{"id":"v1"}]}'),
+            () => mockCache.readVideos(
+              pubkey: any(named: 'pubkey'),
+              mode: any(named: 'mode'),
+            ),
           ).called(1);
         },
       );
 
       blocTest<VideoFeedBloc, VideoFeedBlocState>(
-        'does not write forYou response to Home tab cache after fresh fetch',
+        'serves cached For You then refreshes (supersedes #3861 exclusion)',
         setUp: () {
-          final videos = createTestVideos(3);
-          when(() => mockCache.read(sharedPreferences)).thenReturn(null);
-          when(() => mockCache.write(any(), any())).thenAnswer((_) async {});
-          when(() => mockFollowRepository.followingPubkeys).thenReturn([]);
+          when(
+            () => mockCache.readVideos(
+              pubkey: any(named: 'pubkey'),
+              mode: any(named: 'mode'),
+            ),
+          ).thenAnswer((_) async => createTestVideos(2, idPrefix: 'cached'));
           when(
             () => mockVideosRepository.getRecommendedVideos(
               userPubkey: any(named: 'userPubkey'),
@@ -3269,136 +3232,55 @@ void main() {
               skipCache: any(named: 'skipCache'),
             ),
           ).thenAnswer(
-            (_) async => HomeFeedResult(
-              videos: videos,
-              rawResponseBody: '{"videos":[{"id":"for-you"}]}',
-            ),
+            (_) async =>
+                HomeFeedResult(videos: createTestVideos(3, idPrefix: 'rec')),
           );
-        },
-        build: createBlocWithCache,
-        act: (bloc) => bloc.add(const VideoFeedStarted()),
-        verify: (_) {
-          // forYou is a recommendation feed and must not be persisted to the
-          // cross-restart cache, otherwise the feed looks identical on every
-          // app reopen (issue #3861).
-          verifyNever(() => mockCache.write(any(), any()));
-        },
-      );
-
-      blocTest<VideoFeedBloc, VideoFeedBlocState>(
-        'does not write cache when rawResponseBody is null',
-        setUp: () {
-          final videos = createTestVideos(3);
-          when(() => mockCache.read(sharedPreferences)).thenReturn(null);
-          when(() => mockFollowRepository.followingPubkeys).thenReturn([]);
-          when(
-            () => mockVideosRepository.getHomeFeedVideos(
-              authors: any(named: 'authors'),
-              videoRefs: any(named: 'videoRefs'),
-              userPubkey: any(named: 'userPubkey'),
-              limit: any(named: 'limit'),
-              until: any(named: 'until'),
-              skipCache: any(named: 'skipCache'),
-            ),
-          ).thenAnswer((_) async => HomeFeedResult(videos: videos));
-        },
-        build: createBlocWithCache,
-        act: (bloc) =>
-            bloc.add(const VideoFeedStarted(mode: FeedMode.following)),
-        verify: (_) {
-          verifyNever(() => mockCache.write(any(), any()));
-        },
-      );
-
-      blocTest<VideoFeedBloc, VideoFeedBlocState>(
-        'does not serve cache for subscribed list source',
-        setUp: () async {
-          final videos = createTestVideos(3);
-          SharedPreferences.setMockInitialValues({
-            'selected_feed_mode': 'list:list-a',
-          });
-          sharedPreferences = await SharedPreferences.getInstance();
-          when(
-            () => mockCuratedListRepository.getListById('list-a'),
-          ).thenReturn(createTestList());
-          when(
-            () => mockCuratedListRepository.getOrderedVideoIds('list-a'),
-          ).thenReturn(['video-a', 'video-b']);
-          when(
-            () => mockVideosRepository.getVideosForList(['video-a', 'video-b']),
-          ).thenAnswer((_) async => videos);
-        },
-        build: createBlocWithCache,
-        act: (bloc) => bloc.add(const VideoFeedStarted()),
-        expect: () => [
-          isA<VideoFeedBlocState>().having(
-            (s) => s.source.type,
-            'source',
-            VideoFeedSourceType.subscribedList,
-          ),
-          isA<VideoFeedBlocState>()
-              .having((s) => s.status, 'status', VideoFeedStatus.success)
-              .having((s) => s.videos.length, 'count', 3),
-        ],
-        verify: (_) {
-          verifyNever(() => mockCache.read(any()));
-        },
-      );
-
-      blocTest<VideoFeedBloc, VideoFeedBlocState>(
-        'does not serve cached Home tab data for forYou recommendations',
-        setUp: () {
-          final recommendedVideos = createTestVideos(
-            3,
-            idPrefix: 'recommended',
-          );
-
-          when(
-            () => mockCache.read(sharedPreferences),
-          ).thenReturn(HomeFeedResult(videos: createTestVideos(2)));
-          when(() => mockCache.write(any(), any())).thenAnswer((_) async {});
-          when(() => mockFollowRepository.followingPubkeys).thenReturn([]);
-          when(
-            () => mockVideosRepository.getRecommendedVideos(
-              userPubkey: any(named: 'userPubkey'),
-              limit: any(named: 'limit'),
-              until: any(named: 'until'),
-              skipCache: any(named: 'skipCache'),
-            ),
-          ).thenAnswer((_) async => HomeFeedResult(videos: recommendedVideos));
         },
         build: createBlocWithCache,
         act: (bloc) => bloc.add(const VideoFeedStarted()),
         expect: () => [
           const VideoFeedBlocState(),
-          // No cached state is emitted — the first success state is the fresh
-          // recommendations straight from the network (issue #3861).
           isA<VideoFeedBlocState>()
               .having((s) => s.status, 'status', VideoFeedStatus.success)
-              .having((s) => s.videos.length, 'recommended count', 3)
-              .having(
-                (s) => s.videos.first.id,
-                'first recommended id',
-                'recommended-0',
-              ),
+              .having((s) => s.videos.length, 'cached count', 2)
+              .having((s) => s.videos.first.id, 'first cached id', 'cached-0'),
+          isA<VideoFeedBlocState>()
+              .having((s) => s.videos.length, 'spliced count', 5)
+              .having((s) => s.videos[2].id, 'first fresh id', 'rec-0'),
         ],
         verify: (_) {
-          // forYou must never read the cross-restart cache, otherwise the feed
-          // is identical on every app reopen.
-          verifyNever(() => mockCache.read(any()));
-          verifyNever(() => mockCache.write(any(), any()));
+          verify(
+            () => mockCache.readVideos(
+              pubkey: any(named: 'pubkey'),
+              mode: any(named: 'mode'),
+            ),
+          ).called(1);
         },
       );
 
       blocTest<VideoFeedBloc, VideoFeedBlocState>(
-        'keeps cached data visible when network fails',
-        setUp: () {
-          final cachedVideos = createTestVideos(2, idPrefix: 'cached');
+        'replaces wholesale when no cache exists',
+        setUp: () => stubFollowingFetch(createTestVideos(3)),
+        build: createBlocWithCache,
+        act: (bloc) =>
+            bloc.add(const VideoFeedStarted(mode: FeedMode.following)),
+        expect: () => [
+          const VideoFeedBlocState(mode: FeedMode.following),
+          isA<VideoFeedBlocState>()
+              .having((s) => s.status, 'status', VideoFeedStatus.success)
+              .having((s) => s.videos.length, 'count', 3),
+        ],
+      );
 
+      blocTest<VideoFeedBloc, VideoFeedBlocState>(
+        'keeps cached data visible when the network fails',
+        setUp: () {
           when(
-            () => mockCache.read(sharedPreferences),
-          ).thenReturn(HomeFeedResult(videos: cachedVideos));
-          when(() => mockFollowRepository.followingPubkeys).thenReturn([]);
+            () => mockCache.readVideos(
+              pubkey: any(named: 'pubkey'),
+              mode: any(named: 'mode'),
+            ),
+          ).thenAnswer((_) async => createTestVideos(2, idPrefix: 'cached'));
           when(
             () => mockVideosRepository.getHomeFeedVideos(
               authors: any(named: 'authors'),
@@ -3414,59 +3296,58 @@ void main() {
         act: (bloc) =>
             bloc.add(const VideoFeedStarted(mode: FeedMode.following)),
         expect: () => [
-          // 1. Loading state
           const VideoFeedBlocState(mode: FeedMode.following),
-          // 2. Cached videos served
           isA<VideoFeedBlocState>()
               .having((s) => s.status, 'status', VideoFeedStatus.success)
               .having((s) => s.videos.length, 'cached count', 2),
-          // No failure state emitted because cached data is displayed
+          // No failure state — cached data stays visible.
         ],
       );
 
       blocTest<VideoFeedBloc, VideoFeedBlocState>(
-        'serves cache only once per bloc instance',
-        setUp: () {
-          final cachedVideos = createTestVideos(2, idPrefix: 'cached');
-          final freshVideos = createTestVideos(3, idPrefix: 'fresh');
-
+        'does not serve cache for a subscribed list source',
+        setUp: () async {
+          SharedPreferences.setMockInitialValues({
+            'selected_feed_mode': 'list:list-a',
+          });
+          sharedPreferences = await SharedPreferences.getInstance();
           when(
-            () => mockCache.read(sharedPreferences),
-          ).thenReturn(HomeFeedResult(videos: cachedVideos));
-          when(() => mockCache.write(any(), any())).thenAnswer((_) async {});
+            () => mockCuratedListRepository.getListById('list-a'),
+          ).thenReturn(createTestList());
           when(
-            () => mockFollowRepository.followingPubkeys,
-          ).thenReturn(['author1']);
+            () => mockCuratedListRepository.getOrderedVideoIds('list-a'),
+          ).thenReturn(['video-a', 'video-b']);
           when(
-            () => mockVideosRepository.getHomeFeedVideos(
-              authors: any(named: 'authors'),
-              videoRefs: any(named: 'videoRefs'),
-              userPubkey: any(named: 'userPubkey'),
-              limit: any(named: 'limit'),
-              until: any(named: 'until'),
-              skipCache: any(named: 'skipCache'),
-            ),
-          ).thenAnswer((_) async => HomeFeedResult(videos: freshVideos));
+            () => mockVideosRepository.getVideosForList(['video-a', 'video-b']),
+          ).thenAnswer((_) async => createTestVideos(3));
         },
         build: createBlocWithCache,
-        act: (bloc) async {
-          bloc.add(const VideoFeedStarted(mode: FeedMode.following));
-          await Future<void>.delayed(Duration.zero);
-          // Trigger a refresh — should NOT serve cache again
-          bloc.add(const VideoFeedRefreshRequested());
-        },
+        act: (bloc) => bloc.add(const VideoFeedStarted()),
+        expect: () => [
+          isA<VideoFeedBlocState>().having(
+            (s) => s.source.type,
+            'source',
+            VideoFeedSourceType.subscribedList,
+          ),
+          isA<VideoFeedBlocState>()
+              .having((s) => s.status, 'status', VideoFeedStatus.success)
+              .having((s) => s.videos.length, 'count', 3),
+        ],
         verify: (_) {
-          // Cache read should only be called once (on first load)
-          verify(() => mockCache.read(sharedPreferences)).called(1);
+          verifyNever(
+            () => mockCache.readVideos(
+              pubkey: any(named: 'pubkey'),
+              mode: any(named: 'mode'),
+            ),
+          );
         },
       );
 
       blocTest<VideoFeedBloc, VideoFeedBlocState>(
-        'filters cached videos through '
-        'VideosRepository.applyContentPreferences before emitting them',
+        'filters cached videos through applyContentPreferences',
         setUp: () {
           final hidden = VideoEvent(
-            id: '1111111111111111111111111111111111111111111111111111111111111111',
+            id: '1' * 64,
             pubkey: '0' * 64,
             createdAt: 1704067200,
             content: '',
@@ -3476,7 +3357,7 @@ void main() {
             moderationLabels: const ['nudity'],
           );
           final visible = VideoEvent(
-            id: '2222222222222222222222222222222222222222222222222222222222222222',
+            id: '2' * 64,
             pubkey: '0' * 64,
             createdAt: 1704067200,
             content: '',
@@ -3486,71 +3367,131 @@ void main() {
           );
 
           when(
-            () => mockCache.read(sharedPreferences),
-          ).thenReturn(HomeFeedResult(videos: [hidden, visible]));
-          when(() => mockCache.write(any(), any())).thenAnswer((_) async {});
-          when(() => mockFollowRepository.followingPubkeys).thenReturn([]);
-
-          // Override the default passthrough: drop the hidden video.
+            () => mockCache.readVideos(
+              pubkey: any(named: 'pubkey'),
+              mode: any(named: 'mode'),
+            ),
+          ).thenAnswer((_) async => [hidden, visible]);
           when(
             () => mockVideosRepository.applyContentPreferences(any()),
           ).thenReturn([visible]);
-
-          // Fresh fetch returns the raw, unfiltered pair. This mirrors the
-          // behavior if the cache-path filter were bypassed: the fresh fetch
-          // would still surface the hidden video. The cache-path filter is
-          // the only thing that should drop `hidden` from the emitted state.
-          when(
-            () => mockVideosRepository.getHomeFeedVideos(
-              authors: any(named: 'authors'),
-              videoRefs: any(named: 'videoRefs'),
-              userPubkey: any(named: 'userPubkey'),
-              limit: any(named: 'limit'),
-              until: any(named: 'until'),
-              skipCache: any(named: 'skipCache'),
-            ),
-          ).thenAnswer((_) async => HomeFeedResult(videos: [hidden, visible]));
+          stubFollowingFetch([hidden, visible]);
         },
         build: createBlocWithCache,
         act: (bloc) =>
             bloc.add(const VideoFeedStarted(mode: FeedMode.following)),
         expect: () => [
-          // 1. Loading state from _onStarted
           const VideoFeedBlocState(mode: FeedMode.following),
-          // 2. Cached emission: hidden filtered out via applyContentPreferences
           isA<VideoFeedBlocState>()
-              .having((s) => s.status, 'status', VideoFeedStatus.success)
-              .having((s) => s.videos.length, 'cached count', 1)
-              .having(
-                (s) => s.videos.first.id,
-                'cached visible id',
-                '2222222222222222222222222222222222222222222222222222222222222222',
-              ),
-          // 3. Fresh fetch result replaces cached state (unfiltered on the
-          //    fresh path — only the cache path is under test here).
-          isA<VideoFeedBlocState>()
-              .having((s) => s.status, 'status', VideoFeedStatus.success)
-              .having((s) => s.videos.length, 'fresh count', 2),
+              .having((s) => s.videos.length, 'filtered cached count', 1)
+              .having((s) => s.videos.first.id, 'visible id', '2' * 64),
+          isA<VideoFeedBlocState>().having(
+            (s) => s.videos.length,
+            'spliced count',
+            2,
+          ),
         ],
         verify: (_) {
-          // Secondary guardrail: confirm the filter was called with the raw,
-          // unfiltered cached list (both hidden and visible).
           final captured = verify(
             () => mockVideosRepository.applyContentPreferences(captureAny()),
           ).captured;
-          expect(captured, isNotEmpty);
           final list = captured.first as List<VideoEvent>;
-          expect(
-            list.map((v) => v.id),
-            contains(
-              '1111111111111111111111111111111111111111111111111111111111111111',
+          expect(list.map((v) => v.id), contains('1' * 64));
+          expect(list.map((v) => v.id), contains('2' * 64));
+        },
+      );
+
+      blocTest<VideoFeedBloc, VideoFeedBlocState>(
+        'advances the resume window past the active position on a fetch',
+        setUp: () => stubFollowingFetch(createTestVideos(3, idPrefix: 'fresh')),
+        build: createBlocWithCache,
+        act: (bloc) =>
+            bloc.add(const VideoFeedStarted(mode: FeedMode.following)),
+        verify: (_) {
+          // Active index 0 + offset 1 = 1 → forward window starts past the
+          // just-shown video, dropping only it.
+          final captured = verify(
+            () => mockCache.writeVideos(
+              pubkey: any(named: 'pubkey'),
+              mode: 'following',
+              videos: captureAny(named: 'videos'),
             ),
-          );
-          expect(
-            list.map((v) => v.id),
-            contains(
-              '2222222222222222222222222222222222222222222222222222222222222222',
+          ).captured;
+          final window = captured.last as List<VideoEvent>;
+          expect(window.map((v) => v.id), equals(['fresh-1', 'fresh-2']));
+        },
+      );
+
+      blocTest<VideoFeedBloc, VideoFeedBlocState>(
+        'on swipe, persists the forward window starting past the active video',
+        setUp: () => stubFollowingFetch(createTestVideos(5, idPrefix: 'fresh')),
+        build: createBlocWithCache,
+        act: (bloc) async {
+          bloc.add(const VideoFeedStarted(mode: FeedMode.following));
+          await Future<void>.delayed(Duration.zero);
+          bloc.add(const VideoFeedActiveIndexChanged(2));
+        },
+        // The swipe persist is trailing-debounced, so wait past the debounce
+        // window for the disk write to fire.
+        wait: const Duration(milliseconds: 700),
+        expect: () => [
+          const VideoFeedBlocState(mode: FeedMode.following),
+          isA<VideoFeedBlocState>()
+              .having((s) => s.status, 'status', VideoFeedStatus.success)
+              .having((s) => s.videos.length, 'count', 5),
+          isA<VideoFeedBlocState>().having(
+            (s) => s.currentIndex,
+            'active index',
+            2,
+          ),
+        ],
+        verify: (_) {
+          // Last write is the swipe: active index 2 + offset 1 = 3 →
+          // [fresh-3, fresh-4]. (An earlier load-time write from index 0 also
+          // occurs.)
+          final captured = verify(
+            () => mockCache.writeVideos(
+              pubkey: any(named: 'pubkey'),
+              mode: 'following',
+              videos: captureAny(named: 'videos'),
             ),
+          ).captured;
+          final window = captured.last as List<VideoEvent>;
+          expect(window.map((v) => v.id), equals(['fresh-3', 'fresh-4']));
+        },
+      );
+
+      blocTest<VideoFeedBloc, VideoFeedBlocState>(
+        'clears the resume cache when swiped to the end of the window',
+        setUp: () => stubFollowingFetch(createTestVideos(3, idPrefix: 'fresh')),
+        build: createBlocWithCache,
+        act: (bloc) async {
+          bloc.add(const VideoFeedStarted(mode: FeedMode.following));
+          await Future<void>.delayed(Duration.zero);
+          // Index 2 + offset 1 = 3 == length → nothing left to resume to.
+          bloc.add(const VideoFeedActiveIndexChanged(2));
+        },
+        wait: const Duration(milliseconds: 700),
+        verify: (_) {
+          // An empty forward window must invalidate the key, not no-op — else
+          // the next cold start re-serves already-seen videos.
+          verify(
+            () => mockCache.clearVideos(
+              pubkey: any(named: 'pubkey'),
+              mode: 'following',
+            ),
+          ).called(1);
+          // No write should ever carry an empty list (those route to clear).
+          final writes = verify(
+            () => mockCache.writeVideos(
+              pubkey: any(named: 'pubkey'),
+              mode: any(named: 'mode'),
+              videos: captureAny(named: 'videos'),
+            ),
+          ).captured;
+          expect(
+            writes.every((w) => (w as List<VideoEvent>).isNotEmpty),
+            isTrue,
           );
         },
       );

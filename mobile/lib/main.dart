@@ -731,10 +731,10 @@ StartupCoordinator _createStartupCoordinator(ProviderContainer container) {
       );
     },
   );
-
+  // Critical: home feed reads this cache on first build (cold-start race).
   coordinator.registerService(
     name: 'CacheSync',
-    phase: StartupPhase.standard,
+    phase: StartupPhase.critical,
     initialize: CacheSync.init,
     optional: true,
   );
