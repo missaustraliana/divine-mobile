@@ -14,6 +14,7 @@ import 'package:openvine/providers/video_providers.dart';
 import 'package:openvine/state/video_feed_state.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:unified_logger/unified_logger.dart';
+import 'package:videos_repository/videos_repository.dart';
 
 part 'for_you_provider.g.dart';
 
@@ -27,6 +28,7 @@ class ForYouFeed extends _$ForYouFeed {
   static const int _pageSize = 50;
 
   String? _nextCursor;
+  String _sessionSeed = generateRecommendationSessionSeed();
 
   @override
   Future<VideoFeedState> build() async {
@@ -99,14 +101,17 @@ class ForYouFeed extends _$ForYouFeed {
       return const VideoFeedState(videos: [], hasMoreContent: false);
     }
 
-    _nextCursor = null;
-    return _fetchRecommendations();
+    return _fetchRecommendations(
+      sessionSeed: generateRecommendationSessionSeed(),
+    );
   }
 
   Future<VideoFeedState> _fetchRecommendations({
     bool preserveExistingOnError = false,
+    String? sessionSeed,
   }) async {
     try {
+      final requestSeed = sessionSeed ?? _sessionSeed;
       final authService = ref.read(authServiceProvider);
       final currentUserPubkey = authService.currentPublicKeyHex;
       if (currentUserPubkey == null) {
@@ -118,6 +123,7 @@ class ForYouFeed extends _$ForYouFeed {
       final response = await client.getRecommendations(
         pubkey: currentUserPubkey,
         limit: _pageSize,
+        seed: requestSeed,
         preferredLanguages: hints.preferredLanguages,
         viewerCountry: hints.viewerCountry,
       );
@@ -140,6 +146,7 @@ class ForYouFeed extends _$ForYouFeed {
             .toList(),
       );
 
+      _sessionSeed = requestSeed;
       _nextCursor = response.nextCursor;
       final hasMore = response.hasMore && _nextCursor != null;
 
@@ -190,6 +197,7 @@ class ForYouFeed extends _$ForYouFeed {
 
       final client = ref.read(funnelcakeApiClientProvider);
       final cursor = _nextCursor;
+      final seed = _sessionSeed;
       if (cursor == null) {
         state = AsyncData(
           currentState.copyWith(isLoadingMore: false, hasMoreContent: false),
@@ -201,12 +209,16 @@ class ForYouFeed extends _$ForYouFeed {
         pubkey: currentUserPubkey,
         limit: _pageSize,
         cursor: cursor,
+        seed: seed,
         preferredLanguages: hints.preferredLanguages,
         viewerCountry: hints.viewerCountry,
       );
       final resultVideos = response.videos.toVideoEvents();
 
       if (!ref.mounted) return;
+      if (_sessionSeed != seed) {
+        return;
+      }
 
       final videoEventService = ref.read(videoEventServiceProvider);
       final blocklistRepository = ref.read(contentBlocklistRepositoryProvider);
@@ -266,7 +278,10 @@ class ForYouFeed extends _$ForYouFeed {
       getCurrentState: () => state,
       isMounted: () => ref.mounted,
       setState: (s) => state = s,
-      fetchFresh: () => _fetchRecommendations(preserveExistingOnError: true),
+      fetchFresh: () => _fetchRecommendations(
+        preserveExistingOnError: true,
+        sessionSeed: generateRecommendationSessionSeed(),
+      ),
     );
   }
 }

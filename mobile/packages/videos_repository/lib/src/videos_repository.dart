@@ -15,6 +15,7 @@ import 'package:videos_repository/src/home_feed_result.dart';
 import 'package:videos_repository/src/in_memory_feed_cache.dart';
 import 'package:videos_repository/src/popular_videos_page.dart';
 import 'package:videos_repository/src/profile_video_merge.dart';
+import 'package:videos_repository/src/recommendation_session_seed.dart';
 import 'package:videos_repository/src/video_content_filter.dart';
 import 'package:videos_repository/src/video_event_filter.dart';
 import 'package:videos_repository/src/video_local_storage.dart';
@@ -135,7 +136,7 @@ String _popularPreferenceCacheSuffix({
 /// {@endtemplate}
 class VideosRepository {
   /// {@macro videos_repository}
-  const VideosRepository({
+  VideosRepository({
     required NostrClient nostrClient,
     VideoLocalStorage? localStorage,
     BlockedVideoFilter? blockFilter,
@@ -158,6 +159,7 @@ class VideosRepository {
   final VideoWarningLabelsResolver? _warningLabelsResolver;
   final FunnelcakeApiClient? _funnelcakeApiClient;
   final InMemoryFeedCache? _inMemoryFeedCache;
+  String _recommendationSessionSeed = generateRecommendationSessionSeed();
 
   /// Clears the in-memory feed cache.
   ///
@@ -2437,6 +2439,11 @@ class VideosRepository {
       if (cached != null) return cached;
     }
 
+    final isFirstPage = until == null && cursor == null;
+    final requestSeed = skipCache && isFirstPage
+        ? generateRecommendationSessionSeed()
+        : _recommendationSessionSeed;
+
     if (effectiveUserPubkey == null ||
         _funnelcakeApiClient == null ||
         !_funnelcakeApiClient.isAvailable) {
@@ -2456,6 +2463,7 @@ class VideosRepository {
         ? await _funnelcakeApiClient.getRecommendations(
             pubkey: effectiveUserPubkey,
             limit: limit,
+            seed: requestSeed,
             preferredLanguages: preferredLanguages,
             viewerCountry: viewerCountry,
           )
@@ -2463,6 +2471,7 @@ class VideosRepository {
             pubkey: effectiveUserPubkey,
             limit: limit,
             cursor: recommendationCursor,
+            seed: requestSeed,
             preferredLanguages: preferredLanguages,
             viewerCountry: viewerCountry,
           );
@@ -2485,6 +2494,9 @@ class VideosRepository {
       hasMore: response.hasMore,
       rawResponseBody: response.rawBody,
     );
+    if (isFirstPage) {
+      _recommendationSessionSeed = requestSeed;
+    }
     if (until == null && cursor == null) {
       _inMemoryFeedCache?.set(cacheKey, result);
     }
