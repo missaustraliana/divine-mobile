@@ -13,6 +13,7 @@ import 'package:openvine/extensions/complete_parameters_extensions.dart';
 import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/services/crash_reporting_service.dart';
 import 'package:openvine/services/native_proofmode_service.dart';
+import 'package:openvine/services/video_editor/video_editor_audio_render.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
@@ -882,22 +883,10 @@ class VideoEditorRenderService {
     );
 
     final customTracks = parameters?.audioTracks ?? const <AudioTrack>[];
-
-    final audioTracks = <VideoAudioTrack>[];
-    for (final track in customTracks) {
-      final audioPath = await track.audio.safeFilePath();
-      audioTracks.add(
-        VideoAudioTrack(
-          path: audioPath,
-          startTime: track.startTime,
-          endTime: track.endTime,
-          audioStartTime: track.audioStartTime,
-          audioEndTime: track.audioEndTime,
-          loop: track.loop,
-          volume: track.volume,
-        ),
-      );
-    }
+    final audioTracks = await resolveRenderAudioTracks(
+      customTracks,
+      logName: _logName,
+    );
 
     final volumeSegments = segments
         .map((s) => s.copyWith(volume: s.volume))

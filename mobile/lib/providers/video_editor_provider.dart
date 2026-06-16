@@ -25,6 +25,7 @@ import 'package:openvine/providers/video_publish_provider.dart';
 import 'package:openvine/providers/video_reply_context_provider.dart';
 import 'package:openvine/services/draft_storage_service.dart';
 import 'package:openvine/services/file_cleanup_service.dart';
+import 'package:openvine/services/video_editor/video_editor_audio_render.dart';
 import 'package:openvine/services/video_editor/video_editor_render_service.dart';
 import 'package:openvine/services/video_thumbnail_service.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
@@ -47,22 +48,6 @@ final StreamProvider<ProgressModel> videoEditorCompositeProgressProvider =
       final draftId = ref.read(videoEditorProvider.notifier).draftId;
       return VideoEditorRenderService.compositeProgressStreamById(draftId);
     });
-
-@visibleForTesting
-AudioTrack audioTrackFromSoundForRender(AudioEvent sound) {
-  return AudioTrack(
-    id: sound.id,
-    title: sound.title ?? '',
-    subtitle: sound.source ?? '',
-    duration: Duration(seconds: sound.duration?.toInt() ?? 0),
-    audio: sound.isBundled
-        ? EditorAudio.asset(sound.assetPath!)
-        : sound.isLocalImport && sound.localFilePath != null
-        ? EditorAudio.file(File(sound.localFilePath!))
-        : EditorAudio.network(sound.url!),
-    startTime: sound.startOffset,
-  );
-}
 
 /// Manages video editor state and operations.
 ///
@@ -1020,32 +1005,27 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
     final baseParams =
         state.editorEditingParameters ?? CompleteParameters.fromMap({});
 
-    final audioTracks = baseParams.audioTracksFromMeta;
+    final audioEvents = baseParams.audioTracksFromMeta;
+    final audioTracks = <AudioTrack>[
+      for (final track in audioEvents) ?audioTrackFromMetaForRender(track),
+      // selectedSound is legacy single-sound state from the recorder flow.
+      // When the timeline already carries audio (meta tracks) it is the same
+      // sound, so adding it again duplicates the audio. Only fall back to it
+      // when the timeline has no audio of its own.
+      if (audioEvents.isEmpty && soundTrack != null)
+        ?audioTrackFromSoundForRender(soundTrack),
+    ];
 
-    return baseParams.copyWith(
-      audioTracks: [
-        for (final track in audioTracks)
-          AudioTrack(
-            id: track.id,
-            title: track.title ?? '',
-            subtitle: track.source ?? '',
-            duration: Duration(seconds: track.duration?.toInt() ?? 0),
-            audio: track.isBundled
-                ? EditorAudio.asset(track.assetPath!)
-                : track.url!.startsWith('/')
-                ? EditorAudio.file(File(track.url!))
-                : EditorAudio.network(track.url!),
-            startTime: track.startTime,
-            endTime: track.endTime,
-            audioStartTime: track.startOffset,
-            audioEndTime:
-                track.startOffset +
-                Duration(milliseconds: ((track.duration ?? 0) * 1000).toInt()),
-            volume: track.volume,
-          ),
-
-        if (soundTrack != null) audioTrackFromSoundForRender(soundTrack),
-      ],
+    // Surface the resolution result so a silent export (no audio) is
+    // diagnosable from logs instead of failing quietly — the common cause is
+    // an empty/unparsable `audio` meta key.
+    Log.info(
+      'Render audio: ${audioEvents.length} track(s) in meta, '
+      '${audioTracks.length} resolved for muxing',
+      name: 'VideoEditorNotifier',
+      category: LogCategory.video,
     );
+
+    return baseParams.copyWith(audioTracks: audioTracks);
   }
 }

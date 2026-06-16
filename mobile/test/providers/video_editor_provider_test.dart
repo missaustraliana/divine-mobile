@@ -17,6 +17,7 @@ import 'package:openvine/providers/clip_manager_provider.dart';
 import 'package:openvine/providers/shared_preferences_provider.dart';
 import 'package:openvine/providers/video_editor_provider.dart';
 import 'package:openvine/services/draft_storage_service.dart';
+import 'package:openvine/services/video_editor/video_editor_audio_render.dart';
 import 'package:openvine/services/video_editor/video_editor_render_service.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -248,9 +249,178 @@ void main() {
 
         final track = audioTrackFromSoundForRender(sound);
 
-        expect(track.audio.hasFile, isTrue);
+        expect(track, isNotNull);
+        expect(track!.audio.hasFile, isTrue);
         expect(track.audio.file?.path, equals('/tmp/imported/snare.mp3'));
         expect(track.audio.hasNetworkUrl, isFalse);
+      });
+
+      test('selected absolute-path url is rendered as file audio', () {
+        const sound = AudioEvent(
+          id: 'video_source_copy_3',
+          pubkey: 'pk',
+          createdAt: 1700000000,
+          url: '/tmp/extracted/selected.m4a',
+          duration: 3,
+        );
+
+        final track = audioTrackFromSoundForRender(sound);
+
+        expect(track, isNotNull);
+        expect(track!.audio.hasFile, isTrue);
+        expect(track.audio.file?.path, equals('/tmp/extracted/selected.m4a'));
+        expect(track.audio.hasNetworkUrl, isFalse);
+      });
+
+      test('selected sound without a resolvable source is skipped', () {
+        const sound = AudioEvent(
+          id: 'video_source_no_url',
+          pubkey: 'pk',
+          createdAt: 1700000000,
+          duration: 3,
+        );
+
+        expect(audioTrackFromSoundForRender(sound), isNull);
+      });
+
+      test('selected sound without a known duration is skipped', () {
+        const sound = AudioEvent(
+          id: 'video_source_no_duration',
+          pubkey: 'pk',
+          createdAt: 1700000000,
+          url: 'https://media.divine.video/abc',
+        );
+
+        expect(audioTrackFromSoundForRender(sound), isNull);
+      });
+
+      test(
+        'selected sound with a start offset gets a valid composition window',
+        () {
+          const sound = AudioEvent(
+            id: 'video_selected_offset',
+            pubkey: 'pk',
+            createdAt: 1700000000,
+            url: 'https://media.divine.video/abc',
+            duration: 6.533,
+            startOffset: Duration(milliseconds: 292),
+          );
+
+          final track = audioTrackFromSoundForRender(sound);
+
+          // Regression: previously startTime=startOffset and endTime=null
+          // produced an invalid [0.292s, 0.0s] window the native renderer
+          // dropped with "no time remaining in composition".
+          expect(track, isNotNull);
+          expect(track!.startTime, equals(Duration.zero));
+          expect(track.endTime, equals(const Duration(milliseconds: 6533)));
+          expect(
+            track.audioStartTime,
+            equals(const Duration(milliseconds: 292)),
+          );
+          // Null = play to file end, clipped by the composition window.
+          expect(track.audioEndTime, isNull);
+        },
+      );
+
+      test(
+        'meta network original sound renders with its composition window and '
+        'plays to file end',
+        () {
+          const event = AudioEvent(
+            id: 'video_source_copy_1',
+            pubkey: 'pk',
+            createdAt: 1700000000,
+            url: 'https://media.divine.video/abc123',
+            duration: 6.533,
+            startOffset: Duration(milliseconds: 292),
+            endTime: Duration(milliseconds: 3966),
+          );
+
+          final track = audioTrackFromMetaForRender(event);
+
+          expect(track, isNotNull);
+          expect(track!.audio.hasNetworkUrl, isTrue);
+          expect(
+            track.audioStartTime,
+            equals(const Duration(milliseconds: 292)),
+          );
+          // Null = play to the end of the file; the composition window clips
+          // it. (Previously startOffset + full length overran the file end.)
+          expect(track.audioEndTime, isNull);
+          expect(track.startTime, equals(Duration.zero));
+          expect(track.endTime, equals(const Duration(milliseconds: 3966)));
+        },
+      );
+
+      test(
+        'meta track with an invalid window plays across the whole video',
+        () {
+          // A sound added before its duration was known persists endTime=0.
+          const event = AudioEvent(
+            id: 'video_source_no_window',
+            pubkey: 'pk',
+            createdAt: 1700000000,
+            url: 'https://media.divine.video/abc123',
+            startOffset: Duration(milliseconds: 100),
+          );
+
+          final track = audioTrackFromMetaForRender(event);
+
+          expect(track, isNotNull);
+          // Both null = play for the entire video, instead of an invalid
+          // zero-length [start, 0] window the native renderer would drop.
+          expect(track!.startTime, isNull);
+          expect(track.endTime, isNull);
+          expect(
+            track.audioStartTime,
+            equals(const Duration(milliseconds: 100)),
+          );
+          expect(track.audioEndTime, isNull);
+        },
+      );
+
+      test('meta absolute-path url renders as file audio', () {
+        const event = AudioEvent(
+          id: 'video_source_copy_2',
+          pubkey: 'pk',
+          createdAt: 1700000000,
+          url: '/tmp/extracted/original.m4a',
+          duration: 3,
+        );
+
+        final track = audioTrackFromMetaForRender(event);
+
+        expect(track, isNotNull);
+        expect(track!.audio.hasFile, isTrue);
+        expect(track.audio.file?.path, equals('/tmp/extracted/original.m4a'));
+      });
+
+      test('meta local import renders as file audio', () {
+        final event = AudioEvent.fromLocalImport(
+          id: 'local_import_1700000000000',
+          filePath: '/tmp/imported/beat.mp3',
+          createdAt: 1700000000,
+          title: 'beat',
+          mimeType: 'audio/mpeg',
+          duration: 4,
+        );
+
+        final track = audioTrackFromMetaForRender(event);
+
+        expect(track, isNotNull);
+        expect(track!.audio.hasFile, isTrue);
+        expect(track.audio.file?.path, equals('/tmp/imported/beat.mp3'));
+      });
+
+      test('meta track without a resolvable source is skipped', () {
+        const event = AudioEvent(
+          id: 'video_source_no_url',
+          pubkey: 'pk',
+          createdAt: 1700000000,
+        );
+
+        expect(audioTrackFromMetaForRender(event), isNull);
       });
     });
 

@@ -93,6 +93,10 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
   /// Tracks the previous audio tracks to detect offset changes.
   List<AudioEvent> _previousAudioTracks = const [];
 
+  /// Track ids whose missing duration we already tried to backfill, so a
+  /// failed probe isn't retried on every audio-track change.
+  final Set<String> _durationHealAttempted = {};
+
   ProImageEditorState? get _editor => _editorKey.currentState;
 
   DivineVideoClip? get _clip => ref.read(clipManagerProvider).firstClipOrNull;
@@ -429,13 +433,19 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
 
   Future<void> _openMusicLibrary() async {
     var result = await AudioSelectionBottomSheet.show(context);
+    if (!mounted || result == null) return;
+
+    // Nostr sounds sometimes carry no duration tag, which otherwise persists a
+    // zero-length timeline window (endTime=0). Probe the source once and store
+    // the real duration so the track is placed and rendered correctly.
+    final durationSecs = await _resolveSoundDurationSecs(result);
+    if (!mounted) return;
 
     final editor = _editorKey.currentState;
-
-    if (!mounted || editor == null || result == null) return;
+    if (editor == null) return;
 
     final audioDuration = Duration(
-      milliseconds: ((result.duration ?? 0) * 1000).toInt(),
+      milliseconds: (durationSecs * 1000).toInt(),
     );
     final clipDuration = _clipEditorBloc.state.totalDuration;
     const maxDuration = VideoEditorConstants.maxDuration;
@@ -449,6 +459,7 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
       id: '${result.id}-${DateTime.now().millisecondsSinceEpoch}',
       startTime: .zero,
       endTime: endTime,
+      duration: durationSecs > 0 ? durationSecs : null,
     );
     editor.addHistory(
       meta: {
@@ -457,6 +468,87 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
           ...editor.stateManager.audioTracks.map((e) => e.toJson()),
           result.toJson(),
         ],
+      },
+    );
+  }
+
+  /// Resolves the sound's duration in seconds, probing the source via
+  /// [ProVideoEditor.getMetadata] when the event carries no duration tag
+  /// (common for Nostr sounds). Returns the tagged duration when present, or
+  /// `0` when it can't be determined.
+  Future<double> _resolveSoundDurationSecs(AudioEvent sound) async {
+    final tagged = sound.duration ?? 0;
+    if (tagged > 0) return tagged;
+
+    final path = sound.isBundled ? sound.assetPath : sound.url;
+    if (path == null || path.isEmpty) return 0;
+    try {
+      final source = sound.isBundled
+          ? EditorVideo.asset(path)
+          : path.startsWith('/')
+          ? EditorVideo.file(path)
+          : EditorVideo.network(path);
+      final metadata = await ProVideoEditor.instance.getMetadata(source);
+      return metadata.duration.inMilliseconds / 1000.0;
+    } catch (e, s) {
+      Log.error(
+        'Failed to probe audio duration for ${sound.id}',
+        name: 'VideoEditorScreen',
+        category: LogCategory.video,
+        error: e,
+        stackTrace: s,
+      );
+      return 0;
+    }
+  }
+
+  /// Backfills a real duration onto persisted audio tracks that carry none.
+  ///
+  /// Sounds added before [_resolveSoundDurationSecs] existed (or from Nostr
+  /// events without a duration tag) persist `duration == 0`, which becomes a
+  /// zero-length timeline window (`endTime == 0`) — an invisible bar. Probe the
+  /// source once, recompute `endTime`, and rewrite the editor history so the
+  /// repair persists. Each track is attempted at most once per session.
+  Future<void> _healMissingAudioDurations(List<AudioEvent> tracks) async {
+    final pending = tracks
+        .where(
+          (t) =>
+              (t.duration ?? 0) <= 0 && !_durationHealAttempted.contains(t.id),
+        )
+        .toList(growable: false);
+    if (pending.isEmpty) return;
+    _durationHealAttempted.addAll(pending.map((t) => t.id));
+
+    final resolved = <String, double>{};
+    for (final track in pending) {
+      final secs = await _resolveSoundDurationSecs(track);
+      if (secs > 0) resolved[track.id] = secs;
+    }
+    if (!mounted || resolved.isEmpty) return;
+
+    final editor = _editorKey.currentState;
+    if (editor == null) return;
+
+    final clipDuration = _clipEditorBloc.state.totalDuration;
+    const maxDuration = VideoEditorConstants.maxDuration;
+    final healed = editor.stateManager.audioTracks.map((track) {
+      final secs = resolved[track.id];
+      if (secs == null) return track;
+      final audioDuration = Duration(milliseconds: (secs * 1000).toInt());
+      final endTime = [
+        audioDuration,
+        clipDuration,
+        maxDuration,
+      ].reduce((a, b) => a < b ? a : b);
+      return track.copyWith(duration: secs, endTime: endTime);
+    }).toList();
+
+    editor.addHistory(
+      meta: {
+        ...editor.stateManager.activeMeta,
+        VideoEditorConstants.audioStateHistoryKey: healed
+            .map((e) => e.toJson())
+            .toList(),
       },
     );
   }
@@ -541,6 +633,8 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
               unawaited(_extractWaveform(audio));
             }
           }
+
+          unawaited(_healMissingAudioDurations(state.audioTracks));
         },
         child: Builder(
           builder: (context) {
