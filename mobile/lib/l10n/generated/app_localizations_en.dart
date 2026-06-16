@@ -5751,6 +5751,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonRetry => 'Retry';
 
   @override
+  String get commonSomethingWentWrong => 'Something went wrong';
+
+  @override
   String get commonNext => 'Next';
 
   @override

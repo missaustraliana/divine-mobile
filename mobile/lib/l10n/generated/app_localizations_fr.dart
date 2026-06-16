@@ -5822,6 +5822,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get commonRetry => 'Réessayer';
 
   @override
+  String get commonSomethingWentWrong => 'Un problème est survenu';
+
+  @override
   String get commonNext => 'Suivant';
 
   @override

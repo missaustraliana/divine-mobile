@@ -5526,6 +5526,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get commonRetry => 'もう一回';
 
   @override
+  String get commonSomethingWentWrong => '問題が発生しました';
+
+  @override
   String get commonNext => '次へ';
 
   @override

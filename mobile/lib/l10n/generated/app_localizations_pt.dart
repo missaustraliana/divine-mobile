@@ -5786,6 +5786,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get commonRetry => 'Tentar novamente';
 
   @override
+  String get commonSomethingWentWrong => 'Algo deu errado';
+
+  @override
   String get commonNext => 'Próximo';
 
   @override

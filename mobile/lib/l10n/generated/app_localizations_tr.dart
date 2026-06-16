@@ -5733,6 +5733,9 @@ class AppLocalizationsTr extends AppLocalizations {
   String get commonRetry => 'Tekrar dene';
 
   @override
+  String get commonSomethingWentWrong => 'Bir hata oluştu';
+
+  @override
   String get commonNext => 'İleri';
 
   @override

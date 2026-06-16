@@ -5900,6 +5900,9 @@ class AppLocalizationsRo extends AppLocalizations {
   String get commonRetry => 'Reîncearcă';
 
   @override
+  String get commonSomethingWentWrong => 'Ceva nu a mers bine';
+
+  @override
   String get commonNext => 'Următorul';
 
   @override
