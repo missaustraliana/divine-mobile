@@ -83,6 +83,13 @@ abstract class DmHistoryDrainConfig {
 
   /// Maximum pages fetched in a single drain (≈ [pageSize] × this events).
   static const int maxPages = 50;
+
+  /// Maximum NIP-44 decryption attempts for a single gift wrap before the
+  /// failed-decrypt retry queue gives up on it. Generous so a transient
+  /// remote-signer (Keycast RPC) outage spanning several inbox opens still
+  /// recovers, while a permanently-undecryptable wrap cannot loop forever.
+  /// See #5202.
+  static const int maxDecryptRetries = 10;
 }
 
 const _relayLoopbackHosts = <String>{
@@ -132,6 +139,7 @@ class DmRepository {
     required DirectMessagesDao directMessagesDao,
     required ConversationsDao conversationsDao,
     OutgoingDmsDao? outgoingDmsDao,
+    PendingGiftWrapsDao? pendingGiftWrapsDao,
     DmSyncState? syncState,
     NIP17MessageService? messageService,
     String? userPubkey,
@@ -144,6 +152,7 @@ class DmRepository {
        _directMessagesDao = directMessagesDao,
        _conversationsDao = conversationsDao,
        _outgoingDmsDao = outgoingDmsDao,
+       _pendingGiftWrapsDao = pendingGiftWrapsDao,
        _syncState = syncState,
        _messageService = messageService,
        _userPubkey = userPubkey ?? '',
@@ -164,6 +173,14 @@ class DmRepository {
   /// fixtures working without rewiring — when `null`, [sendMessage]
   /// keeps its previous direct-write behaviour.
   final OutgoingDmsDao? _outgoingDmsDao;
+
+  /// Optional DAO for the durable failed-decrypt gift-wrap retry queue.
+  /// When provided, gift wraps that fail NIP-44 decryption are persisted
+  /// here (instead of being silently dropped) so [retryPendingDecryptions]
+  /// can recover them on a later inbox open — the H2 resilience path for
+  /// flaky remote-signer (Keycast RPC) decryption. Nullable to keep older
+  /// test fixtures working without rewiring. See #5202.
+  final PendingGiftWrapsDao? _pendingGiftWrapsDao;
 
   final DmSyncState? _syncState;
   NIP17MessageService? _messageService;
@@ -195,6 +212,22 @@ class DmRepository {
   /// repeated [backfillHistoryIfNeeded] calls (e.g. every inbox open) never
   /// launch overlapping drains. Cleared when the drain settles.
   Future<void>? _historyDrain;
+
+  /// The in-flight failed-decrypt retry pass, shared by concurrent callers so
+  /// repeated [retryPendingDecryptions] calls (every inbox open, plus
+  /// load-more / blocklist re-dispatches) never run overlapping passes that
+  /// would double the Keycast RPC decrypts or race the per-wrap attempt
+  /// counter. Cleared when the pass settles. See #5202.
+  Future<void>? _pendingDecryptRetry;
+
+  /// Count of in-flight recovery operations doing real work — history-drain
+  /// paging and failed-decrypt replay passes. Drives [isRecoveringHistory] /
+  /// [historyRecoveryStream] so the inbox can show a restore progress
+  /// indicator while a reinstall backfill runs (it can take a while on
+  /// remote-signer accounts that decrypt each wrap over RPC). See #5202.
+  int _activeRecoveryOps = 0;
+  final StreamController<bool> _recoveryStateController =
+      StreamController<bool>.broadcast();
 
   /// User-scoped subscription ID to prevent collision when the provider
   /// rebuilds during auth transitions (old unsubscribe won't kill new sub).
@@ -266,9 +299,18 @@ class DmRepository {
   void _resetState() {
     _disposed = true;
     _eventLock = null;
-    // Drop the in-flight history drain so the next user can start a fresh
-    // one; the running loop bails on the _userPubkey change.
+    // Drop the in-flight history drain and decrypt-retry pass so the next
+    // user can start fresh; the running loops bail on the _userPubkey change.
     _historyDrain = null;
+    _pendingDecryptRetry = null;
+    // Abandon the recovery signal for the outgoing user. The bailing loops'
+    // _endRecovery() then no-ops (guarded on the zeroed counter).
+    if (_activeRecoveryOps > 0) {
+      _activeRecoveryOps = 0;
+      if (!_recoveryStateController.isClosed) {
+        _recoveryStateController.add(false);
+      }
+    }
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     unawaited(_giftWrapSubscription?.cancel());
@@ -439,6 +481,32 @@ class DmRepository {
     return events;
   }
 
+  /// Whether a DM history recovery (the backfill drain or a failed-decrypt
+  /// replay) is actively doing work right now. The inbox surfaces this as a
+  /// restore progress indicator so the user knows chats are still being
+  /// recovered after a reinstall. See #5202.
+  bool get isRecoveringHistory => _activeRecoveryOps > 0;
+
+  /// Broadcasts changes to [isRecoveringHistory]. Does not replay the current
+  /// value, so callers should seed with [isRecoveringHistory] (e.g.
+  /// `historyRecoveryStream.startWith(repo.isRecoveringHistory)`). See #5202.
+  Stream<bool> get historyRecoveryStream => _recoveryStateController.stream;
+
+  void _beginRecovery() {
+    _activeRecoveryOps++;
+    if (_activeRecoveryOps == 1 && !_recoveryStateController.isClosed) {
+      _recoveryStateController.add(true);
+    }
+  }
+
+  void _endRecovery() {
+    if (_activeRecoveryOps == 0) return;
+    _activeRecoveryOps--;
+    if (_activeRecoveryOps == 0 && !_recoveryStateController.isClosed) {
+      _recoveryStateController.add(false);
+    }
+  }
+
   /// Recovers the user's full DM history from relays once per install.
   ///
   /// On reinstall the local DB and [DmSyncState] are wiped, so the live
@@ -470,6 +538,105 @@ class DmRepository {
     return drain;
   }
 
+  /// Replays gift wraps that previously failed NIP-44 decryption.
+  ///
+  /// On remote-signer accounts (Keycast RPC) each gift-wrap decrypt is a
+  /// network call, so a transient failure during the history-drain burst
+  /// would otherwise silently drop the conversation. Those wraps are
+  /// persisted raw (see [_handleGiftWrapEvent]); this replays each back
+  /// through the decrypt + persist pipeline, newest first, capped at
+  /// [DmHistoryDrainConfig.maxDecryptRetries] attempts per wrap so a
+  /// permanently-undecryptable wrap cannot loop forever (rows that exhaust
+  /// the cap are dropped). Each replay routes through [_handleIncomingEvent]
+  /// so it serializes on the same `_eventLock` as the live subscription and
+  /// the drain. Concurrent callers share one in-flight pass. A no-op when no
+  /// failed-decrypt DAO is wired. Safe to fire-and-forget from the inbox
+  /// BLoC on every open. See #5202.
+  Future<void> retryPendingDecryptions() {
+    final existing = _pendingDecryptRetry;
+    if (existing != null) return existing;
+    final run = _runPendingDecryptRetry();
+    _pendingDecryptRetry = run;
+    unawaited(
+      run.whenComplete(() {
+        if (identical(_pendingDecryptRetry, run)) _pendingDecryptRetry = null;
+      }),
+    );
+    return run;
+  }
+
+  Future<void> _runPendingDecryptRetry() async {
+    if (!isInitialized) return;
+    final dao = _pendingGiftWrapsDao;
+    if (dao == null) return;
+    final pubkey = _userPubkey;
+    var began = false;
+    try {
+      // Drop wraps that exhausted the retry cap so the queue cannot grow
+      // without bound — a permanently-undecryptable wrap or spammed kind-1059
+      // events addressed to the user would otherwise linger forever. See #5202.
+      await dao.deleteExhausted(
+        ownerPubkey: pubkey,
+        maxAttempts: DmHistoryDrainConfig.maxDecryptRetries,
+      );
+      final pending = await dao.getRetryable(
+        ownerPubkey: pubkey,
+        maxAttempts: DmHistoryDrainConfig.maxDecryptRetries,
+      );
+      if (pending.isEmpty) return;
+      // Only signal "recovering" once there is genuine work, so a normal
+      // inbox open (empty queue) never flickers the progress indicator.
+      _beginRecovery();
+      began = true;
+      for (final row in pending) {
+        if (_disposed || _userPubkey != pubkey) return;
+        // Already recovered by the live sub / drain — clear the stale row so
+        // it does not linger and re-query on every inbox open.
+        if (await _directMessagesDao.hasGiftWrap(row.giftWrapId)) {
+          await dao.deletePending(
+            giftWrapId: row.giftWrapId,
+            ownerPubkey: pubkey,
+          );
+          continue;
+        }
+        final Event giftWrapEvent;
+        try {
+          giftWrapEvent = Event.fromJson(
+            jsonDecode(row.rawJson) as Map<String, dynamic>,
+          );
+        } on Object {
+          // Corrupt stored JSON — drop it so it cannot loop. We wrote this
+          // JSON ourselves, so a parse failure is a programming invariant.
+          await dao.deletePending(
+            giftWrapId: row.giftWrapId,
+            ownerPubkey: pubkey,
+          );
+          continue;
+        }
+        // Re-check after the awaits above so an account switch mid-pass never
+        // replays the old user's wrap under the new session.
+        if (_disposed || _userPubkey != pubkey) return;
+        // Route through _handleIncomingEvent so the replay serializes on the
+        // same _eventLock as the live subscription and the drain. A
+        // successful decrypt deletes the pending row inside
+        // _handleGiftWrapEvent; a failure increments its attempts.
+        await _handleIncomingEvent(giftWrapEvent);
+      }
+    } on Object catch (e, stackTrace) {
+      // Relay/DB/IO failures here are expected (e.g. a transient read-only
+      // DB) and NOT reportable; the pass resumes on the next inbox open since
+      // rows are removed only on success, cap, or corruption.
+      Log.error(
+        'DM decrypt-retry pass failed (will resume on next inbox open): $e',
+        category: LogCategory.system,
+        error: e,
+        stackTrace: stackTrace,
+      );
+    } finally {
+      if (began) _endRecovery();
+    }
+  }
+
   Future<void> _runHistoryDrain() async {
     if (!isInitialized) return;
     final syncState = _syncState;
@@ -477,6 +644,12 @@ class DmRepository {
     // Pin the user for the whole drain so an account switch mid-drain can
     // never mark the wrong pubkey complete or query for the new user.
     final pubkey = _userPubkey;
+    // One-time forced re-drain: installs that completed under an older,
+    // buggy drain (pre-#5202) are stuck with historyDrainComplete=true while
+    // the relay still holds unrecovered history. A drain-version bump clears
+    // the stale flag once so recovery runs again. No-op once at the current
+    // version, so it does not loop on every inbox open. See #5202.
+    await syncState.upgradeDrainVersionIfNeeded(pubkey);
     if (syncState.historyDrainComplete(pubkey)) {
       Log.info(
         'DM history drain skipped for $pubkey: already complete',
@@ -492,6 +665,7 @@ class DmRepository {
       category: LogCategory.system,
     );
 
+    _beginRecovery();
     try {
       // The relay filters `until:` on the OUTER gift-wrap created_at, which
       // NIP-59 randomizes up to 2 days into the past — so the cursor tracks
@@ -521,6 +695,21 @@ class DmRepository {
         pagesRun++;
         totalEvents += events.length;
         if (events.isEmpty) {
+          // An empty page is genuine history exhaustion ONLY if a relay was
+          // actually connected to answer it. With 0 connected relays the
+          // query short-circuits to [] — marking the drain complete then
+          // would permanently strand unrecovered history (the #5202 root
+          // cause). Defer instead: leave historyDrainComplete unset and the
+          // cursor persisted so the next inbox open resumes once relays
+          // are up.
+          if (_nostrClient.connectedRelayCount == 0) {
+            Log.warning(
+              'DM history drain saw an empty page with 0 connected relays '
+              'for $pubkey; deferring completion to the next inbox open.',
+              category: LogCategory.system,
+            );
+            return;
+          }
           reachedEnd = true;
           break;
         }
@@ -579,6 +768,8 @@ class DmRepository {
           site: DmRepositoryReportableSites.historyDrainUnexpectedFailure,
         );
       }
+    } finally {
+      _endRecovery();
     }
   }
 
@@ -695,12 +886,28 @@ class DmRepository {
 
       final rumorEvent = await _decryptRumor(nostr, giftWrapEvent);
       if (rumorEvent == null) {
+        // Persist the still-encrypted wrap so a later retry can recover the
+        // conversation instead of losing it — flaky remote-signer (Keycast
+        // RPC) decryption must not be permanent data loss. See #5202.
+        await _pendingGiftWrapsDao?.recordFailedDecrypt(
+          giftWrapId: giftWrapEvent.id,
+          ownerPubkey: _userPubkey,
+          rawJson: jsonEncode(giftWrapEvent.toJson()),
+          createdAt: giftWrapEvent.createdAt,
+        );
         Log.debug(
-          'Failed to decrypt gift wrap event ${giftWrapEvent.id}',
+          'Failed to decrypt gift wrap event ${giftWrapEvent.id}; '
+          'queued for retry',
           category: LogCategory.system,
         );
         return;
       }
+      // Decrypt succeeded — drop any prior failed-decrypt record so the
+      // retry queue stops reprocessing this wrap. See #5202.
+      await _pendingGiftWrapsDao?.deletePending(
+        giftWrapId: giftWrapEvent.id,
+        ownerPubkey: _userPubkey,
+      );
 
       // NIP-17 spec line 14 explicitly permits kind 7 reactions inside
       // the gift-wrap envelope. Reaction deletions are also wrapped by
