@@ -1,9 +1,10 @@
 // ABOUTME: Tests for ComposableVideoGrid widget
 // ABOUTME: Verifies grid rendering, broken video filtering, and user interactions
 //
-// NOTE: These tests fail because ComposableVideoGrid uses UserName widget which
-// triggers the Nostr provider chain (userProfileReactive -> userProfileService ->
-// nostrService) that attempts real WebSocket connections to relays.
+// NOTE: Tests that render video tiles are skipped because ComposableVideoGrid
+// uses UserName widget, which triggers the Nostr provider chain
+// (userProfileReactive -> userProfileService -> nostrService) that attempts
+// real WebSocket connections to relays.
 //
 // Flutter's TestWidgetsFlutterBinding automatically intercepts and mocks all
 // HTTP/WebSocket connections, returning "Mocked response" errors. This is built
@@ -15,9 +16,9 @@
 // That version uses IntegrationTestWidgetsFlutterBinding which allows real
 // network connections and tests the widget in the context of the running app.
 //
-// These widget tests are kept for reference and potential future refactoring
-// where ComposableVideoGrid could accept profile data as props instead of
-// fetching via providers, which would allow isolated widget testing.
+// The skipped tile tests are kept for reference and potential future
+// refactoring where ComposableVideoGrid could accept profile data as props
+// instead of fetching via providers, which would allow isolated widget testing.
 
 import 'dart:ui' show PointerDeviceKind;
 
@@ -28,6 +29,7 @@ import 'package:models/models.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/services/broken_video_tracker.dart' as broken_tracker;
+import 'package:openvine/widgets/branded_loading_indicator.dart';
 import 'package:openvine/widgets/composable_video_grid.dart';
 
 void main() {
@@ -346,5 +348,96 @@ void main() {
       expect(find.text('5s'), findsOneWidget); // duration badge
       // TODO(any): Fix and re-enable these tests
     }, skip: true);
+
+    group('load-more footer', () {
+      // Renders the grid path with no tiles (empty list + no emptyBuilder) so
+      // the footer can be exercised without the video-tile Nostr/network chain.
+      Widget buildGrid({
+        required bool isLoadingMore,
+        required bool hasMoreContent,
+        Future<void> Function()? onLoadMore,
+      }) {
+        return ProviderScope(
+          overrides: [
+            brokenVideoTrackerProvider.overrideWith((ref) async => mockTracker),
+            subscribedListVideoCacheProvider.overrideWithValue(null),
+          ],
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: ComposableVideoGrid(
+                videos: const [],
+                onVideoTap: (videos, index) {},
+                isLoadingMore: isLoadingMore,
+                hasMoreContent: hasMoreContent,
+                onLoadMore: onLoadMore,
+              ),
+            ),
+          ),
+        );
+      }
+
+      testWidgets(
+        'shows a centered $BrandedLoadingIndicator below the scrolling grid '
+        'while loading more',
+        (tester) async {
+          await tester.pumpWidget(
+            buildGrid(
+              isLoadingMore: true,
+              hasMoreContent: true,
+              onLoadMore: () async {},
+            ),
+          );
+          await tester.pump(); // resolve broken-tracker future
+
+          expect(find.byType(BrandedLoadingIndicator), findsOneWidget);
+          // The footer is no longer a grid cell: the grid is a sliver scroll
+          // view and the legacy box-scrolling GridView is gone.
+          expect(find.byType(CustomScrollView), findsOneWidget);
+          expect(find.byType(GridView), findsNothing);
+
+          // Horizontally centered across the full scrollable width.
+          final indicatorCenter = tester.getCenter(
+            find.byType(BrandedLoadingIndicator),
+          );
+          final scrollViewCenter = tester.getCenter(
+            find.byType(CustomScrollView),
+          );
+          expect(
+            indicatorCenter.dx,
+            moreOrLessEquals(scrollViewCenter.dx, epsilon: 1),
+          );
+        },
+      );
+
+      testWidgets('does not show the loading indicator when not loading more', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          buildGrid(
+            isLoadingMore: false,
+            hasMoreContent: true,
+            onLoadMore: () async {},
+          ),
+        );
+        await tester.pump();
+
+        // Footer slot exists (more content available) but stays empty until
+        // a load actually starts.
+        expect(find.byType(BrandedLoadingIndicator), findsNothing);
+      });
+
+      testWidgets('omits the loading indicator when there is no more content', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          buildGrid(isLoadingMore: false, hasMoreContent: false),
+        );
+        await tester.pump();
+
+        expect(find.byType(BrandedLoadingIndicator), findsNothing);
+      });
+    });
   });
 }
