@@ -14,6 +14,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:models/models.dart';
 import 'package:notification_repository/notification_repository.dart';
 import 'package:openvine/notifications/bloc/notification_feed_bloc.dart';
+import 'package:openvine/notifications/bloc/reportable_sites.dart';
 import 'package:openvine/observability/reportable_error.dart';
 
 class _MockNotificationRepository extends Mock
@@ -96,6 +97,9 @@ void main() {
       );
       when(
         () => mockNotificationRepo.markAsRead(any()),
+      ).thenAnswer((_) async {});
+      when(
+        () => mockNotificationRepo.markAllAsRead(),
       ).thenAnswer((_) async {});
       when(() => mockNotificationRepo.resetPaginationDepth()).thenReturn(null);
     });
@@ -191,7 +195,7 @@ void main() {
 
     group('NotificationFeedStarted', () {
       blocTest<NotificationFeedBloc, NotificationFeedState>(
-        'emits loading then loaded; calls refresh without marking read',
+        'emits loading then loaded; refreshes then marks seen on open (#4708)',
         build: createBloc,
         act: (bloc) => bloc.add(NotificationFeedStarted()),
         expect: () => [
@@ -199,8 +203,66 @@ void main() {
           NotificationFeedState(status: NotificationFeedStatus.loaded),
         ],
         verify: (_) {
+          // Seen-on-open advances the server watermark AFTER the refresh so
+          // the badge clears and thereafter shows "new since last seen".
+          verifyInOrder([
+            () => mockNotificationRepo.refresh(),
+            () => mockNotificationRepo.markAllAsRead(),
+          ]);
+        },
+      );
+
+      blocTest<NotificationFeedBloc, NotificationFeedState>(
+        'stays loaded when the seen-on-open mark-all fails (does not blacken '
+        'the feed)',
+        setUp: () {
+          when(
+            () => mockNotificationRepo.markAllAsRead(),
+          ).thenThrow(Exception('mark-all boom'));
+        },
+        build: createBloc,
+        act: (bloc) => bloc.add(NotificationFeedStarted()),
+        expect: () => [
+          NotificationFeedState(status: NotificationFeedStatus.loading),
+          NotificationFeedState(status: NotificationFeedStatus.loaded),
+        ],
+        errors: () => [isA<Exception>()],
+        verify: (_) {
           verify(() => mockNotificationRepo.refresh()).called(1);
-          verifyNever(() => mockNotificationRepo.markAllAsRead());
+          verify(() => mockNotificationRepo.markAllAsRead()).called(1);
+        },
+      );
+
+      blocTest<NotificationFeedBloc, NotificationFeedState>(
+        'wraps unexpected Error from seen-on-open mark-all as Reportable '
+        'without blackening the feed',
+        setUp: () {
+          when(
+            () => mockNotificationRepo.markAllAsRead(),
+          ).thenThrow(StateError('invariant'));
+        },
+        build: createBloc,
+        act: (bloc) => bloc.add(NotificationFeedStarted()),
+        expect: () => [
+          NotificationFeedState(status: NotificationFeedStatus.loading),
+          NotificationFeedState(status: NotificationFeedStatus.loaded),
+        ],
+        errors: () => [
+          isA<Reportable<Object>>()
+              .having(
+                (r) => r.context,
+                'context',
+                NotificationFeedBlocReportableSites.markSeenOnOpen,
+              )
+              .having(
+                (r) => r.unwrap(),
+                'unwrap',
+                isA<StateError>(),
+              ),
+        ],
+        verify: (_) {
+          verify(() => mockNotificationRepo.refresh()).called(1);
+          verify(() => mockNotificationRepo.markAllAsRead()).called(1);
         },
       );
 
@@ -413,6 +475,9 @@ void main() {
         ],
         verify: (_) {
           verify(() => mockNotificationRepo.refresh()).called(1);
+          // Pull-to-refresh shows current unread; only opening (Started)
+          // advances the seen watermark (#4708).
+          verifyNever(() => mockNotificationRepo.markAllAsRead());
         },
       );
 
