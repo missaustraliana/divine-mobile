@@ -1,9 +1,8 @@
 // ABOUTME: Explore screen with proper Vine theme and video grid functionality
 // ABOUTME: Pure Riverpod architecture for video discovery with grid/feed modes
 
-import 'dart:async';
-
 import 'package:divine_ui/divine_ui.dart';
+import 'package:feed_repository/feed_repository.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +14,7 @@ import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/mixins/grid_prefetch_mixin.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/classic_vines_provider.dart';
+import 'package:openvine/providers/feed_repository_provider.dart';
 import 'package:openvine/providers/for_you_provider.dart';
 import 'package:openvine/providers/list_providers.dart';
 import 'package:openvine/providers/route_feed_providers.dart';
@@ -43,7 +43,6 @@ import 'package:openvine/widgets/nav_rounded_shell.dart';
 import 'package:openvine/widgets/new_videos_tab.dart';
 import 'package:openvine/widgets/popular_videos_tab.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
-import 'package:rxdart/rxdart.dart' show StartWithExtension;
 import 'package:unified_logger/unified_logger.dart';
 
 /// Pure ExploreScreen using revolutionary Riverpod architecture
@@ -1228,28 +1227,6 @@ class _ExploreFeedContent extends ConsumerStatefulWidget {
 }
 
 class _ExploreFeedContentState extends ConsumerState<_ExploreFeedContent> {
-  late final StreamController<List<VideoEvent>> _streamController;
-  List<VideoEvent>? _lastVideos;
-
-  @override
-  void initState() {
-    super.initState();
-    _streamController = StreamController<List<VideoEvent>>.broadcast();
-  }
-
-  @override
-  void dispose() {
-    _streamController.close();
-    super.dispose();
-  }
-
-  void _pushVideos(List<VideoEvent> videos) {
-    if (videos.isEmpty) return;
-    if (identical(videos, _lastVideos)) return;
-    _lastVideos = videos;
-    if (!_streamController.isClosed) _streamController.add(videos);
-  }
-
   @override
   Widget build(BuildContext context) {
     ref.watch(divineHostFilterVersionProvider);
@@ -1267,14 +1244,13 @@ class _ExploreFeedContentState extends ConsumerState<_ExploreFeedContent> {
       );
     }
 
-    _pushVideos(videos);
-
     final safeIndex = widget.startIndex.clamp(0, videos.length - 1);
 
     return PooledFullscreenVideoFeedScreen(
-      videosStream: _streamController.stream.startWith(videos),
+      source: const ExploreViewSource(),
+      feedRepository: ref.read(feedRepositoryProvider),
       initialIndex: safeIndex,
-      removedIdsStream: ref.read(videoEventServiceProvider).removedVideoIds,
+      initialVideoId: videos[safeIndex].id,
       contextTitle: '',
       onPageChanged: (index) => context.go(ExploreScreen.pathForIndex(index)),
     );

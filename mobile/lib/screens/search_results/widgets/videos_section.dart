@@ -1,6 +1,5 @@
-import 'dart:async';
-
 import 'package:divine_ui/divine_ui.dart';
+import 'package:feed_repository/feed_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,7 +8,6 @@ import 'package:go_router/go_router.dart';
 import 'package:models/models.dart';
 import 'package:openvine/blocs/video_search/video_search_bloc.dart';
 import 'package:openvine/l10n/l10n.dart';
-import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/screens/feed/pooled_fullscreen_video_feed_screen.dart';
 import 'package:openvine/screens/search_results/widgets/search_section_empty_state.dart';
 import 'package:openvine/screens/search_results/widgets/search_section_error_state.dart';
@@ -88,53 +86,30 @@ class _VideosContent extends ConsumerStatefulWidget {
 }
 
 class _VideosContentState extends ConsumerState<_VideosContent> {
-  late final StreamController<List<VideoEvent>> _videosStreamController;
-  late final StreamController<bool> _hasMoreStreamController;
-
-  @override
-  void initState() {
-    super.initState();
-    _videosStreamController = StreamController<List<VideoEvent>>.broadcast();
-    _hasMoreStreamController = StreamController<bool>.broadcast();
-  }
-
-  @override
-  void dispose() {
-    _videosStreamController.close();
-    _hasMoreStreamController.close();
-    super.dispose();
-  }
-
   void _onVideoTap(List<VideoEvent> videos, int index) {
+    final bloc = context.read<VideoSearchBloc>();
     context.push(
       PooledFullscreenVideoFeedScreen.path,
       extra: PooledFullscreenVideoFeedArgs(
-        videosStream: _videosStreamController.stream.startWith(videos),
-        initialIndex: index,
-        onLoadMore: () =>
-            context.read<VideoSearchBloc>().add(const VideoSearchLoadMore()),
-        hasMoreStream: _hasMoreStreamController.stream.startWith(
-          context.read<VideoSearchBloc>().state.hasMore,
+        source: SearchViewSource(bloc.state.query),
+        feedRepository: StreamFeedRepository(
+          videos: bloc.stream.map((state) => state.videos).startWith(videos),
+          hasMore: bloc.stream
+              .map((state) => state.hasMore)
+              .startWith(bloc.state.hasMore),
+          onLoadMore: () async => bloc.add(const VideoSearchLoadMore()),
         ),
-        removedIdsStream: ref.read(videoEventServiceProvider).removedVideoIds,
+        initialIndex: index,
         contextTitle: 'Search Results',
         trafficSource: ViewTrafficSource.search,
-        sourceDetail: context.read<VideoSearchBloc>().state.query,
+        sourceDetail: bloc.state.query,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return BlocListener<VideoSearchBloc, VideoSearchState>(
-      listenWhen: (prev, curr) =>
-          prev.videos != curr.videos || prev.hasMore != curr.hasMore,
-      listener: (context, state) {
-        _videosStreamController.add(state.videos);
-        _hasMoreStreamController.add(state.hasMore);
-      },
-      child: _VideosGrid(showAll: widget.showAll, onVideoTap: _onVideoTap),
-    );
+    return _VideosGrid(showAll: widget.showAll, onVideoTap: _onVideoTap);
   }
 }
 

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:divine_ui/divine_ui.dart';
+import 'package:feed_repository/feed_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,7 +11,6 @@ import 'package:models/models.dart';
 import 'package:openvine/blocs/video_search/video_search_bloc.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/mixins/scroll_pagination_mixin.dart';
-import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/screens/feed/pooled_fullscreen_video_feed_screen.dart';
 import 'package:openvine/screens/search_results/widgets/videos_section.dart';
 import 'package:openvine/services/view_event_publisher.dart';
@@ -59,8 +59,6 @@ class _VideoSearchGrid extends ConsumerStatefulWidget {
 class _VideoSearchGridState extends ConsumerState<_VideoSearchGrid>
     with ScrollPaginationMixin {
   final _scrollController = ScrollController();
-  late final StreamController<List<VideoEvent>> _videosStreamController;
-  late final StreamController<bool> _hasMoreStreamController;
 
   @override
   ScrollController get paginationScrollController => _scrollController;
@@ -77,45 +75,34 @@ class _VideoSearchGridState extends ConsumerState<_VideoSearchGrid>
   void initState() {
     super.initState();
     initPagination();
-    _videosStreamController = StreamController<List<VideoEvent>>.broadcast();
-    _hasMoreStreamController = StreamController<bool>.broadcast();
-  }
-
-  @override
-  void didUpdateWidget(_VideoSearchGrid oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.videos != widget.videos) {
-      _videosStreamController.add(widget.videos);
-    }
-    if (oldWidget.hasMore != widget.hasMore) {
-      _hasMoreStreamController.add(widget.hasMore);
-    }
   }
 
   @override
   void dispose() {
     disposePagination();
-    _videosStreamController.close();
-    _hasMoreStreamController.close();
     _scrollController.dispose();
     super.dispose();
   }
 
   void _onVideoTap(int index) {
+    final bloc = context.read<VideoSearchBloc>();
     context.push(
       PooledFullscreenVideoFeedScreen.path,
       extra: PooledFullscreenVideoFeedArgs(
-        videosStream: _videosStreamController.stream.startWith(widget.videos),
-        initialIndex: index,
-        onLoadMore: () =>
-            context.read<VideoSearchBloc>().add(const VideoSearchLoadMore()),
-        hasMoreStream: _hasMoreStreamController.stream.startWith(
-          widget.hasMore,
+        source: SearchViewSource(bloc.state.query),
+        feedRepository: StreamFeedRepository(
+          videos: bloc.stream
+              .map((state) => state.videos)
+              .startWith(widget.videos),
+          hasMore: bloc.stream
+              .map((state) => state.hasMore)
+              .startWith(widget.hasMore),
+          onLoadMore: () async => bloc.add(const VideoSearchLoadMore()),
         ),
-        removedIdsStream: ref.read(videoEventServiceProvider).removedVideoIds,
+        initialIndex: index,
         contextTitle: context.l10n.soundsSearchResults,
         trafficSource: ViewTrafficSource.search,
-        sourceDetail: context.read<VideoSearchBloc>().state.query,
+        sourceDetail: bloc.state.query,
       ),
     );
   }

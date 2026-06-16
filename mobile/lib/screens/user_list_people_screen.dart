@@ -2,6 +2,7 @@
 // ABOUTME: Selects the UserList by id from PeopleListsBloc so it reacts to repository updates.
 
 import 'package:divine_ui/divine_ui.dart';
+import 'package:feed_repository/feed_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show SemanticsService;
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -10,7 +11,6 @@ import 'package:go_router/go_router.dart';
 import 'package:models/models.dart' hide LogCategory;
 import 'package:openvine/features/people_lists/people_lists.dart';
 import 'package:openvine/l10n/l10n.dart';
-import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/list_providers.dart';
 import 'package:openvine/providers/user_profile_providers.dart';
 import 'package:openvine/screens/feed/pooled_fullscreen_video_feed_screen.dart';
@@ -480,11 +480,9 @@ class _UserListPeopleViewState extends ConsumerState<_UserListPeopleView>
         return Stack(
           children: [
             PooledFullscreenVideoFeedScreen(
-              videosStream: Stream.value(videos),
+              source: VideoListViewSource(videos),
+              feedRepository: StaticFeedRepository(),
               initialIndex: _activeVideoIndex!,
-              removedIdsStream: ref
-                  .read(videoEventServiceProvider)
-                  .removedVideoIds,
               contextTitle: userList.name,
             ),
             // Header bar showing list name and back button
