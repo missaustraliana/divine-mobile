@@ -1,4 +1,4 @@
-// ABOUTME: Localized route error UI: unknown paths (errorBuilder) and bad pooled extras
+// ABOUTME: Localized route error UI for unknown paths via GoRouter.errorBuilder
 // ABOUTME: Covers GoRouter.errorBuilder and RouteErrorScreen from app routes (#3371)
 
 import 'package:flutter/material.dart';
@@ -10,7 +10,6 @@ import 'package:openvine/l10n/generated/app_localizations_en.dart';
 import 'package:openvine/models/minor_account_review_status.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/router/router.dart';
-import 'package:openvine/screens/feed/pooled_fullscreen_video_feed_screen.dart';
 import 'package:openvine/services/auth_service.dart';
 
 import '../helpers/test_provider_overrides.dart';
@@ -60,30 +59,10 @@ void main() {
     expect(find.text(strings.routeUnknownPath), findsOneWidget);
   });
 
-  testWidgets(
-    'pooled fullscreen route without feed args uses RouteErrorScreen with no videos copy',
-    (tester) async {
-      final strings = AppLocalizationsEn();
-      final container = ProviderContainer(
-        overrides: [
-          authServiceProvider.overrideWithValue(authenticatedAuth()),
-          currentMinorAccountReviewStatusProvider.overrideWith(
-            (ref) async => MinorAccountReviewStatus.active(),
-          ),
-        ],
-      );
-      addTearDown(container.dispose);
-      await container.read(currentMinorAccountReviewStatusProvider.future);
-
-      await _pumpRouter(tester, container);
-
-      container.read(goRouterProvider).go(PooledFullscreenVideoFeedScreen.path);
-      await tester.pumpAndSettle();
-
-      expect(find.byType(RouteErrorScreen), findsOneWidget);
-      expect(find.text(strings.routeNoVideosToDisplay), findsOneWidget);
-    },
-  );
+  // The pooled fullscreen route's no-args redirect is covered at the route
+  // helper level in fullscreen_feed_redirect_test.dart. A widget assertion for
+  // the redirect target would require rendering the full home feed, which this
+  // focused error-route harness does not provide.
 }
 
 Future<void> _pumpRouter(
