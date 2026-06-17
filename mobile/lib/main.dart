@@ -59,8 +59,8 @@ import 'package:openvine/providers/database_provider.dart';
 import 'package:openvine/providers/db_cipher_key_provider.dart';
 import 'package:openvine/providers/deep_link_provider.dart';
 import 'package:openvine/providers/environment_provider.dart';
+import 'package:openvine/providers/foreground_idle_warmup_provider.dart';
 import 'package:openvine/providers/nostr_client_provider.dart';
-import 'package:openvine/providers/popular_now_feed_provider.dart';
 import 'package:openvine/providers/shared_preferences_provider.dart';
 import 'package:openvine/router/router.dart';
 import 'package:openvine/screens/auth/welcome_screen.dart';
@@ -1330,28 +1330,25 @@ Future<void> _startOpenVineApp() async {
   // This also forces package:sqlite3 onto the SQLCipher build (Android) and
   // runs the one-time plaintext→encrypted migration, both of which must happen
   // before any sqlite3 open. (#570, finding C2)
-  String? dbCipherKey;
-  try {
-    dbCipherKey = await DatabaseEncryptionBootstrap(
-      // resetOnError MUST stay false here: the cipher key is the one secret
-      // whose loss makes the encrypted DB unrecoverable. A transient keystore
-      // read error must throw (caught below → plaintext this launch, retry
-      // next) rather than silently deleting the key and triggering the §6
-      // key-loss recovery. (#570 C2)
+  final dbCipherKey = await resolveStartupDatabaseCipherKey(
+    // resetOnError MUST stay false here: the cipher key is the one secret
+    // whose loss makes the encrypted DB unrecoverable. A transient keystore
+    // read error must throw rather than silently deleting the key and
+    // triggering the §6 key-loss recovery. (#570 C2)
+    resolveCipherKey: () => DatabaseEncryptionBootstrap(
       secureStorage: const FlutterSecureStorage(
         aOptions: AndroidOptions(encryptedSharedPreferences: true),
       ),
-    ).resolveCipherKey();
-  } catch (error, stack) {
-    // SQLCipher build misconfiguration or an unexpected keystore failure.
-    // Report and degrade to a plaintext database so the app still launches;
-    // the device-QA gate prevents an unencrypted build from shipping. (#570 C2)
-    await CrashReportingService.instance.recordError(
+    ).resolveCipherKey(),
+    // SQLCipher build misconfiguration or secure-storage failures must fail
+    // closed after reporting. Continuing with a null key would open an
+    // existing encrypted DB as plaintext and spam SQLITE_NOTADB.
+    recordError: (error, stack) => CrashReportingService.instance.recordError(
       error,
       stack,
       reason: 'DatabaseEncryptionBootstrap.resolveCipherKey failed',
-    );
-  }
+    ),
+  );
 
   // Create ProviderContainer to initialize services BEFORE runApp
   final container = ProviderContainer(
@@ -1750,28 +1747,9 @@ class _DivineAppState extends ConsumerState<DivineApp> {
     );
   }
 
-  /// Initialize opportunistic background warmups owned by the app shell.
+  /// Initialize opportunistic foreground-idle warmups owned by the app shell.
   void _initializeBackgroundServices() {
-    Future.microtask(() {
-      unawaited(
-        ref
-            .read(popularNowFeedProvider.future)
-            .then((state) {
-              Log.info(
-                '[INIT] Warmed New feed with ${state.videos.length} videos',
-                name: 'Main',
-                category: LogCategory.system,
-              );
-            })
-            .catchError((Object error, StackTrace stackTrace) {
-              Log.warning(
-                '[INIT] New feed warmup failed (non-critical): $error',
-                name: 'Main',
-                category: LogCategory.system,
-              );
-            }),
-      );
-    });
+    ref.read(foregroundIdleWarmupSchedulerProvider).start();
 
     // Block/mute list sync is handled by blocklistSyncBridgeProvider
     // (watched in AppShell) which reacts to auth state changes and
