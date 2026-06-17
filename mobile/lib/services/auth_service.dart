@@ -2404,10 +2404,7 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
 
   Future<void> _clearOAuthSessionForSignOut() async {
     if (_oauthClient != null) {
-      await _runSignOutCleanupWithRetry(
-        'OAuth logout',
-        _oauthClient.logout,
-      );
+      await _runSignOutCleanupWithRetry('OAuth logout', _oauthClient.logout);
     }
 
     await _runSignOutCleanupWithRetry(
