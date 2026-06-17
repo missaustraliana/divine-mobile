@@ -14,16 +14,57 @@ const _divineApiBaseUrl = 'https://api.divine.video';
 ///  * `mobile/android/app/src/main/res/xml/network_security_config.xml`
 ///  * `mobile/packages/nostr_sdk/lib/nip46/nostr_remote_signer_info.dart`
 ///  * `mobile/packages/nostr_client/lib/src/relay_manager.dart`
-const _loopbackHosts = <String>{
-  'localhost',
-  '127.0.0.1',
-  '10.0.2.2',
-  '::1',
-};
+const _loopbackHosts = <String>{'localhost', '127.0.0.1', '10.0.2.2', '::1'};
 
 /// True if [host] is a recognized loopback address that may be reached over
 /// cleartext (`ws://` / `http://`).
 bool isLoopbackHost(String host) => _loopbackHosts.contains(host.toLowerCase());
+
+/// Relay hosts operated by Divine across all environments.
+///
+/// Matches the `EnvironmentConfig.relayUrl` hosts. Loopback (the `local`
+/// environment relay) is covered separately via [isLoopbackHost].
+const _divineHostedRelayHosts = <String>{
+  'relay.divine.video',
+  'relay.staging.divine.video',
+  'relay.poc.dvines.org',
+  'relay.test.dvines.org',
+};
+
+/// True when [url]'s host is a Divine-operated relay host or a loopback host
+/// (the `local` environment relay). Malformed URLs return false.
+bool isDivineHostedRelayUrl(String url) {
+  final host = Uri.tryParse(url)?.host.toLowerCase();
+  if (host == null || host.isEmpty) return false;
+  return _divineHostedRelayHosts.contains(host) || isLoopbackHost(host);
+}
+
+/// True if [configuredRelays] includes a relay the user added beyond the
+/// Divine-operated relays, loopback, and the app's own [defaultRelayUrls].
+///
+/// Every account — including a brand-new one — is auto-seeded with NIP-65
+/// indexer relays and DM-reachability fallback relays. Those are app plumbing,
+/// not relays the user chose, so they must be passed in via [defaultRelayUrls]
+/// and excluded; otherwise a fresh Divine-only account would falsely register
+/// as "using non-Divine relays".
+bool usesUserChosenRelay(
+  Iterable<String> configuredRelays, {
+  required Iterable<String> defaultRelayUrls,
+}) {
+  final allowedHosts = <String>{
+    ..._divineHostedRelayHosts,
+    for (final url in defaultRelayUrls)
+      if (Uri.tryParse(url)?.host.toLowerCase() case final String host
+          when host.isNotEmpty)
+        host,
+  };
+  return configuredRelays.any((url) {
+    final host = Uri.tryParse(url)?.host.toLowerCase();
+    if (host == null || host.isEmpty) return false;
+    if (allowedHosts.contains(host) || isLoopbackHost(host)) return false;
+    return true;
+  });
+}
 
 /// True if [url] is a relay URL the app is allowed to connect to.
 ///

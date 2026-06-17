@@ -190,4 +190,97 @@ void main() {
       );
     });
   });
+
+  group('isDivineHostedRelayUrl', () {
+    test('accepts every Divine-operated relay host', () {
+      expect(isDivineHostedRelayUrl('wss://relay.divine.video'), isTrue);
+      expect(
+        isDivineHostedRelayUrl('wss://relay.staging.divine.video'),
+        isTrue,
+      );
+      expect(isDivineHostedRelayUrl('wss://relay.poc.dvines.org'), isTrue);
+      expect(isDivineHostedRelayUrl('wss://relay.test.dvines.org'), isTrue);
+    });
+
+    test('accepts loopback relays (local environment)', () {
+      expect(isDivineHostedRelayUrl('ws://10.0.2.2:47777'), isTrue);
+      expect(isDivineHostedRelayUrl('ws://localhost:47777'), isTrue);
+    });
+
+    test('rejects non-Divine relays', () {
+      expect(isDivineHostedRelayUrl('wss://purplepag.es'), isFalse);
+      expect(isDivineHostedRelayUrl('wss://relay.nos.social'), isFalse);
+      expect(isDivineHostedRelayUrl('wss://relay.example.com'), isFalse);
+    });
+
+    test('rejects suffix-match attacks on a Divine host', () {
+      expect(
+        isDivineHostedRelayUrl('wss://relay.divine.video.attacker.example'),
+        isFalse,
+      );
+    });
+
+    test('rejects malformed URLs', () {
+      expect(isDivineHostedRelayUrl(''), isFalse);
+      expect(isDivineHostedRelayUrl('http://example.com'), isFalse);
+    });
+  });
+
+  group('usesUserChosenRelay', () {
+    const defaultRelayUrls = [
+      'wss://purplepag.es',
+      'wss://relay.nos.social',
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+    ];
+
+    test('false when every relay is Divine-hosted', () {
+      expect(
+        usesUserChosenRelay(
+          const [
+            'wss://relay.divine.video',
+            'wss://relay.staging.divine.video',
+          ],
+          defaultRelayUrls: defaultRelayUrls,
+        ),
+        isFalse,
+      );
+    });
+
+    test('false for a fresh account seeded with app default relays', () {
+      // Divine relay + auto-seeded indexer/fallback relays — none user-chosen.
+      expect(
+        usesUserChosenRelay(
+          const [
+            'wss://relay.divine.video',
+            'wss://purplepag.es',
+            'wss://relay.nos.social',
+            'wss://nos.lol',
+          ],
+          defaultRelayUrls: defaultRelayUrls,
+        ),
+        isFalse,
+      );
+    });
+
+    test('true when a relay outside Divine and the defaults is configured', () {
+      expect(
+        usesUserChosenRelay(
+          const [
+            'wss://relay.divine.video',
+            'wss://my-personal-relay.example',
+          ],
+          defaultRelayUrls: defaultRelayUrls,
+        ),
+        isTrue,
+      );
+    });
+
+    test('false for an empty relay set', () {
+      expect(
+        usesUserChosenRelay(const [], defaultRelayUrls: defaultRelayUrls),
+        isFalse,
+      );
+    });
+  });
 }
