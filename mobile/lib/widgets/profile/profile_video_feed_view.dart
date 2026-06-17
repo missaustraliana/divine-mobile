@@ -14,6 +14,7 @@ import 'package:openvine/screens/feed/pooled_fullscreen_video_feed_screen.dart';
 import 'package:openvine/services/view_event_publisher.dart';
 import 'package:openvine/utils/video_identity.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:videos_repository/videos_repository.dart';
 
 /// Fullscreen video feed view for profile screens.
 ///
@@ -113,23 +114,21 @@ class _ProfileFullscreenContentState extends State<_ProfileFullscreenContent> {
   late final ProfileFeedCubit _cubit;
   late final FeedRepository _feedRepository;
   late final int _initialIndex;
+  late final bool _seedContainsInitialTarget;
 
   @override
   void initState() {
     super.initState();
     _cubit = context.read<ProfileFeedCubit>();
-
-    // Prefer the live cubit list, falling back to the tapped seed list until
-    // the cubit resolves. `startWith` guarantees the first list reaches the
-    // FullscreenFeedBloc before it subscribes.
-    List<VideoEvent> effective(ProfileFeedState state) =>
-        state.videos.isNotEmpty ? state.videos : widget.seedVideos;
+    _seedContainsInitialTarget = _containsInitialTarget(widget.seedVideos);
 
     final initialState = _cubit.state;
-    _initialIndex = _resolveInitialIndex(effective(initialState));
+    _initialIndex = _resolveInitialIndex(_effectiveVideos(initialState));
 
     _feedRepository = StreamFeedRepository(
-      videos: _cubit.stream.map(effective).startWith(effective(initialState)),
+      videos: _cubit.stream
+          .map(_effectiveVideos)
+          .startWith(_effectiveVideos(initialState)),
       hasMore: _cubit.stream
           .map((state) => state.hasMoreContent)
           .startWith(initialState.hasMoreContent),
@@ -137,21 +136,45 @@ class _ProfileFullscreenContentState extends State<_ProfileFullscreenContent> {
     );
   }
 
+  // Adapts the scoped live cubit feed to the launch seed while the new cubit
+  // catches up to the tapped video from the profile grid.
+  List<VideoEvent> _effectiveVideos(ProfileFeedState state) {
+    final liveVideos = state.videos;
+    final seedVideos = widget.seedVideos;
+    if (liveVideos.isEmpty) return seedVideos;
+    if (seedVideos.isEmpty || !_seedContainsInitialTarget) return liveVideos;
+
+    // Once live paging reaches the tapped target, the cubit-owned list is
+    // authoritative again; seed-only items can drop until live paging reaches
+    // them through the normal profile feed path.
+    if (_containsInitialTarget(liveVideos)) return liveVideos;
+
+    return mergeProfileFeedVideoLists(liveVideos, seedVideos);
+  }
+
   int _resolveInitialIndex(List<VideoEvent> videos) {
     if (videos.isEmpty) return 0;
 
+    final resolved = _indexOfInitialTarget(videos);
+    if (resolved >= 0) return resolved;
+
+    return widget.videoIndex.clamp(0, videos.length - 1);
+  }
+
+  bool _containsInitialTarget(List<VideoEvent> videos) =>
+      _indexOfInitialTarget(videos) >= 0;
+
+  int _indexOfInitialTarget(List<VideoEvent> videos) {
     final initialVideoId = widget.initialVideoId;
     final initialStableId = widget.initialStableId;
     if (initialVideoId != null || initialStableId != null) {
-      final resolved = indexOfVideoIdentity(
+      return indexOfVideoIdentity(
         videos,
         videoId: initialVideoId,
         stableId: initialStableId,
       );
-      if (resolved >= 0) return resolved;
     }
-
-    return widget.videoIndex.clamp(0, videos.length - 1);
+    return -1;
   }
 
   @override
