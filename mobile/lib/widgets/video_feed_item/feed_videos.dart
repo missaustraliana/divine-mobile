@@ -34,8 +34,8 @@ import 'package:openvine/widgets/video_feed_item/double_tap_heart_overlay.dart';
 import 'package:openvine/widgets/video_feed_item/live_engagement_counts.dart';
 import 'package:openvine/widgets/video_feed_item/moderated_content_overlay.dart';
 import 'package:openvine/widgets/video_feed_item/paused_video_overlay.dart';
-import 'package:openvine/widgets/video_feed_item/pooled_video_error_overlay.dart';
 import 'package:openvine/widgets/video_feed_item/subtitle_overlay.dart';
+import 'package:openvine/widgets/video_feed_item/verifying_aware_video_error_overlay.dart';
 import 'package:openvine/widgets/video_feed_item/video_feed_item.dart';
 import 'package:openvine/widgets/video_feed_item/video_interactions_bloc_key.dart';
 import 'package:openvine/widgets/video_feed_item/video_loading_placeholder.dart';
@@ -340,17 +340,12 @@ class FeedVideosState extends ConsumerState<FeedVideos> with RouteAware {
           final width = video.width;
           final height = video.height;
           final isSquare = width != null && height != null && width == height;
-          return PooledVideoErrorOverlay(
+          return VerifyingAwareVideoErrorOverlay(
             video: video,
+            index: index,
             onRetry: onRetry,
-            onVerifyAge: () => retryAgeRestrictedPooledVideo(
-              context: context,
-              ref: ref,
-              video: video,
-              index: index,
-              retryPlayback: (httpHeaders) =>
-                  _retryPooledVideoAt(index, httpHeaders),
-            ),
+            retryPlayback: (httpHeaders) =>
+                _retryPooledVideoAt(index, httpHeaders),
             errorType: errorType,
             shouldPortraitExpand: widget.shouldPortraitExpand,
             isSquare: isSquare,
@@ -577,6 +572,9 @@ class __OverlayState extends ConsumerState<_Overlay> {
     final playbackStatus = context.select(
       (VideoPlaybackStatusCubit cubit) => cubit.state.statusFor(video.id),
     );
+    final isVerifyingAge = context.select(
+      (VideoPlaybackStatusCubit cubit) => cubit.state.isVerifying(video.id),
+    );
 
     final isReady =
         widget.controller != null &&
@@ -600,6 +598,7 @@ class __OverlayState extends ConsumerState<_Overlay> {
           status: playbackStatus,
           onSkip: _skipToNextVideo,
           onVerifyAge: _verifyAgeForVideo,
+          isVerifying: isVerifyingAge,
         );
       case _OverlayContentWarningMode(:final labels):
         return ContentWarningBlurOverlay(
@@ -838,8 +837,8 @@ class _SubtitleLayer extends StatelessWidget {
 /// moderation API is queried via [FeedLoadingModerationCubit]. Cached
 /// videos load immediately and never reach the delay, so no unnecessary
 /// API calls are made. Once the moderation check returns a restricted
-/// status the view switches to [PooledVideoErrorOverlay] without waiting
-/// for the native player to time out with a 404.
+/// status the view switches to [VerifyingAwareVideoErrorOverlay] without
+/// waiting for the native player to time out with a 404.
 class _FeedLoadingOrRestrictedOverlay extends ConsumerWidget {
   const _FeedLoadingOrRestrictedOverlay({
     required this.video,
@@ -881,7 +880,7 @@ class _FeedLoadingOrRestrictedOverlay extends ConsumerWidget {
   }
 }
 
-class _FeedLoadingOrRestrictedOverlayView extends ConsumerWidget {
+class _FeedLoadingOrRestrictedOverlayView extends StatelessWidget {
   const _FeedLoadingOrRestrictedOverlayView({
     required this.video,
     required this.index,
@@ -897,27 +896,23 @@ class _FeedLoadingOrRestrictedOverlayView extends ConsumerWidget {
   final bool shouldPortraitExpand;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final isRestricted = context.select(
       (FeedLoadingModerationCubit c) => c.state.isRestricted,
     );
 
     if (isRestricted) {
-      return PooledVideoErrorOverlay(
+      return VerifyingAwareVideoErrorOverlay(
         video: video,
+        index: index,
         // Retry is hidden for moderation-restricted content.
         onRetry: () {},
-        onVerifyAge: () => retryAgeRestrictedPooledVideo(
-          context: context,
-          ref: ref,
-          video: video,
-          index: index,
-          retryPlayback: (httpHeaders) =>
-              context
-                  .findAncestorStateOfType<InfiniteVideoFeedState>()
-                  ?.retryAt(index, httpHeaders: httpHeaders) ??
-              Future.value(false),
-        ),
+        retryPlayback: (httpHeaders) =>
+            context.findAncestorStateOfType<InfiniteVideoFeedState>()?.retryAt(
+              index,
+              httpHeaders: httpHeaders,
+            ) ??
+            Future.value(false),
         errorType: VideoErrorType.notFound,
         shouldPortraitExpand: shouldPortraitExpand,
         isSquare: isSquare,
