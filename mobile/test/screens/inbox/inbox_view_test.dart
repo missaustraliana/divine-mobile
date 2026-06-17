@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -47,17 +48,19 @@ class _MockNotificationBadgeCubit extends MockCubit<int>
     implements NotificationBadgeCubit {}
 
 class _MockAuthService extends MockAuthService {
-  _MockAuthService(this._pubkey) {
+  _MockAuthService(this.pubkey) {
     when(() => authState).thenReturn(AuthState.authenticated);
     when(() => isAuthenticated).thenReturn(true);
     when(
       () => authStateStream,
     ).thenAnswer((_) => const Stream<AuthState>.empty());
   }
-  final String _pubkey;
+
+  /// Mutable so a test can simulate an account switch mid-flight.
+  String pubkey;
 
   @override
-  String? get currentPublicKeyHex => _pubkey;
+  String? get currentPublicKeyHex => pubkey;
 }
 
 void main() {
@@ -92,6 +95,7 @@ void main() {
       ConversationListState? state,
       int dmUnreadCount = 0,
       int notificationUnreadCount = 0,
+      Stream<int>? notificationStream,
     }) {
       if (state != null) {
         whenListen(
@@ -123,7 +127,7 @@ void main() {
       when(() => mockNotifBadgeCubit.state).thenReturn(notificationUnreadCount);
       whenListen(
         mockNotifBadgeCubit,
-        const Stream<int>.empty(),
+        notificationStream ?? const Stream<int>.empty(),
         initialState: notificationUnreadCount,
       );
 
@@ -194,6 +198,7 @@ void main() {
         // Switch to Messages tab (default is Notifications).
         await tester.tap(find.text('Messages'));
         await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
 
         expect(find.byType(FollowingBar), findsOneWidget);
       });
@@ -207,8 +212,18 @@ void main() {
         // Switch to Messages tab (default is Notifications).
         await tester.tap(find.text('Messages'));
         await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
 
-        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        // Both tabs stay alive in the TabBarView, so scope to the Messages
+        // subtree (the Notifications tab shows its own spinner with a null
+        // notification repository).
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('messages-$currentPubkey')),
+            matching: find.byType(CircularProgressIndicator),
+          ),
+          findsOneWidget,
+        );
       });
 
       testWidgets('renders $InboxEmptyState when status is error', (
@@ -226,6 +241,7 @@ void main() {
         // Switch to Messages tab (default is Notifications).
         await tester.tap(find.text('Messages'));
         await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
 
         expect(find.byType(InboxEmptyState), findsOneWidget);
       });
@@ -245,6 +261,7 @@ void main() {
           // Switch to Messages tab (default is Notifications).
           await tester.tap(find.text('Messages'));
           await tester.pump();
+          await tester.pump(const Duration(milliseconds: 350));
 
           expect(find.byType(InboxEmptyState), findsOneWidget);
         },
@@ -275,10 +292,135 @@ void main() {
 
         // Switch to Messages tab (default is Notifications).
         await tester.tap(find.text('Messages'));
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
 
         expect(find.byType(ConversationTile), findsOneWidget);
       });
+
+      testWidgets(
+        'excludes inactive mounted pane from semantics after tab switch',
+        (tester) async {
+          final semantics = tester.ensureSemantics();
+          try {
+            final conversation = DmConversation(
+              id: 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+              participantPubkeys: const [currentPubkey, otherPubkey],
+              isGroup: false,
+              createdAt: nowUnix,
+              lastMessageContent: 'Hello',
+              lastMessageTimestamp: nowUnix,
+            );
+
+            await tester.pumpWidget(
+              buildSubject(
+                state: ConversationListState(
+                  status: ConversationListStatus.loaded,
+                  conversations: [conversation],
+                  hasMore: false,
+                ),
+              ),
+            );
+            await tester.pump();
+
+            await tester.tap(find.text('Messages'));
+            await tester.pump();
+            await tester.pump(const Duration(milliseconds: 350));
+
+            final conversationLabel = UserProfile.defaultDisplayNameFor(
+              otherPubkey,
+            );
+            bool hasConversationSemantics() {
+              SemanticsNode? root;
+              bool visitPipelineOwner(PipelineOwner owner) {
+                root ??= owner.semanticsOwner?.rootSemanticsNode;
+                owner.visitChildren(visitPipelineOwner);
+                return true;
+              }
+
+              visitPipelineOwner(RendererBinding.instance.rootPipelineOwner);
+              expect(root, isNotNull);
+
+              var found = false;
+              bool visit(SemanticsNode node) {
+                if (node.label.contains(conversationLabel)) {
+                  found = true;
+                }
+                node.visitChildren(visit);
+                return true;
+              }
+
+              visit(root!);
+              return found;
+            }
+
+            expect(
+              hasConversationSemantics(),
+              isTrue,
+            );
+
+            await tester.tap(find.text('Notifications'));
+            await tester.pump();
+            await tester.pump(const Duration(milliseconds: 350));
+
+            expect(find.byType(ConversationTile), findsOneWidget);
+            expect(
+              hasConversationSemantics(),
+              isFalse,
+            );
+          } finally {
+            semantics.dispose();
+          }
+        },
+      );
+
+      testWidgets(
+        'collapses back to Notifications when the signed-in identity changes',
+        (tester) async {
+          final notificationController = StreamController<int>();
+          addTearDown(notificationController.close);
+
+          final conversation = DmConversation(
+            id: 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+            participantPubkeys: const [currentPubkey, otherPubkey],
+            isGroup: false,
+            createdAt: nowUnix,
+            lastMessageContent: 'Hello',
+            lastMessageTimestamp: nowUnix,
+          );
+
+          await tester.pumpWidget(
+            buildSubject(
+              state: ConversationListState(
+                status: ConversationListStatus.loaded,
+                conversations: [conversation],
+                hasMore: false,
+              ),
+              notificationStream: notificationController.stream,
+            ),
+          );
+          await tester.pump();
+
+          // Open Messages so the pane is activated and the tab is selected.
+          await tester.tap(find.text('Messages'));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 350));
+          expect(find.byType(ConversationTile), findsOneWidget);
+
+          // Simulate an account switch: the auth service reports a new pubkey
+          // and a watched cubit emits to drive the InboxView rebuild.
+          mockAuthService.pubkey = otherPubkey;
+          notificationController.add(1);
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 350));
+
+          final toggle = tester.widget<InboxSegmentedToggle>(
+            find.byType(InboxSegmentedToggle),
+          );
+          expect(toggle.selected, InboxTab.notifications);
+          expect(find.byType(ConversationTile), findsNothing);
+        },
+      );
 
       testWidgets(
         'renders $MessageRequestsBanner when request conversations exist',
@@ -306,6 +448,7 @@ void main() {
           // Switch to Messages tab (default is Notifications).
           await tester.tap(find.text('Messages'));
           await tester.pump();
+          await tester.pump(const Duration(milliseconds: 350));
 
           expect(find.byType(MessageRequestsBanner), findsOneWidget);
         },
@@ -346,7 +489,8 @@ void main() {
 
           // Switch to Messages tab (default is Notifications).
           await tester.tap(find.text('Messages'));
-          await tester.pumpAndSettle();
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 350));
 
           expect(find.byType(MessageRequestsBanner), findsOneWidget);
           expect(find.byType(ConversationTile), findsOneWidget);
@@ -370,6 +514,7 @@ void main() {
           await tester.tap(find.text('Messages'));
           // pump (not pumpAndSettle): LinearProgressIndicator animates forever.
           await tester.pump();
+          await tester.pump(const Duration(milliseconds: 350));
 
           expect(find.byType(LinearProgressIndicator), findsOneWidget);
         },
@@ -390,6 +535,7 @@ void main() {
           // Switch to Messages tab (default is Notifications).
           await tester.tap(find.text('Messages'));
           await tester.pump();
+          await tester.pump(const Duration(milliseconds: 350));
 
           expect(find.byType(LinearProgressIndicator), findsNothing);
         },
@@ -423,7 +569,8 @@ void main() {
         await tester.pump();
 
         await tester.tap(find.text('Messages'));
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
 
         await tester.drag(find.byType(ListView), const Offset(0, -5000));
         await tester.pump();
@@ -457,7 +604,8 @@ void main() {
 
         // Switch to Messages tab (default is Notifications).
         await tester.tap(find.text('Messages'));
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
 
         when(
           () => mockGoRouter.push(any(), extra: any(named: 'extra')),
@@ -500,6 +648,7 @@ void main() {
         // Switch to Messages tab (default is Notifications).
         await tester.tap(find.text('Messages'));
         await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
 
         when(() => mockGoRouter.pushNamed(any())).thenAnswer((_) async => null);
 
@@ -535,6 +684,7 @@ void main() {
         // Switch to Messages tab (default is Notifications).
         await tester.tap(find.text('Messages'));
         await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
         await tester.pump(const Duration(milliseconds: 100));
 
         // FollowingBar uses fetchUserProfileProvider for names. When the
