@@ -10,6 +10,7 @@ import 'package:nostr_client/src/publish_result.dart';
 import 'package:nostr_client/src/relay_manager.dart';
 import 'package:nostr_sdk/nostr_sdk.dart';
 import 'package:nostr_sdk/utils/hash_util.dart';
+import 'package:pool/pool.dart';
 
 /// Observer for NostrClient activity statistics.
 ///
@@ -102,6 +103,17 @@ class NostrClient {
   final Nostr _nostr;
   final RelayManager _relayManager;
   final AppDbClient? _dbClient;
+
+  /// Maximum number of concurrent one-shot relay queries ([queryEvents]).
+  ///
+  /// Caps the per-item fan-out (like counts, badges, profiles, repost-source
+  /// fetches) a high-volume screen triggers, so the app can't trip a relay's
+  /// "too many concurrent REQs" limit. Override in tests before the first
+  /// query. Backed by a [Pool] from `package:pool`.
+  @visibleForTesting
+  static int maxConcurrentQueries = 6;
+
+  late final Pool _queryPool = Pool(maxConcurrentQueries);
 
   /// The signer used by this client for event signing and NIP-44 encryption.
   ///
@@ -522,13 +534,19 @@ class NostrClient {
       await retryDisconnectedRelays();
     }
     final filtersJson = filters.map((f) => f.toJson()).toList();
-    final websocketEvents = await _nostr.queryEvents(
-      filtersJson,
-      id: subscriptionId,
-      tempRelays: effectiveTempRelays,
-      relayTypes: relayTypes,
-      sendAfterAuth: sendAfterAuth,
-      timeout: timeout,
+    // Throttle concurrent one-shot REQs so high fan-out (a profile with many
+    // videos → per-item like-count/badge/profile/repost fetches) can't trip a
+    // relay's "too many concurrent REQs" limit. `withResource` releases the
+    // slot when the (time-bounded) query completes, so it can't leak.
+    final websocketEvents = await _queryPool.withResource(
+      () => _nostr.queryEvents(
+        filtersJson,
+        id: subscriptionId,
+        tempRelays: effectiveTempRelays,
+        relayTypes: relayTypes,
+        sendAfterAuth: sendAfterAuth,
+        timeout: timeout,
+      ),
     );
 
     // Cache websocket results (fire-and-forget)
@@ -1253,6 +1271,7 @@ class NostrClient {
   Future<void> dispose() async {
     await closeAllSubscriptions();
     await _relayManager.dispose();
+    await _queryPool.close();
     _nostr.close();
     _subscriptionFilters.clear();
     _isDisposed = true;

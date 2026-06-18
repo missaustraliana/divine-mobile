@@ -13,10 +13,26 @@ import 'package:flutter/foundation.dart';
 import 'package:models/models.dart';
 import 'package:openvine/constants/app_constants.dart';
 import 'package:openvine/services/video_event_service.dart';
+import 'package:stream_transform/stream_transform.dart';
 import 'package:videos_repository/videos_repository.dart';
 
 part 'profile_feed_event.dart';
 part 'profile_feed_state.dart';
+
+/// Audits an event stream, then processes the survivors sequentially.
+///
+/// Used for [ProfileFeedRelaySnapshotChanged]: the cubit listens to the
+/// app-wide [VideoEventService], so a single profile pays a snapshot
+/// reconciliation for *every* global relay event — even ones for other
+/// feeds. Auditing collapses those bursts so a high-video-count author's
+/// profile recomputes its (O(videos)) snapshot at most once per window
+/// rather than hundreds of times during streaming. Unlike `debounce`,
+/// `audit` cannot be starved by sustained sub-window traffic from other
+/// feeds — it still emits the latest snapshot once per window.
+EventTransformer<E> _auditSequential<E>(Duration duration) {
+  return (events, mapper) =>
+      sequential<E>().call(events.audit(duration), mapper);
+}
 
 /// Enriches REST-sourced videos with their full Nostr tag set. Injected so the
 /// cubit stays decoupled from `NostrClient` / the enrichment util and testable.
@@ -49,11 +65,19 @@ class ProfileFeedCubit extends Bloc<ProfileFeedEvent, ProfileFeedState> {
     on<ProfileFeedLoadMoreRequested>(_onLoadMore, transformer: droppable());
     on<ProfileFeedRefreshRequested>(_onRefresh, transformer: restartable());
     on<ProfileFeedFiltersChanged>(_onFiltersChanged, transformer: sequential());
+    // Audited: the cubit listens to the app-wide [VideoEventService], so a
+    // streaming relay — including this author's whole backlog, delivered as
+    // individual live "new video" notifications — would otherwise reconcile
+    // the O(videos) snapshot (and rebuild the grid) once per event. The audit
+    // window coalesces bursts into a single reconciliation that reads the full
+    // author set via [_relayVideosSnapshot], without starving under sustained
+    // traffic. This is the sole realtime add path; there is no separate
+    // per-video handler (the snapshot is always a superset of any single new
+    // video, which is in the author bucket before the notification fires).
     on<ProfileFeedRelaySnapshotChanged>(
       _onRelaySnapshot,
-      transformer: sequential(),
+      transformer: _auditSequential(relaySnapshotAudit),
     );
-    on<ProfileFeedNewVideoReceived>(_onNewVideo, transformer: sequential());
     on<ProfileFeedVideoUpdated>(_onVideoUpdated, transformer: restartable());
     on<ProfileFeedInitialLoadTimedOut>(
       _onInitialLoadTimedOut,
@@ -72,6 +96,14 @@ class ProfileFeedCubit extends Bloc<ProfileFeedEvent, ProfileFeedState> {
   /// source settles, so the loading spinner can't strand (#4164).
   @visibleForTesting
   static Duration initialLoadHardTimeout = const Duration(seconds: 10);
+
+  /// Audit window for coalescing [ProfileFeedRelaySnapshotChanged] bursts. The
+  /// cubit listens to the app-wide [VideoEventService], so unrelated feeds'
+  /// relay traffic would otherwise trigger a full snapshot reconciliation per
+  /// event — multi-second jank on profiles with many videos. See
+  /// [_auditSequential].
+  @visibleForTesting
+  static Duration relaySnapshotAudit = const Duration(milliseconds: 250);
 
   final String _authorPubkey;
   final VideosRepository _videosRepository;
@@ -95,7 +127,6 @@ class ProfileFeedCubit extends Bloc<ProfileFeedEvent, ProfileFeedState> {
 
   VoidCallback? _removeChangeListener;
   VoidCallback? _unregisterUpdate;
-  VoidCallback? _unregisterNew;
 
   // ---------------------------------------------------------------------------
   // Realtime wiring
@@ -112,15 +143,6 @@ class ProfileFeedCubit extends Bloc<ProfileFeedEvent, ProfileFeedState> {
     _unregisterUpdate = _videoEventService.addVideoUpdateListener((updated) {
       if (updated.pubkey == _authorPubkey && !isClosed) {
         add(const ProfileFeedVideoUpdated());
-      }
-    });
-
-    _unregisterNew = _videoEventService.addNewVideoListener((
-      newVideo,
-      authorPubkey,
-    ) {
-      if (authorPubkey == _authorPubkey && !isClosed) {
-        add(ProfileFeedNewVideoReceived(newVideo));
       }
     });
   }
@@ -512,28 +534,6 @@ class ProfileFeedCubit extends Bloc<ProfileFeedEvent, ProfileFeedState> {
     );
   }
 
-  void _onNewVideo(
-    ProfileFeedNewVideoReceived event,
-    Emitter<ProfileFeedState> emit,
-  ) {
-    if (event.video.isRepost) return;
-    final merged = _withoutTombstones(
-      mergeProfileFeedVideoLists(_unfilteredVideos, [event.video]),
-    );
-    final filtered = _applyFeedFilters(merged);
-    if (_sameVideoSequence(state.videos, filtered)) return;
-
-    _completeInitialLoad();
-    _unfilteredVideos = merged;
-    emit(
-      state.copyWith(
-        videos: filtered,
-        isInitialLoad: false,
-        lastUpdated: DateTime.now(),
-      ),
-    );
-  }
-
   void _onFiltersChanged(
     ProfileFeedFiltersChanged event,
     Emitter<ProfileFeedState> emit,
@@ -769,7 +769,6 @@ class ProfileFeedCubit extends Bloc<ProfileFeedEvent, ProfileFeedState> {
   Future<void> close() {
     _removeChangeListener?.call();
     _unregisterUpdate?.call();
-    _unregisterNew?.call();
     _initialLoadTimer?.cancel();
     return super.close();
   }
