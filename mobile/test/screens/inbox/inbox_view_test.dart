@@ -3,6 +3,7 @@
 // ABOUTME: empty, loaded), and tab switching between messages and notifications.
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
@@ -25,6 +26,7 @@ import 'package:openvine/screens/inbox/message_requests/widgets/message_requests
 import 'package:openvine/screens/inbox/widgets/conversation_tile.dart';
 import 'package:openvine/screens/inbox/widgets/following_bar.dart';
 import 'package:openvine/screens/inbox/widgets/inbox_empty_state.dart';
+import 'package:openvine/screens/inbox/widgets/inbox_fab.dart';
 import 'package:openvine/screens/inbox/widgets/inbox_segmented_toggle.dart';
 import 'package:openvine/services/auth_service.dart' hide UserProfile;
 
@@ -297,6 +299,62 @@ void main() {
 
         expect(find.byType(ConversationTile), findsOneWidget);
       });
+
+      testWidgets(
+        'keeps the last conversation tile clear of the FAB when scrolled '
+        'to the end',
+        (tester) async {
+          final conversations = List.generate(
+            30,
+            (index) => DmConversation(
+              id: 'conv$index',
+              participantPubkeys: const [currentPubkey, otherPubkey],
+              isGroup: false,
+              createdAt: nowUnix - index,
+              lastMessageContent: 'Hello $index',
+              lastMessageTimestamp: nowUnix - index,
+            ),
+          );
+
+          await tester.pumpWidget(
+            buildSubject(
+              state: ConversationListState(
+                status: ConversationListStatus.loaded,
+                conversations: conversations,
+                hasMore: false,
+              ),
+            ),
+          );
+          await tester.pump();
+
+          await tester.tap(find.text('Messages'));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 350));
+
+          // Scroll the conversation list to its very end so the last tile is
+          // pinned against the reserved bottom inset.
+          final position = tester
+              .state<ScrollableState>(
+                find.ancestor(
+                  of: find.byType(ConversationTile).first,
+                  matching: find.byType(Scrollable),
+                ),
+              )
+              .position;
+          position.jumpTo(position.maxScrollExtent);
+          await tester.pump();
+
+          // The bottom edge of the last visible tile must sit at or above the
+          // FAB's top edge — i.e. the FAB never overlaps the last tile.
+          final lastTileBottom = tester
+              .widgetList<ConversationTile>(find.byType(ConversationTile))
+              .map((tile) => tester.getRect(find.byWidget(tile)).bottom)
+              .reduce(math.max);
+          final fabTop = tester.getRect(find.byType(InboxFab)).top;
+
+          expect(lastTileBottom, lessThanOrEqualTo(fabTop));
+        },
+      );
 
       testWidgets(
         'excludes inactive mounted pane from semantics after tab switch',

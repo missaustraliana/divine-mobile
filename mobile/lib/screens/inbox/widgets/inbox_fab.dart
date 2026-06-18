@@ -6,20 +6,25 @@ import 'package:flutter/material.dart';
 
 /// Green FAB for starting a new conversation.
 ///
-/// 56x56 circle with `primary` background and a `+` icon.
+/// A [size]×[size] circle with `primary` background and a `+` icon.
 /// Positioned by the parent layout (typically bottom-right).
 class InboxFab extends StatelessWidget {
   const InboxFab({required this.onPressed, super.key});
 
   final VoidCallback onPressed;
 
+  /// Diameter of the circular FAB. Single source of truth — layouts that
+  /// reserve space for the FAB (e.g. the conversation list bottom inset)
+  /// derive from this rather than re-hardcoding the value.
+  static const double size = 56;
+
   static const double _borderRadius = 24;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 56,
-      height: 56,
+      width: size,
+      height: size,
       child: GestureDetector(
         onTap: onPressed,
         child: DecoratedBox(
