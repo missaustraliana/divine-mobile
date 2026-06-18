@@ -1418,6 +1418,10 @@ class AppLocalizationsPl extends AppLocalizations {
       'Nie udało się zweryfikować Twojego wieku. Spróbuj ponownie.';
 
   @override
+  String get videoErrorVerifyAgeSignerUnreachable =>
+      'Przekroczono czas weryfikacji. Sprawdź połączenie lub spróbuj ponownie za chwilę.';
+
+  @override
   String get videoFollowButtonFollowing => 'Obserwujesz';
 
   @override

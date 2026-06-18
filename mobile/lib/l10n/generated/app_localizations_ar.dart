@@ -1378,6 +1378,10 @@ class AppLocalizationsAr extends AppLocalizations {
       'تعذّر التحقق من عمرك. يرجى المحاولة مرّة أخرى.';
 
   @override
+  String get videoErrorVerifyAgeSignerUnreachable =>
+      'انتهت مهلة التحقق. تحقّق من اتصالك أو حاول مرّة أخرى بعد قليل.';
+
+  @override
   String get videoFollowButtonFollowing => 'متابع';
 
   @override

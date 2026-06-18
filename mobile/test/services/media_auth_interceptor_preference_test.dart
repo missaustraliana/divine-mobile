@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:openvine/models/viewer_auth_result.dart';
 import 'package:openvine/services/age_verification_service.dart';
 import 'package:openvine/services/content_filter_service.dart';
 import 'package:openvine/services/media_auth_interceptor.dart';
@@ -73,7 +74,11 @@ void main() {
             url: any(named: 'url'),
             serverUrl: any(named: 'serverUrl'),
           ),
-        ).thenAnswer((_) async => {'Authorization': 'Nostr unlockedToken'});
+        ).thenAnswer(
+          (_) async => const ViewerAuthAuthorized({
+            'Authorization': 'Nostr unlockedToken',
+          }),
+        );
 
         when(() => mockContext.mounted).thenReturn(true);
 
@@ -88,7 +93,11 @@ void main() {
           category: 'nudity',
         );
 
-        expect(result, equals({'Authorization': 'Nostr unlockedToken'}));
+        expect(result, isA<ViewerAuthAuthorized>());
+        expect(
+          result.headersOrNull,
+          equals({'Authorization': 'Nostr unlockedToken'}),
+        );
         verify(
           () => mockMediaViewerAuthService.createAuthHeaders(
             sha256Hash: 'abc123',
@@ -113,7 +122,7 @@ void main() {
           category: 'nudity',
         );
 
-        expect(result, isNull);
+        expect(result, isA<ViewerAuthUnavailable>());
         verifyNever(
           () => mockMediaViewerAuthService.createAuthHeaders(
             sha256Hash: any(named: 'sha256Hash'),
@@ -146,7 +155,11 @@ void main() {
             url: any(named: 'url'),
             serverUrl: any(named: 'serverUrl'),
           ),
-        ).thenAnswer((_) async => {'Authorization': 'Nostr dialogToken'});
+        ).thenAnswer(
+          (_) async => const ViewerAuthAuthorized({
+            'Authorization': 'Nostr dialogToken',
+          }),
+        );
 
         final result = await interceptor.handleUnauthorizedMedia(
           context: mockContext,
@@ -154,7 +167,11 @@ void main() {
           category: 'nudity',
         );
 
-        expect(result, equals({'Authorization': 'Nostr dialogToken'}));
+        expect(result, isA<ViewerAuthAuthorized>());
+        expect(
+          result.headersOrNull,
+          equals({'Authorization': 'Nostr dialogToken'}),
+        );
         verify(
           () => mockAgeVerificationService.verifyAdultContentAccess(any()),
         ).called(1);
@@ -177,7 +194,10 @@ void main() {
             url: any(named: 'url'),
             serverUrl: any(named: 'serverUrl'),
           ),
-        ).thenAnswer((_) async => {'Authorization': 'Nostr autoToken'});
+        ).thenAnswer(
+          (_) async =>
+              const ViewerAuthAuthorized({'Authorization': 'Nostr autoToken'}),
+        );
 
         // Act
         final result = await interceptor.handleUnauthorizedMedia(
@@ -187,7 +207,11 @@ void main() {
         );
 
         // Assert - auto auth header created, no dialog shown
-        expect(result, equals({'Authorization': 'Nostr autoToken'}));
+        expect(result, isA<ViewerAuthAuthorized>());
+        expect(
+          result.headersOrNull,
+          equals({'Authorization': 'Nostr autoToken'}),
+        );
         verifyNever(
           () => mockAgeVerificationService.verifyAdultContentAccess(any()),
         );
@@ -219,7 +243,11 @@ void main() {
             url: any(named: 'url'),
             serverUrl: any(named: 'serverUrl'),
           ),
-        ).thenAnswer((_) async => {'Authorization': 'Nostr dialogToken'});
+        ).thenAnswer(
+          (_) async => const ViewerAuthAuthorized({
+            'Authorization': 'Nostr dialogToken',
+          }),
+        );
 
         // Act
         final result = await interceptor.handleUnauthorizedMedia(
@@ -229,7 +257,11 @@ void main() {
         );
 
         // Assert - dialog was shown, auth header created after confirmation
-        expect(result, equals({'Authorization': 'Nostr dialogToken'}));
+        expect(result, isA<ViewerAuthAuthorized>());
+        expect(
+          result.headersOrNull,
+          equals({'Authorization': 'Nostr dialogToken'}),
+        );
         verify(
           () => mockAgeVerificationService.verifyAdultContentAccess(any()),
         ).called(1);
@@ -264,7 +296,7 @@ void main() {
         );
 
         // Assert - user declined, no auth header
-        expect(result, isNull);
+        expect(result, isA<ViewerAuthUnavailable>());
         verify(
           () => mockAgeVerificationService.verifyAdultContentAccess(any()),
         ).called(1);

@@ -22,6 +22,7 @@ import 'package:openvine/blocs/video_playback_status/video_playback_status_cubit
 import 'package:openvine/blocs/video_playback_status/video_playback_status_state.dart';
 import 'package:openvine/blocs/video_volume/video_volume_cubit.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
+import 'package:openvine/models/viewer_auth_result.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/screens/feed/feed_auto_advance_cubit.dart';
 import 'package:openvine/screens/feed/feed_settings_menu.dart';
@@ -931,7 +932,7 @@ void main() {
               serverUrl: 'https://media.divine.video',
               category: 'video',
             ),
-          ).thenAnswer((_) async => headers);
+          ).thenAnswer((_) async => const ViewerAuthAuthorized(headers));
 
           await tester.pumpWidget(
             buildSubject(
@@ -1024,7 +1025,7 @@ void main() {
               serverUrl: 'https://media.divine.video',
               category: 'video',
             ),
-          ).thenAnswer((_) async => headers);
+          ).thenAnswer((_) async => const ViewerAuthAuthorized(headers));
 
           await tester.pumpWidget(
             buildSubject(

@@ -1140,14 +1140,14 @@ Map<String, String>? _computeAuthHeadersSync(
 Future<Map<String, String>?> createViewerAuthHeadersForVideo({
   required MediaViewerAuthService mediaViewerAuthService,
   required VideoControllerParams params,
-}) {
+}) async {
   final sha256 = _resolveSha256ForParams(params);
   final serverUrl = _extractServerUrl(params.videoUrl);
-  return mediaViewerAuthService.createAuthHeaders(
+  return (await mediaViewerAuthService.createAuthHeaders(
     sha256Hash: sha256,
     url: params.videoUrl,
     serverUrl: serverUrl,
-  );
+  )).headersOrNull;
 }
 
 /// Generate auth headers asynchronously and cache them for future use
