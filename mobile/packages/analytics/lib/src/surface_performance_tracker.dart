@@ -1,11 +1,11 @@
 // ABOUTME: Tracks user-visible surface load timing with semantic analytics.
 // ABOUTME: Emits safe terminal surface_load events for sheets and panels.
 
+import 'package:analytics/src/analytics_event_sink.dart';
+import 'package:analytics/src/analytics_surface.dart';
+import 'package:analytics/src/firebase_analytics_event_sink.dart';
+import 'package:analytics/src/page_load_history.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
-import 'package:openvine/services/analytics_event_sink.dart';
-import 'package:openvine/services/analytics_surface.dart';
-import 'package:openvine/services/firebase_analytics_event_sink.dart';
-import 'package:openvine/services/page_load_history.dart';
 import 'package:unified_logger/unified_logger.dart';
 
 /// Maximum age for a session before it is considered stale and discarded.
@@ -33,7 +33,7 @@ class SurfacePerformanceTracker {
   SurfacePerformanceTracker._({
     AnalyticsEventSink? sink,
     DateTime Function()? now,
-  }) : _sink = sink ?? _createAnalyticsSink(),
+  }) : _sink = sink ?? FirebaseAnalyticsEventSink(),
        _now = now ?? DateTime.now;
 
   static SurfacePerformanceTracker? _instance;
@@ -60,14 +60,6 @@ class SurfacePerformanceTracker {
   /// Number of active tracking sessions.
   int get activeSessionCount => _activeSessions.length;
 
-  static AnalyticsEventSink _createAnalyticsSink() {
-    try {
-      return FirebaseAnalyticsEventSink();
-    } catch (_) {
-      return const NoOpAnalyticsEventSink();
-    }
-  }
-
   /// Clear all active sessions.
   ///
   /// Call this when the app resumes from background to prevent stale start
@@ -92,10 +84,7 @@ class SurfacePerformanceTracker {
       params: _safeParameters(params),
     );
 
-    UnifiedLogger.info(
-      'Surface load started: $safeName',
-      name: 'SurfacePerf',
-    );
+    UnifiedLogger.info('Surface load started: $safeName', name: 'SurfacePerf');
   }
 
   /// Mark when the surface is first visible.

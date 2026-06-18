@@ -1,21 +1,41 @@
 // ABOUTME: Comprehensive video loading performance metrics and analytics
 // ABOUTME: Tracks video loading bottlenecks from initialization to first frame playback
 
-import 'package:firebase_analytics/firebase_analytics.dart';
-import 'package:flutter/foundation.dart';
+import 'package:analytics/src/analytics_event_sink.dart';
+import 'package:analytics/src/feed_performance_tracker.dart';
+import 'package:analytics/src/firebase_analytics_event_sink.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
+import 'package:media_cache/media_cache.dart';
 import 'package:models/models.dart' hide LogCategory;
-import 'package:openvine/services/feed_performance_tracker.dart';
-import 'package:openvine/services/openvine_media_cache.dart';
 import 'package:unified_logger/unified_logger.dart';
+
+/// Supplies the current media-cache metrics for periodic reporting.
+///
+/// The app wires this to its media-cache singleton so the analytics package
+/// stays decoupled from the app's cache instance.
+typedef CacheMetricsProvider = CacheMetrics Function();
 
 /// Tracks different stages of video loading for performance analysis
 class VideoLoadingMetrics {
   static final VideoLoadingMetrics _instance = VideoLoadingMetrics._internal();
   factory VideoLoadingMetrics() => _instance;
-  VideoLoadingMetrics._internal();
+  VideoLoadingMetrics._internal() : _analytics = FirebaseAnalyticsEventSink();
 
-  final FirebaseAnalytics _analytics = FirebaseAnalytics.instance;
+  /// Creates a testable instance that does not touch Firebase Analytics.
+  @visibleForTesting
+  VideoLoadingMetrics.testInstance({
+    AnalyticsEventSink? sink,
+    this.cacheMetricsProvider,
+  }) : _analytics = sink ?? const NoOpAnalyticsEventSink();
+
+  final AnalyticsEventSink _analytics;
   final Map<String, _VideoLoadingSession> _activeSessions = {};
+
+  /// Optional source of media-cache metrics, wired by the app at startup.
+  ///
+  /// When null, periodic cache-metrics reporting is skipped (keeps the
+  /// package usable without a cache, e.g. in tests).
+  CacheMetricsProvider? cacheMetricsProvider;
 
   // Add a static variable to count metrics for visibility
   static int _metricsCount = 0;
@@ -444,10 +464,7 @@ class VideoLoadingMetrics {
       parameters: {
         'video_id': session.videoId, // Truncate for privacy
         'error_type': session.errorType!,
-        'error_message': session.errorMessage!.substring(
-          0,
-          100,
-        ), // Truncate long messages
+        'error_message': _truncate(session.errorMessage!, 100),
         'time_to_error_ms': totalDuration,
         'stage_when_failed': session._getCurrentStage().name,
         'video_url_domain': Uri.tryParse(session.videoUrl)?.host ?? 'unknown',
@@ -464,8 +481,9 @@ class VideoLoadingMetrics {
   /// (e.g., on app background).
   void reportCacheMetrics() {
     if (kIsWeb) return;
-    final metrics = openVineMediaCache.metrics;
-    final metricsMap = metrics.toMap();
+    final provider = cacheMetricsProvider;
+    if (provider == null) return;
+    final metricsMap = provider().toMap();
 
     _analytics.logEvent(
       name: 'video_cache_performance',
@@ -506,6 +524,11 @@ class VideoLoadingMetrics {
       'Cleared all video loading sessions',
       name: 'VideoLoadingMetrics',
     );
+  }
+
+  String _truncate(String value, int maxLength) {
+    if (value.length <= maxLength) return value;
+    return value.substring(0, maxLength);
   }
 }
 

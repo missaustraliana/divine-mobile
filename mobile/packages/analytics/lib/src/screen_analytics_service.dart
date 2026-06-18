@@ -3,11 +3,11 @@
 
 import 'dart:async';
 
+import 'package:analytics/src/analytics_event_sink.dart';
+import 'package:analytics/src/firebase_analytics_event_sink.dart';
+import 'package:analytics/src/page_load_history.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
-import 'package:openvine/services/analytics_event_sink.dart';
-import 'package:openvine/services/firebase_analytics_event_sink.dart';
-import 'package:openvine/services/page_load_history.dart';
 import 'package:unified_logger/unified_logger.dart';
 
 /// Maximum age for a session before it is considered stale and discarded.
@@ -21,7 +21,7 @@ const _maxScreenSessionAge = Duration(seconds: 60);
 class ScreenAnalyticsService {
   factory ScreenAnalyticsService() => _instance ??= ScreenAnalyticsService._();
   ScreenAnalyticsService._({AnalyticsEventSink? sink})
-    : _sink = sink ?? _createAnalyticsSink();
+    : _sink = sink ?? FirebaseAnalyticsEventSink();
 
   static ScreenAnalyticsService? _instance;
 
@@ -48,14 +48,6 @@ class ScreenAnalyticsService {
                : const NoOpAnalyticsEventSink());
 
   final AnalyticsEventSink _sink;
-
-  static AnalyticsEventSink _createAnalyticsSink() {
-    try {
-      return FirebaseAnalyticsEventSink();
-    } catch (_) {
-      return const NoOpAnalyticsEventSink();
-    }
-  }
 
   final Map<String, _ScreenSession> _activeSessions = {};
 
