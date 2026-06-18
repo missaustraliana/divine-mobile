@@ -146,25 +146,36 @@ void main() {
   });
 
   group('resolveStartupDatabaseCipherKey', () {
-    test(
-      'records bootstrap failures and lets startup continue without a key',
-      () async {
-        final error = StateError('secure storage unavailable');
-        Object? recordedError;
-        StackTrace? recordedStack;
+    test('records and rethrows bootstrap failures', () async {
+      final error = StateError('secure storage unavailable');
+      Object? recordedError;
+      StackTrace? recordedStack;
 
-        final key = await resolveStartupDatabaseCipherKey(
+      await expectLater(
+        resolveStartupDatabaseCipherKey(
           resolveCipherKey: () async => throw error,
           recordError: (error, stack) async {
             recordedError = error;
             recordedStack = stack;
           },
-        );
+        ),
+        throwsA(same(error)),
+      );
 
-        expect(key, isNull);
-        expect(recordedError, same(error));
-        expect(recordedStack, isNotNull);
-      },
-    );
+      expect(recordedError, same(error));
+      expect(recordedStack, isNotNull);
+    });
+
+    test('rethrows bootstrap root cause when recording fails', () async {
+      final bootstrapError = StateError('secure storage unavailable');
+
+      await expectLater(
+        resolveStartupDatabaseCipherKey(
+          resolveCipherKey: () async => throw bootstrapError,
+          recordError: (_, _) async => throw StateError('crash reporter down'),
+        ),
+        throwsA(same(bootstrapError)),
+      );
+    });
   });
 }
