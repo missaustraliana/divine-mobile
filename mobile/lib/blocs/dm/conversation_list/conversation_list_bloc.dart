@@ -95,27 +95,48 @@ class ConversationListBloc
         ),
       ),
       onData: (data) {
+        final userPubkey = _dmRepository.userPubkey;
         final split = DmRepository.classifyPotentialRequests(
           data.potentialRequests,
-          userPubkey: _dmRepository.userPubkey,
+          userPubkey: userPubkey,
           isFollowing: _followRepository.isFollowing,
         );
-        final merged = DmRepository.mergeAndSort(data.accepted, split.followed);
-        final userPubkey = _dmRepository.userPubkey;
+
+        // While the one-time history-recovery drain is still running
+        // (post-reinstall window), HOLD BACK the conversations that would
+        // classify as requests. Until the drain re-ingests the user's own
+        // message for a chat, a previously-accepted conversation is
+        // indistinguishable from a genuine request — both have
+        // currentUserHasSent=false and an unfollowed peer. Showing them as
+        // requests is the original #5304 bug; showing them in the inbox makes
+        // real requests flash there and then jump to the Requests tab once
+        // recovery completes. So during recovery we surface only the
+        // unambiguous chats (accepted + followed), backed by the restore
+        // indicator, and let the ambiguous ones settle into their correct
+        // bucket as soon as recovery completes. See #5304.
+        final recoveryComplete = _dmRepository.isHistoryRecoveryComplete;
+        final inboxConversations = DmRepository.mergeAndSort(
+          data.accepted,
+          split.followed,
+        );
+        final requests = recoveryComplete
+            ? split.requests
+            : const <DmConversation>[];
+
         return state.copyWith(
           status: ConversationListStatus.loaded,
           conversations:
               _blocklistRepository?.filterBlockedConversations(
-                merged,
+                inboxConversations,
                 userPubkey: userPubkey,
               ) ??
-              merged,
+              inboxConversations,
           requestConversations:
               _blocklistRepository?.filterBlockedConversations(
-                split.requests,
+                requests,
                 userPubkey: userPubkey,
               ) ??
-              split.requests,
+              requests,
           potentialRequests: data.potentialRequests,
           hasMore: data.accepted.length == state.currentLimit,
           isLoadingMore: false,

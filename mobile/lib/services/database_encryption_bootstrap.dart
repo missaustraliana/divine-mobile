@@ -29,19 +29,28 @@ class DatabaseEncryptionBootstrap {
     bool Function()? isCipherAvailable,
     Future<CipherMigrationOutcome> Function(String rawKeyHex)? migrate,
     Future<void> Function()? deleteDatabase,
+    Future<void> Function()? onDatabaseReset,
   }) : _secureStorage = secureStorage,
        _ensureRuntime = ensureRuntime ?? ensureSqlCipherRuntime,
        _isCipherAvailable = isCipherAvailable ?? isSqlCipherAvailable,
        _migrate =
            migrate ??
            ((rawKeyHex) => migratePlaintextToEncrypted(rawKeyHex: rawKeyHex)),
-       _deleteDatabase = deleteDatabase ?? backUpAndRemoveSharedDatabase;
+       _deleteDatabase = deleteDatabase ?? backUpAndRemoveSharedDatabase,
+       _onDatabaseReset = onDatabaseReset;
 
   final FlutterSecureStorage _secureStorage;
   final Future<void> Function() _ensureRuntime;
   final bool Function() _isCipherAvailable;
   final Future<CipherMigrationOutcome> Function(String rawKeyHex) _migrate;
   final Future<void> Function() _deleteDatabase;
+
+  /// Invoked after the key-loss recreate wipes the Drift DB, so callers can
+  /// clear local state that lives OUTSIDE the database (e.g. the DM sync
+  /// cursors / `historyDrainComplete` flag in SharedPreferences). Without this
+  /// the next inbox open would skip the full DM re-drain ("already complete")
+  /// and leave recovered chats stranded under "Message requests". See #5304.
+  final Future<void> Function()? _onDatabaseReset;
 
   static const _logName = 'DatabaseEncryptionBootstrap';
 
@@ -93,6 +102,24 @@ class DatabaseEncryptionBootstrap {
             name: _logName,
           );
           await _deleteDatabase();
+          // The Drift DB is now empty but SharedPreferences survives, so the
+          // DM sync cursors / `historyDrainComplete` flag would make the next
+          // inbox open skip the full re-drain and strand recovered chats under
+          // "Message requests". Clear DM sync state so recovery re-runs against
+          // the fresh DB. See #5304.
+          //
+          // Best-effort: a SharedPreferences IO failure here only re-strands
+          // requests (itself healed by the drain-version bump) and must not
+          // escalate into a hard cipher-key-resolution failure now that the DB
+          // has already been recreated.
+          try {
+            await _onDatabaseReset?.call();
+          } on Object catch (e) {
+            Log.warning(
+              'Post-recreate DM sync-state reset failed (non-fatal): $e',
+              name: _logName,
+            );
+          }
         }
         return key;
       case CipherMigrationOutcome.failed:
