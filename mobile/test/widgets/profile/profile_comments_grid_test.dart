@@ -1,4 +1,3 @@
-@Tags(['skip_very_good_optimization'])
 import 'package:bloc_test/bloc_test.dart';
 import 'package:comments_repository/comments_repository.dart';
 import 'package:divine_ui/divine_ui.dart';
@@ -94,6 +93,27 @@ void main() {
       }
       return app;
     }
+
+    Widget buildNestedScrollSubject({
+      double headerHeight = 200,
+    }) => ProviderScope(
+      child: MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        theme: VineTheme.theme,
+        home: Scaffold(
+          body: NestedScrollView(
+            headerSliverBuilder: (context, innerBoxIsScrolled) => [
+              SliverToBoxAdapter(child: SizedBox(height: headerHeight)),
+            ],
+            body: BlocProvider<ProfileCommentsBloc>.value(
+              value: mockBloc,
+              child: const ProfileCommentsGrid(isOwnProfile: true),
+            ),
+          ),
+        ),
+      ),
+    );
 
     group('renders', () {
       testWidgets('loading indicator when status is initial', (tester) async {
@@ -268,9 +288,8 @@ void main() {
       testWidgets('dispatches load more when scrolled near bottom', (
         tester,
       ) async {
-        // Create enough items to make the list scrollable
         final manyComments = List.generate(
-          20,
+          40,
           (i) =>
               _createTextComment(id: 't$i', createdAtSeconds: 1700000000 - i),
         );
@@ -282,11 +301,10 @@ void main() {
           ),
         );
 
-        await tester.pumpWidget(buildSubject());
+        await tester.pumpWidget(buildNestedScrollSubject());
 
-        // Scroll to the bottom
         await tester.drag(
-          find.byType(CustomScrollView),
+          find.byType(CustomScrollView).last,
           const Offset(0, -5000),
         );
         await tester.pumpAndSettle();
