@@ -26,6 +26,15 @@ typedef SandboxViewBuilder =
     Widget Function(void Function(Uri uri) onNavigationAttempt);
 typedef SandboxJavaScriptRunner = Future<void> Function(String script);
 
+const _bridgePayloadObjectMessage = 'Bridge payload must be a JSON object';
+const _bridgeMethodRequiredMessage = 'Bridge method is required';
+const _bridgeArgsObjectMessage = 'Bridge args must be an object';
+const Set<String> _safeBridgeFormatMessages = {
+  _bridgePayloadObjectMessage,
+  _bridgeMethodRequiredMessage,
+  _bridgeArgsObjectMessage,
+};
+
 class NostrAppSandboxScreen extends ConsumerStatefulWidget {
   static const routeName = 'nostr-app-sandbox';
   static const path = '/apps/:appId/sandbox';
@@ -474,7 +483,7 @@ class _NostrAppSandboxScreenState extends ConsumerState<NostrAppSandboxScreen> {
     try {
       final payload = jsonDecode(message);
       if (payload is! Map) {
-        throw const FormatException('Bridge payload must be a JSON object');
+        throw const FormatException(_bridgePayloadObjectMessage);
       }
 
       final request = payload.map(
@@ -496,10 +505,10 @@ class _NostrAppSandboxScreenState extends ConsumerState<NostrAppSandboxScreen> {
       final args = request['args'];
 
       if (method == null || method.isEmpty) {
-        throw const FormatException('Bridge method is required');
+        throw const FormatException(_bridgeMethodRequiredMessage);
       }
       if (args is! Map) {
-        throw const FormatException('Bridge args must be an object');
+        throw const FormatException(_bridgeArgsObjectMessage);
       }
 
       final origin = _currentPageUri ?? Uri.parse(widget.app.launchUrl);
@@ -517,10 +526,15 @@ class _NostrAppSandboxScreenState extends ConsumerState<NostrAppSandboxScreen> {
         id: responseId,
         result: BridgeResult.error(
           'invalid_request',
-          errorMessage: error.toString(),
+          errorMessage: _safeBridgeErrorMessage(error),
         ),
       );
     }
+  }
+
+  String? _safeBridgeErrorMessage(Object error) {
+    final message = error is FormatException ? error.message : null;
+    return _safeBridgeFormatMessages.contains(message) ? message : null;
   }
 
   Future<bool> _showPermissionPrompt(BridgePermissionRequest request) async {
