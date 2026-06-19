@@ -160,12 +160,11 @@ class LikesRepository {
   /// Emits an ordered list (most recent first) whenever the user's likes
   /// change. This is useful for UI components that need to reactively update
   /// while preserving pagination order.
-  Stream<List<String>> watchLikedEventIds() {
-    // If we have local storage, delegate to its reactive stream
-    if (_localStorage != null) {
-      return _localStorage.watchLikedEventIds();
-    }
-    return _likedIdsController.stream;
+  Stream<List<String>> watchLikedEventIds() async* {
+    // The public stream follows the repository cache, not direct storage
+    // watches, so it stays consistent with isLiked/getOrderedLikedEventIds.
+    await _ensureInitialized();
+    yield* _likedIdsController.stream;
   }
 
   /// Get the current set of liked event IDs.
