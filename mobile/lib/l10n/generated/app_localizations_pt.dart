@@ -7775,6 +7775,10 @@ class AppLocalizationsPt extends AppLocalizations {
   String get videoRecorderCaptureNextLabel => 'Próximo';
 
   @override
+  String get videoRecorderLipSyncAddAudioFirst =>
+      'Adicione áudio antes de gravar';
+
+  @override
   String get videoRecorderToggleFlashLabel => 'Alternar flash';
 
   @override

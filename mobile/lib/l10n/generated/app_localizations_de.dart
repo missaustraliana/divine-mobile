@@ -7813,6 +7813,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get videoRecorderCaptureNextLabel => 'Weiter';
 
   @override
+  String get videoRecorderLipSyncAddAudioFirst =>
+      'Audio vor der Aufnahme hinzufügen';
+
+  @override
   String get videoRecorderToggleFlashLabel => 'Blitz ein-/ausschalten';
 
   @override

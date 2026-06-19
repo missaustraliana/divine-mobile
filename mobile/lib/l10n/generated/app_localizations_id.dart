@@ -7705,6 +7705,10 @@ class AppLocalizationsId extends AppLocalizations {
   String get videoRecorderCaptureNextLabel => 'Berikutnya';
 
   @override
+  String get videoRecorderLipSyncAddAudioFirst =>
+      'Tambahkan audio sebelum merekam';
+
+  @override
   String get videoRecorderToggleFlashLabel => 'Ganti flash';
 
   @override

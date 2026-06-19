@@ -82,6 +82,12 @@ class VideoEditorCanvas extends StatelessWidget {
         previous.clips != current.clips;
   }
 
+  @visibleForTesting
+  static bool shouldSeedSelectedSoundAsAudioTrack({
+    required bool hasSelectedSound,
+    required bool seedSelectedSoundAsAudioTrack,
+  }) => hasSelectedSound && seedSelectedSoundAsAudioTrack;
+
   @override
   Widget build(BuildContext context) {
     final isSubEditorOpen = context.select(
@@ -636,6 +642,23 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
   }
 
   /// Syncs the main-editor capabilities from the main editor to the bloc.
+  /// Timeline end position for a lip-sync sound seeded on editor init.
+  ///
+  /// Spans from zero up to the sound's own length, capped at the editor's hard
+  /// duration ceiling. The editor re-clamps it to the real video duration once
+  /// that is measured.
+  Duration _lipSyncAudioEndTime(double? durationSecs) {
+    final soundMs = durationSecs != null
+        ? (durationSecs * 1000).round()
+        : VideoEditorConstants.maxDuration.inMilliseconds;
+    return Duration(
+      milliseconds: min(
+        soundMs,
+        VideoEditorConstants.maxDuration.inMilliseconds,
+      ),
+    );
+  }
+
   void _syncMainCapabilities(VideoEditorScope scope, VideoEditorMainBloc bloc) {
     final editor = scope.editor;
     if (editor == null) return;
@@ -1425,6 +1448,14 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
 
               if (editorStateHistory.isEmpty) {
                 final clips = ref.read(clipManagerProvider).clips;
+                final editorState = ref.read(videoEditorProvider);
+                final selectedSound = editorState.selectedSound;
+                final shouldSeedSelectedSound =
+                    VideoEditorCanvas.shouldSeedSelectedSoundAsAudioTrack(
+                      hasSelectedSound: selectedSound != null,
+                      seedSelectedSoundAsAudioTrack:
+                          editorState.seedSelectedSoundAsAudioTrack,
+                    );
 
                 scope.requireEditor.stateManager.replaceHistory(
                   scope.requireEditor.stateHistory.first.copyWith(
@@ -1433,6 +1464,27 @@ class _VideoEditorState extends ConsumerState<_VideoEditor> {
                       VideoEditorConstants.clipsStateHistoryKey: clips
                           .map((e) => e.toJson())
                           .toList(),
+                      // Lip-sync: the recorder picked a sound the clips were
+                      // recorded against (and muted on handoff). Seed it as the
+                      // timeline's audio track only when the recorder marked
+                      // this as a handoff, not for every selected editor/draft
+                      // sound. The editor re-clamps the window to the real
+                      // video duration on the next
+                      // TimelineOverlayTotalDurationChanged.
+                      if (shouldSeedSelectedSound)
+                        VideoEditorConstants.audioStateHistoryKey: [
+                          selectedSound!
+                              .copyWith(
+                                id:
+                                    '${selectedSound.id}-'
+                                    '${DateTime.now().millisecondsSinceEpoch}',
+                                startTime: Duration.zero,
+                                endTime: _lipSyncAudioEndTime(
+                                  selectedSound.duration,
+                                ),
+                              )
+                              .toJson(),
+                        ],
                     },
                   ),
                   index: 0,

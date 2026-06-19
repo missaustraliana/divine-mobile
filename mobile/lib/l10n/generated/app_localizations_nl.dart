@@ -7765,6 +7765,10 @@ class AppLocalizationsNl extends AppLocalizations {
   String get videoRecorderCaptureNextLabel => 'Volgende';
 
   @override
+  String get videoRecorderLipSyncAddAudioFirst =>
+      'Voeg audio toe vóór de opname';
+
+  @override
   String get videoRecorderToggleFlashLabel => 'Flitser in-/uitschakelen';
 
   @override
