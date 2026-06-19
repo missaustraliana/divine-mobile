@@ -255,17 +255,25 @@ class _NotificationsViewState extends ConsumerState<NotificationsView> {
         switch (target) {
           case OpenVideoTarget():
             // targetEventId is the event the resolver walks to find the root
-            // video. A mention with no resolvable video falls back to the
-            // actor's profile.
+            // video. Any comment/reply/likeComment/mention whose root video
+            // can't be resolved falls back to the actor's profile, mirroring
+            // the push executor's #5079 fallback contract
+            // (main.dart:_resolveAndPushVideoLink) so the tap never silently
+            // dead-ends regardless of kind.
             final navigated = await _navigateToVideo(
               context,
               targetEventId!,
               videoAddressableId: videoAddressableId,
               notificationKind: type,
             );
-            if (!navigated &&
-                type == NotificationKind.mention &&
-                context.mounted) {
+            if (!navigated && context.mounted) {
+              Log.warning(
+                'Notification tap could not resolve a video '
+                '(kind=$type, targetEventId=$targetEventId) — '
+                'falling back to actor profile',
+                name: 'NotificationsView',
+                category: LogCategory.ui,
+              );
               _navigateToProfile(context, actor.pubkey);
             }
           case OpenProfileTarget(:final actorPubkey):
@@ -280,7 +288,8 @@ class _NotificationsViewState extends ConsumerState<NotificationsView> {
   ///
   /// Returns `true` if a navigation was pushed, `false` if resolution failed
   /// (resolver returned null) and no navigation occurred. The caller decides
-  /// what to do on `false` — e.g. the mention branch falls back to profile.
+  /// what to do on `false`, such as falling back to the actor profile for
+  /// unresolvable comment-opening notifications.
   ///
   /// This uses the durable `/video/<id>` route rather than the ephemeral
   /// fullscreen feed route, so web builds do not depend on in-memory
@@ -306,9 +315,9 @@ class _NotificationsViewState extends ConsumerState<NotificationsView> {
     // Resolve the navigation target.
     //
     // The stable-ID path (videoAddressableId set) and raw-event-id fallback
-    // are synchronous. Comment/reply/mention targets without an addressable
-    // coordinate may be Kind 1111 comments, so resolve them to the root video
-    // before pushing the durable video route.
+    // are synchronous. Comment/reply/likeComment/mention targets without an
+    // addressable coordinate may be Kind 1111 comments, so resolve them to the
+    // root video before pushing the durable video route.
     String? routeId;
     var fallbackVideoIds = const <String>[];
     if (videoAddressableId != null && videoAddressableId.isNotEmpty) {
