@@ -15,9 +15,11 @@ import 'package:http/http.dart' as http;
 import 'package:nostr_app_bridge_repository/nostr_app_bridge_repository.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/providers/app_providers.dart';
+import 'package:openvine/screens/apps/nostr_app_sandbox_bridge.dart';
 import 'package:openvine/widgets/apps/nostr_app_permission_prompt_sheet.dart';
 import 'package:unified_logger/unified_logger.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 typedef SandboxViewBuilder =
@@ -67,7 +69,7 @@ class NostrAppSandboxScreen extends ConsumerStatefulWidget {
 }
 
 class _NostrAppSandboxScreenState extends ConsumerState<NostrAppSandboxScreen> {
-  // iOS frame attestation channels.
+  // iOS/Android frame attestation channels.
   static const MethodChannel _attestationMethodChannel = MethodChannel(
     'co.openvine/nostr_bridge_attestation',
   );
@@ -111,18 +113,29 @@ class _NostrAppSandboxScreenState extends ConsumerState<NostrAppSandboxScreen> {
   void dispose() {
     _attestedMessageSubscription?.cancel();
     if (_isNativeAttestationActive) {
-      final platformController = _webViewController?.platform;
-      if (platformController is WebKitWebViewController) {
+      final webViewId = _attestationWebViewId();
+      if (webViewId != null) {
         unawaited(
           _attestationMethodChannel.invokeMethod<void>(
             'detach',
-            {'webViewId': platformController.webViewIdentifier},
+            {'webViewId': webViewId},
           ),
         );
       }
     }
     _ownedBootstrapHttpClient?.close();
     super.dispose();
+  }
+
+  /// The native WebView identifier for the active controller, on whichever
+  /// platform exposes one. Used to address attach/detach to the right WebView.
+  int? _attestationWebViewId() {
+    final platformController = _webViewController?.platform;
+    return switch (platformController) {
+      WebKitWebViewController() => platformController.webViewIdentifier,
+      AndroidWebViewController() => platformController.webViewIdentifier,
+      _ => null,
+    };
   }
 
   bool _handleNavigationAttempt(Uri uri) {
@@ -241,11 +254,12 @@ class _NostrAppSandboxScreenState extends ConsumerState<NostrAppSandboxScreen> {
       },
     );
 
-    // On iOS, replace the pigeon handler with the frame-attesting one and
-    // hand off the document-start bootstrap script to the native plugin.
-    // Must run before the page loads so the native handler is in place when
-    // the bootstrap script fires its first postMessage.
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
+    // Replace the pigeon message channel with the native frame-attesting one
+    // (iOS: WKScriptMessageHandler reading frameInfo; Android: WebMessageListener
+    // reporting isMainFrame). Must run before the page loads so the native
+    // handler is in place when the bridge fires its first postMessage.
+    if (defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android) {
       await _activateNativeAttestation(controller);
     }
 
@@ -258,34 +272,56 @@ class _NostrAppSandboxScreenState extends ConsumerState<NostrAppSandboxScreen> {
         _isAllowedOrigin(uri);
   }
 
-  /// Activates platform-level frame attestation on iOS by replacing the
-  /// pigeon-managed WKScriptMessageHandler with a native one that includes
-  /// WKScriptMessage.frameInfo. Messages arrive via EventChannel instead of
-  /// the addJavaScriptChannel callback.
+  /// Activates platform-level frame attestation by replacing the pigeon-managed
+  /// message channel with a native one that surfaces the platform-attested main-
+  /// frame signal. Attested messages then arrive via the EventChannel instead of
+  /// the `addJavaScriptChannel` callback.
   ///
-  /// Also hands the document-start bridge bootstrap script to the native
-  /// plugin so it can be installed as a `WKUserScript` without the Dart
-  /// layer needing to import private webview_flutter_wkwebview src types.
+  /// - iOS: swaps the `WKScriptMessageHandler` for one that reads
+  ///   `WKScriptMessage.frameInfo.isMainFrame`, and hands off the document-start
+  ///   bootstrap script to the native plugin as a `WKUserScript`.
+  /// - Android: swaps the `divineSandboxBridge` JS interface for a
+  ///   `WebViewCompat.addWebMessageListener` whose listener reports `isMainFrame`,
+  ///   scoped to the app's allowed origins. The bootstrap is still injected via
+  ///   the HTML-rewrite path; the listener's injected JS object exposes the same
+  ///   `.postMessage` API the bootstrap already calls.
   ///
-  /// Falls back to nonce-only enforcement when the native plugin is
-  /// unavailable (e.g. in tests that do not configure the channel, or if a
-  /// previous sandbox is still attached). Logs a warning so the degraded
-  /// security posture is visible in unified logs.
+  /// Falls back to nonce-only enforcement when the native plugin is unavailable
+  /// (tests that don't configure the channel; a previous sandbox still attached;
+  /// `WEB_MESSAGE_LISTENER` unsupported; no resolvable allowed origins). Logs a
+  /// warning so the degraded security posture is visible in unified logs.
   Future<void> _activateNativeAttestation(WebViewController controller) async {
     final platformController = controller.platform;
-    if (platformController is! WebKitWebViewController) return;
-
-    final bootstrapScript = buildBridgeBootstrapScript(
-      nonce: _bridgeNonce,
-      pubkey: _currentUserPubkey,
-      autoLoginScript: widget.app.autoLoginScript,
-    );
+    final Map<String, Object?> attachArgs;
+    if (platformController is WebKitWebViewController) {
+      attachArgs = {
+        'webViewId': platformController.webViewIdentifier,
+        'bootstrapScript': buildBridgeBootstrapScript(
+          nonce: _bridgeNonce,
+          pubkey: _currentUserPubkey,
+          autoLoginScript: widget.app.autoLoginScript,
+        ),
+      };
+    } else if (platformController is AndroidWebViewController) {
+      final allowedOriginRules = webMessageAllowedOriginRules(
+        widget.app.allowedOrigins,
+      );
+      if (allowedOriginRules.isEmpty) {
+        // No resolvable origins to scope the listener to. Keep the nonce-only
+        // JS-channel path rather than removing it for a listener that would
+        // never be injected into any frame.
+        return;
+      }
+      attachArgs = {
+        'webViewId': platformController.webViewIdentifier,
+        'allowedOriginRules': allowedOriginRules,
+      };
+    } else {
+      return;
+    }
 
     try {
-      await _attestationMethodChannel.invokeMethod<void>('attach', {
-        'webViewId': platformController.webViewIdentifier,
-        'bootstrapScript': bootstrapScript,
-      });
+      await _attestationMethodChannel.invokeMethod<void>('attach', attachArgs);
       _isNativeAttestationActive = true;
       _attestedMessageSubscription = _attestationEventChannel
           .receiveBroadcastStream()
@@ -298,8 +334,8 @@ class _NostrAppSandboxScreenState extends ConsumerState<NostrAppSandboxScreen> {
         category: LogCategory.system,
       );
     } on MissingPluginException catch (_) {
-      // Channel is not registered (tests, simulator without the plugin set
-      // up). Nonce gate remains the only defence on iOS in this case.
+      // Channel is not registered (tests, simulator/emulator without the plugin
+      // set up). Nonce gate remains the only defence in this case.
     }
   }
 
@@ -610,136 +646,6 @@ class _NostrAppSandboxScreenState extends ConsumerState<NostrAppSandboxScreen> {
   }
 }
 
-/// Builds the bridge bootstrap JavaScript with optional eager pubkey,
-/// provider metadata, ready-event dispatch, and per-app auto-login.
-///
-/// [nonce] is a per-mount secret embedded in every outgoing bridge
-/// request. The host rejects messages whose nonce does not match,
-/// which prevents iframes that bypass `window.nostr` and call the
-/// `divineSandboxBridge` channel directly from impersonating the main
-/// frame.
-@visibleForTesting
-String buildBridgeBootstrapScript({
-  required String nonce,
-  String? pubkey,
-  String? autoLoginScript,
-}) {
-  final escapedPubkey = pubkey != null && pubkey.isNotEmpty
-      ? _escapeJs(pubkey)
-      : '';
-  final escapedNonce = _escapeJs(nonce);
-  final loginJs = autoLoginScript != null && autoLoginScript.isNotEmpty
-      ? autoLoginScript.replaceAll('{{PUBKEY}}', escapedPubkey)
-      : '';
-
-  return '''
-(() => {
-  if (window.__divineNostrBridgeInstalled) {
-    return;
-  }
-
-  // Refuse to install in non-main frames. Cross-origin access to
-  // window.top throws; treat that as "not main frame" and bail.
-  try {
-    if (window.top !== window.self) {
-      return;
-    }
-  } catch (_) {
-    return;
-  }
-
-  const __divineBridgeNonce = '$escapedNonce';
-  const pending = new Map();
-  let nextId = 0;
-
-  const request = (method, args) => {
-    const id = `divine-\${++nextId}`;
-    const payload = JSON.stringify({
-      id,
-      method,
-      args: args ?? {},
-      nonce: __divineBridgeNonce,
-    });
-
-    return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      divineSandboxBridge.postMessage(payload);
-    });
-  };
-
-  window.__divineNostrBridge = {
-    handleResponse(response) {
-      const pendingRequest = pending.get(response.id);
-      if (!pendingRequest) {
-        return;
-      }
-
-      pending.delete(response.id);
-
-      if (response.success) {
-        pendingRequest.resolve(response.result);
-        return;
-      }
-
-      const error = response.error || { code: 'bridge_error' };
-      const exception = new Error(error.message || error.code);
-      exception.code = error.code;
-      pendingRequest.reject(exception);
-    },
-  };
-
-  window.nostr = {
-    _pubkey: '$escapedPubkey' || null,
-    _metadata: {
-      name: 'diVine',
-      version: '1.0',
-      supports: ['nip04', 'nip44'],
-    },
-    getPublicKey() {
-      if (this._pubkey) return Promise.resolve(this._pubkey);
-      return request('getPublicKey', {});
-    },
-    getRelays() {
-      return request('getRelays', {});
-    },
-    signEvent(event) {
-      return request('signEvent', { event });
-    },
-    nip44: {
-      encrypt(pubkey, plaintext) {
-        return request('nip44.encrypt', { pubkey, plaintext });
-      },
-      decrypt(pubkey, ciphertext) {
-        return request('nip44.decrypt', { pubkey, ciphertext });
-      },
-    },
-  };
-
-  window.__divineNostrBridgeInstalled = true;
-
-  // Auto-login: seed localStorage so the app recognises the session.
-  try { $loginJs } catch (_) {}
-
-  // Signal that a NIP-07 signer is available.
-  window.dispatchEvent(new Event('nostr:ready'));
-  document.dispatchEvent(new CustomEvent('nlAuth', {
-    detail: { type: 'login', method: 'extension' },
-  }));
-})();
-''';
-}
-
-/// Escapes a string for safe embedding inside a JS single-quoted
-/// literal.
-String _escapeJs(String value) {
-  return value
-      .replaceAll(r'\', r'\\')
-      .replaceAll("'", r"\'")
-      .replaceAll('`', r'\`')
-      .replaceAll('\n', r'\n')
-      .replaceAll('\r', r'\r');
-}
-
 class _SandboxStatusCard extends StatelessWidget {
   const _SandboxStatusCard({
     required this.title,
@@ -809,34 +715,4 @@ class _BootstrappedSandboxPage {
 
   final Uri baseUri;
   final String html;
-}
-
-@visibleForTesting
-String injectBridgeBootstrapIntoHtml(
-  String html, {
-  required String nonce,
-  String? pubkey,
-  String? autoLoginScript,
-}) {
-  final script = buildBridgeBootstrapScript(
-    nonce: nonce,
-    pubkey: pubkey,
-    autoLoginScript: autoLoginScript,
-  );
-  final bridgeMarkup = '<!-- divine-nostr-bridge --><script>$script</script>';
-  final insertionPoints = <RegExp>[
-    RegExp('<head[^>]*>', caseSensitive: false),
-    RegExp('<!doctype[^>]*>', caseSensitive: false),
-    RegExp('<html[^>]*>', caseSensitive: false),
-    RegExp('<body[^>]*>', caseSensitive: false),
-  ];
-
-  for (final insertionPoint in insertionPoints) {
-    final match = insertionPoint.firstMatch(html);
-    if (match != null) {
-      return html.replaceRange(match.end, match.end, bridgeMarkup);
-    }
-  }
-
-  return '$bridgeMarkup$html';
 }

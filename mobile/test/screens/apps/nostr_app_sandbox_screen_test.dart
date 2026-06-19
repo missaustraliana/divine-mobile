@@ -10,6 +10,7 @@ import 'package:nostr_app_bridge_repository/nostr_app_bridge_repository.dart';
 import 'package:nostr_sdk/event.dart';
 import 'package:nostr_sdk/signer/nostr_signer.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
+import 'package:openvine/screens/apps/nostr_app_sandbox_bridge.dart';
 import 'package:openvine/screens/apps/nostr_app_sandbox_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
@@ -415,7 +416,7 @@ void main() {
       },
     );
 
-    group('iOS frame attestation', () {
+    group('platform frame attestation', () {
       void Function(dynamic event)? attestedEventHandler;
       List<String> capturedScripts = <String>[];
 
@@ -601,7 +602,15 @@ void main() {
       test('includes provider metadata', () {
         final script = buildBridgeBootstrapScript(nonce: 'n');
         expect(script, contains("name: 'diVine'"));
-        expect(script, contains("'nip04', 'nip44'"));
+        expect(script, contains("supports: ['nip44']"));
+      });
+
+      test('advertises only capabilities the bridge actually exposes', () {
+        // nip04 is intentionally not advertised: the bridge exposes no
+        // window.nostr.nip04 object and the host rejects nip04 methods, so
+        // claiming support would mislead feature-detecting apps.
+        final script = buildBridgeBootstrapScript(nonce: 'n');
+        expect(script, isNot(contains('nip04')));
       });
 
       test('dispatches nostr:ready event', () {
@@ -716,6 +725,60 @@ void main() {
         expect(
           html,
           contains("const __divineBridgeNonce = 'NONCE-XYZ';"),
+        );
+      });
+    });
+
+    group('webMessageAllowedOriginRules', () {
+      test('normalises allowed origins to scheme://host[:port] rules', () {
+        expect(
+          webMessageAllowedOriginRules(const [
+            'https://primal.net',
+            'https://app.example.com:8080',
+          ]),
+          equals(['https://primal.net', 'https://app.example.com:8080']),
+        );
+      });
+
+      test('strips paths and trailing slashes to the bare origin', () {
+        expect(
+          webMessageAllowedOriginRules(const ['https://primal.net/app/']),
+          equals(['https://primal.net']),
+        );
+      });
+
+      test('drops entries that cannot form an origin', () {
+        expect(
+          webMessageAllowedOriginRules(const [
+            'https://primal.net',
+            'nostrsigner:', // non-http(s) scheme — Uri.origin would throw
+            'not a uri at all',
+            '', // empty
+          ]),
+          equals(['https://primal.net']),
+        );
+      });
+
+      test('drops ws/wss entries without throwing (Uri.origin is http(s) '
+          'only)', () {
+        // wss:// is valid in remote-sourced allowedOrigins (relay URLs) and
+        // passes a naive scheme check, but Uri.origin throws a StateError for
+        // any non-http(s) scheme. The rule set must filter these out rather
+        // than let the error escape the unawaited attestation chain.
+        expect(
+          webMessageAllowedOriginRules(const [
+            'https://primal.net',
+            'wss://relay.example.com',
+            'ws://relay.example.com',
+          ]),
+          equals(['https://primal.net']),
+        );
+      });
+
+      test('returns empty when no origin can be formed', () {
+        expect(
+          webMessageAllowedOriginRules(const ['nostrsigner:', 'file:///x']),
+          isEmpty,
         );
       });
     });
