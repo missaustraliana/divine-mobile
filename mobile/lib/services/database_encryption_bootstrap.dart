@@ -76,11 +76,7 @@ class DatabaseEncryptionBootstrap {
 
     await _ensureRuntime();
     if (!_isCipherAvailable()) {
-      throw StateError(
-        'SQLCipher is not linked; refusing to start with an unencrypted local '
-        'database. Verify sqlcipher_flutter_libs replaced sqlite3_flutter_libs '
-        'and that no dependency links plain sqlite3.',
-      );
+      throw SqlCipherUnavailableError();
     }
 
     final (key, wasGenerated) = await _readOrCreateKey();
@@ -143,25 +139,18 @@ class DatabaseEncryptionBootstrap {
       name: _logName,
     );
     await _deleteDatabase();
-    // The Drift DB is now empty but SharedPreferences survives, so the DM sync
-    // cursors / `historyDrainComplete` flag would make the next inbox open skip
-    // the full re-drain and strand recovered chats under "Message requests".
-    // Clear DM sync state so recovery re-runs against the fresh DB. See #5304.
-    //
-    // Best-effort: a SharedPreferences IO failure here only re-strands requests
-    // (itself healed by the drain-version bump) and must not escalate into a
-    // hard cipher-key-resolution failure now that the DB has already been
-    // recreated.
-    try {
-      await _onDatabaseReset?.call();
-    } on Object catch (e) {
-      Log.warning(
-        'Post-recreate DM sync-state reset failed (non-fatal): $e',
-        name: _logName,
-      );
-    }
+    await _runPostDatabaseReset(_onDatabaseReset);
     return key;
   }
+}
+
+class SqlCipherUnavailableError extends StateError {
+  SqlCipherUnavailableError()
+    : super(
+        'SQLCipher is not linked; refusing to start with an unencrypted local '
+        'database. Verify sqlcipher_flutter_libs replaced sqlite3_flutter_libs '
+        'and that no dependency links plain sqlite3.',
+      );
 }
 
 /// Resolves the startup DB cipher key and fails closed on bootstrap errors.
@@ -190,6 +179,60 @@ Future<String?> resolveStartupDatabaseCipherKey({
 
 bool _isValidCipherKey(String value) =>
     RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(value);
+
+const _sqliteCorrupt = 11;
+const _sqliteNotADb = 26;
+
+/// Returns whether a startup bootstrap failure is safe to repair by backing up
+/// the local encrypted DB cache and retrying once.
+///
+/// Keep this as an allowlist. Secure-storage, SQLCipher linkage, and other
+/// transient startup failures must fail closed because deleting or rotating the
+/// DB cipher key can make an otherwise recoverable encrypted DB unusable.
+bool shouldRepairLocalDatabaseCacheAfterBootstrapError(Object error) {
+  if (error is SqlCipherUnavailableError) return false;
+
+  final message = error.toString();
+  return message.contains('SqliteException($_sqliteNotADb)') ||
+      message.contains('SqliteException($_sqliteCorrupt)') ||
+      message.contains('SQLITE_NOTADB') ||
+      message.contains('SQLITE_CORRUPT') ||
+      message.contains('database disk image is malformed') ||
+      message.contains('file is not a database');
+}
+
+/// Backs up the encrypted local database cache and removes only its DB cipher
+/// key so the next bootstrap creates a fresh encrypted cache.
+Future<void> resetEncryptedDatabaseCache({
+  required FlutterSecureStorage secureStorage,
+  Future<void> Function()? deleteDatabase,
+  Future<void> Function()? onDatabaseReset,
+}) async {
+  await (deleteDatabase ?? backUpAndRemoveSharedDatabase)();
+  await secureStorage.delete(key: dbCipherKeyStorageKey);
+  await _runPostDatabaseReset(onDatabaseReset);
+}
+
+Future<void> _runPostDatabaseReset(
+  Future<void> Function()? onDatabaseReset,
+) async {
+  // The Drift DB is now empty but SharedPreferences survives, so the DM sync
+  // cursors / `historyDrainComplete` flag would make the next inbox open skip
+  // the full re-drain and strand recovered chats under "Message requests".
+  // Clear DM sync state so recovery re-runs against the fresh DB. See #5304.
+  //
+  // Best-effort: a SharedPreferences IO failure here only re-strands requests
+  // (itself healed by the drain-version bump) and must not escalate into a hard
+  // cipher-key-resolution failure now that the DB has already been recreated.
+  try {
+    await onDatabaseReset?.call();
+  } on Object catch (e) {
+    Log.warning(
+      'Post-recreate DM sync-state reset failed (non-fatal): $e',
+      name: DatabaseEncryptionBootstrap._logName,
+    );
+  }
+}
 
 /// Generates a 64-character hex (raw 32-byte) cipher key from a CSPRNG.
 ///

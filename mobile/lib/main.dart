@@ -1303,6 +1303,23 @@ Future<void> _startOpenVineApp() async {
   // This also forces package:sqlite3 onto the SQLCipher build (Android) and
   // runs the one-time plaintext→encrypted migration, both of which must happen
   // before any sqlite3 open. (#570, finding C2)
+  const dbCipherSecureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+  var didRecordDatabaseBootstrapFailure = false;
+  Future<void> recordDatabaseBootstrapFailure(
+    Object error,
+    StackTrace stack,
+  ) async {
+    if (didRecordDatabaseBootstrapFailure) return;
+    didRecordDatabaseBootstrapFailure = true;
+    await CrashReportingService.instance.recordError(
+      error,
+      stack,
+      reason: 'DatabaseEncryptionBootstrap.resolveCipherKey failed',
+    );
+  }
+
   final dbCipherKeyResult = await resolveDatabaseBootstrapForAppStart(
     resolveCipherKey: () => resolveStartupDatabaseCipherKey(
       // resetOnError MUST stay false here: the cipher key is the one secret
@@ -1310,9 +1327,7 @@ Future<void> _startOpenVineApp() async {
       // read error must throw rather than silently deleting the key and
       // triggering the §6 key-loss recovery. (#570 C2)
       resolveCipherKey: () => DatabaseEncryptionBootstrap(
-        secureStorage: const FlutterSecureStorage(
-          aOptions: AndroidOptions(encryptedSharedPreferences: true),
-        ),
+        secureStorage: dbCipherSecureStorage,
         // On the key-loss recreate the Drift DB is wiped but SharedPreferences
         // survives; clear the DM sync state so the next inbox open runs a full
         // re-drain instead of skipping it as "already complete" (which had
@@ -1322,12 +1337,14 @@ Future<void> _startOpenVineApp() async {
       // SQLCipher build misconfiguration or secure-storage failures must fail
       // closed after reporting. Continuing with a null key would open an
       // existing encrypted DB as plaintext and spam SQLITE_NOTADB.
-      recordError: (error, stack) => CrashReportingService.instance.recordError(
-        error,
-        stack,
-        reason: 'DatabaseEncryptionBootstrap.resolveCipherKey failed',
-      ),
+      recordError: recordDatabaseBootstrapFailure,
     ),
+    repairLocalDatabaseCache: (error, stack) => resetEncryptedDatabaseCache(
+      secureStorage: dbCipherSecureStorage,
+      onDatabaseReset: () => DmSyncState(sharedPreferences).clearAll(),
+    ),
+    shouldRepairLocalDatabaseCache:
+        shouldRepairLocalDatabaseCacheAfterBootstrapError,
     runApp: runApp,
     removeNativeSplash: FlutterNativeSplash.remove,
   );
