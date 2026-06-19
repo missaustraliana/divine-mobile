@@ -69,9 +69,9 @@ void main() {
       );
       return signedEvent;
     });
-    when(() => nostrClient.publishEvent(any())).thenAnswer(
-      (_) async => PublishSuccess(event: signedEvent),
-    );
+    when(
+      () => nostrClient.publishEvent(any()),
+    ).thenAnswer((_) async => PublishSuccess(event: signedEvent));
 
     final result = await service.acceptInvite(invite);
 
@@ -160,6 +160,50 @@ void main() {
 
     expect(result.success, isFalse);
     expect(result.error, contains('sign'));
+    verifyNever(() => nostrClient.publishEvent(any()));
+  });
+
+  test('rejects self-acceptance before signing', () async {
+    when(() => authService.currentPublicKeyHex).thenReturn(creatorPubkey);
+
+    final result = await service.acceptInvite(invite);
+
+    expect(result.success, isFalse);
+    expect(result.error, contains('Creators cannot accept'));
+    verifyNever(
+      () => authService.createAndSignEvent(
+        kind: any(named: 'kind'),
+        content: any(named: 'content'),
+        tags: any(named: 'tags'),
+      ),
+    );
+    verifyNever(() => nostrClient.publishEvent(any()));
+  });
+
+  test('rejects self-acceptance case-insensitively before signing', () async {
+    when(() => authService.currentPublicKeyHex).thenReturn(creatorPubkey);
+
+    final uppercaseInvite = CollaboratorInvite(
+      messageId: invite.messageId,
+      videoAddress: '34236:${creatorPubkey.toUpperCase()}:video-d-tag',
+      videoKind: invite.videoKind,
+      creatorPubkey: creatorPubkey.toUpperCase(),
+      videoDTag: invite.videoDTag,
+      role: invite.role,
+      relayHint: invite.relayHint,
+    );
+
+    final result = await service.acceptInvite(uppercaseInvite);
+
+    expect(result.success, isFalse);
+    expect(result.error, contains('Creators cannot accept'));
+    verifyNever(
+      () => authService.createAndSignEvent(
+        kind: any(named: 'kind'),
+        content: any(named: 'content'),
+        tags: any(named: 'tags'),
+      ),
+    );
     verifyNever(() => nostrClient.publishEvent(any()));
   });
 }
