@@ -1619,6 +1619,18 @@ class DmRepository {
     );
 
     if (citation == null) {
+      // The structured reference couldn't be built (most commonly a regular
+      // kind-22 ref whose source `q` tag omitted the author). Degrading to a
+      // plain message is acceptable, but log it so the lost cross-device /
+      // other-client durability isn't silent.
+      Log.warning(
+        'Shared-video citation could not be built (kind=$videoKind, '
+        'hasAuthor=${videoAuthorPubkey.isNotEmpty}, '
+        'hasDTag=${videoDTag?.isNotEmpty ?? false}, '
+        'hasEventId=${videoEventId?.isNotEmpty ?? false}); sending plain '
+        'message without the durable video reference.',
+        category: LogCategory.system,
+      );
       return sendMessage(
         recipientPubkey: recipientPubkey,
         content: baseContent,
@@ -1628,6 +1640,60 @@ class DmRepository {
 
     return sendMessage(
       recipientPubkey: recipientPubkey,
+      content: '$baseContent\n${citation.nostrUri}',
+      additionalTags: [citation.qTag],
+      replyToId: replyToId,
+    );
+  }
+
+  /// Group counterpart of [sendSharedVideo]: cites a video with a NIP-18 `q`
+  /// tag + NIP-21 `nostr:` URI on a kind-14 rumor sent to every member of a
+  /// group conversation.
+  ///
+  /// Used for a reel reply in a group so the reply self-carries the video
+  /// reference end-to-end (cross-device + other Nostr clients can resolve it
+  /// without the parent message). When a valid citation can't be built, falls
+  /// back to a plain-text [sendGroupMessage].
+  ///
+  /// Throws the same errors as [sendGroupMessage].
+  Future<List<NIP17SendResult>> sendSharedVideoGroup({
+    required List<String> recipientPubkeys,
+    required String baseContent,
+    required int videoKind,
+    required String videoAuthorPubkey,
+    String? videoDTag,
+    String? videoEventId,
+    String? relayHint,
+    String? replyToId,
+  }) async {
+    final citation = DmSharedVideoCitation.build(
+      videoKind: videoKind,
+      authorPubkey: videoAuthorPubkey,
+      relayHint: relayHint ?? DmShareConstants.defaultRelayHint,
+      dTag: videoDTag,
+      eventId: videoEventId,
+    );
+
+    if (citation == null) {
+      // See [sendSharedVideo]: log the degradation so a reel reply silently
+      // losing its durable video reference is observable.
+      Log.warning(
+        'Shared-video group citation could not be built (kind=$videoKind, '
+        'hasAuthor=${videoAuthorPubkey.isNotEmpty}, '
+        'hasDTag=${videoDTag?.isNotEmpty ?? false}, '
+        'hasEventId=${videoEventId?.isNotEmpty ?? false}); sending plain '
+        'group message without the durable video reference.',
+        category: LogCategory.system,
+      );
+      return sendGroupMessage(
+        recipientPubkeys: recipientPubkeys,
+        content: baseContent,
+        replyToId: replyToId,
+      );
+    }
+
+    return sendGroupMessage(
+      recipientPubkeys: recipientPubkeys,
       content: '$baseContent\n${citation.nostrUri}',
       additionalTags: [citation.qTag],
       replyToId: replyToId,
@@ -1932,6 +1998,15 @@ class DmRepository {
             giftWrapId: result.messageEventId!,
             messageKind: row.messageKind,
             replyToId: row.replyToId,
+            // Reconstruct tagsJson from the rebuilt rumor so a recovered row
+            // hydrates the same read-time-derived fields (e.g. sharedVideoRef
+            // from a NIP-18 q tag) as the happy-path send. Without this the
+            // queue-recovery row drops its tags and the sender loses the
+            // shared-video reference locally. This intentionally also persists
+            // the rumor's leading recipient `p` tag — matching the receive
+            // path (L1121), not the happy-path 1:1 send which stores only its
+            // own rumorTags; harmless since only the `q` tag is read back.
+            tagsJson: rumor.tags.isEmpty ? null : jsonEncode(rumor.tags),
             ownerPubkey: _userPubkey,
           );
 
@@ -2240,6 +2315,7 @@ class DmRepository {
     required List<String> recipientPubkeys,
     required String content,
     String? replyToId,
+    List<List<String>> additionalTags = const [],
   }) async {
     _assertInitialized();
     if (recipientPubkeys.isEmpty) {
@@ -2262,7 +2338,8 @@ class DmRepository {
     final results = <NIP17SendResult>[];
 
     for (final pubkey in recipientPubkeys) {
-      final additionalTags = <List<String>>[
+      final rumorTags = <List<String>>[
+        ...additionalTags,
         // Include all recipients as p tags per NIP-17
         for (final pk in recipientPubkeys)
           if (pk != pubkey) ['p', pk],
@@ -2276,7 +2353,7 @@ class DmRepository {
       final rumor = _messageService!.buildRumor(
         recipientPubkey: pubkey,
         content: content,
-        additionalTags: additionalTags,
+        additionalTags: rumorTags,
       );
 
       // Enqueue before publish so an app crash mid-send leaves a
@@ -2319,6 +2396,7 @@ class DmRepository {
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final firstSuccess = results.firstWhere((r) => r.success);
       final localTags = <List<String>>[
+        ...additionalTags,
         for (final pk in recipientPubkeys) ['p', pk],
         if (replyToId != null) ['e', replyToId],
       ];
