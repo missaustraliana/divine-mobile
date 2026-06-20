@@ -2,8 +2,11 @@
 // ABOUTME: Provides popular hashtag suggestions for discovery and exploration.
 
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:unified_logger/unified_logger.dart';
+
+typedef _AssetStringLoader = Future<String> Function(String key);
 
 /// Minimal seam for loading hashtag suggestions.
 abstract interface class TopHashtagsLoader {
@@ -35,7 +38,14 @@ class HashtagData {
 }
 
 class TopHashtagsService implements TopHashtagsLoader {
-  TopHashtagsService._();
+  TopHashtagsService._({_AssetStringLoader? loadAssetString})
+    : _loadAssetString = loadAssetString ?? rootBundle.loadString;
+
+  @visibleForTesting
+  TopHashtagsService.forTesting({
+    required Future<String> Function(String key) loadAssetString,
+  }) : this._(loadAssetString: loadAssetString);
+
   static final TopHashtagsService _instance = TopHashtagsService._();
   static TopHashtagsService get instance => _instance;
 
@@ -66,6 +76,7 @@ class TopHashtagsService implements TopHashtagsLoader {
 
   List<HashtagData>? _topHashtags;
   bool _isLoaded = false;
+  final _AssetStringLoader _loadAssetString;
 
   /// Get top hashtags (returns empty list if not loaded)
   List<HashtagData> get topHashtags => _topHashtags ?? [];
@@ -93,7 +104,7 @@ class TopHashtagsService implements TopHashtagsLoader {
       );
 
       // Load the JSON file from assets
-      final jsonString = await rootBundle.loadString(
+      final jsonString = await _loadAssetString(
         'assets/top_1000_hashtags.json',
       );
 

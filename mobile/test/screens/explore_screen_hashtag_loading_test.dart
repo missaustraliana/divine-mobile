@@ -1,17 +1,36 @@
 // ABOUTME: Tests for hashtag loading and display in ExploreScreen Trending tab
 // ABOUTME: Verifies hashtags load quickly from JSON and display immediately after loading
 
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openvine/services/top_hashtags_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  late String bundledTopHashtagsJson;
+  late TopHashtagsService service;
+
+  setUpAll(() {
+    bundledTopHashtagsJson = File(
+      'assets/top_1000_hashtags.json',
+    ).readAsStringSync();
+  });
+
   group('TopHashtagsService Performance Tests', () {
+    setUp(() {
+      service = TopHashtagsService.forTesting(
+        loadAssetString: (_) async => bundledTopHashtagsJson,
+      );
+    });
+
     test('Hashtags load quickly from JSON asset (< 200ms)', () async {
       // Start timing hashtag load
       final startTime = DateTime.now();
 
       // Load hashtags from JSON
-      await TopHashtagsService.instance.loadTopHashtags();
+      await service.loadTopHashtags();
 
       final loadDuration = DateTime.now().difference(startTime);
 
@@ -23,13 +42,11 @@ void main() {
       );
 
       // Verify hashtags are loaded in service
-      expect(TopHashtagsService.instance.isLoaded, isTrue);
-      expect(TopHashtagsService.instance.topHashtags.length, greaterThan(0));
+      expect(service.isLoaded, isTrue);
+      expect(service.topHashtags.length, greaterThan(0));
     });
 
     test('TopHashtagsService loads hashtags only once (idempotent)', () async {
-      final service = TopHashtagsService.instance;
-
       // First load
       await service.loadTopHashtags();
       final firstLoadCount = service.topHashtags.length;
@@ -45,7 +62,6 @@ void main() {
     });
 
     test('getTopHashtags returns requested number of hashtags', () async {
-      final service = TopHashtagsService.instance;
       await service.loadTopHashtags();
 
       // Test various limits
@@ -62,7 +78,6 @@ void main() {
     test(
       'bundled popular hashtags use current API-derived suggestions',
       () async {
-        final service = TopHashtagsService.instance;
         await service.loadTopHashtags();
 
         final topHashtags = service.getTopHashtags(limit: 5);
@@ -72,17 +87,13 @@ void main() {
       },
     );
 
-    test('getTopHashtags returns empty list before loading', () {
-      // Create fresh service instance would normally need a reset mechanism
-      // For now, test the guard condition
-      final hashtags = TopHashtagsService.instance.getTopHashtags(limit: 20);
+    test('getTopHashtags returns fallback defaults before loading', () {
+      final hashtags = service.getTopHashtags(limit: 20);
 
-      // Should either be loaded (from previous test) or empty
-      expect(hashtags, isA<List<String>>());
+      expect(hashtags, equals(TopHashtagsService.defaultHashtags));
     });
 
     test('searchHashtags finds exact matches', () async {
-      final service = TopHashtagsService.instance;
       await service.loadTopHashtags();
 
       // Search for common hashtag (from bundled popular hashtag list)
@@ -93,7 +104,6 @@ void main() {
     });
 
     test('searchHashtags finds prefix matches', () async {
-      final service = TopHashtagsService.instance;
       await service.loadTopHashtags();
 
       // Search with prefix (from bundled popular hashtag list)
@@ -107,7 +117,6 @@ void main() {
     });
 
     test('searchHashtags is case insensitive', () async {
-      final service = TopHashtagsService.instance;
       await service.loadTopHashtags();
 
       final lowercase = service.searchHashtags('funny', limit: 10);
