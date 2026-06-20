@@ -241,7 +241,7 @@ void main() {
           '${signedUri.scheme}://${signedUri.host}${signedUri.path}',
           equals('https://api.example.com/api/users/$userPubkey/notifications'),
         );
-        expect(signedUri.queryParameters['limit'], equals('50'));
+        expect(signedUri.queryParameters['limit'], equals('20'));
         expect(signedUri.queryParameters['before'], isNotNull);
         expect(int.tryParse(signedUri.queryParameters['before']!), isNotNull);
         expect(signedMethod, equals('GET'));
@@ -271,7 +271,7 @@ void main() {
           signedUrl,
           equals(
             'https://api.example.com/api/users/$userPubkey/notifications'
-            '?limit=50&before=cursor_abc',
+            '?limit=20&before=cursor_abc',
           ),
         );
       });
@@ -307,7 +307,7 @@ void main() {
             signedUrl,
             equals(
               'https://api.example.com/api/users/$userPubkey/notifications'
-              '?limit=50&before=1700000000'
+              '?limit=20&before=1700000000'
               '&before_id=$stableCursorId',
             ),
           );
@@ -343,7 +343,7 @@ void main() {
           signedUrl,
           equals(
             'https://api.example.com/api/users/$userPubkey/notifications'
-            '?limit=50&before=manual_cursor',
+            '?limit=20&before=manual_cursor',
           ),
         );
       });
@@ -656,19 +656,20 @@ void main() {
 
           await repository.getNotifications();
 
-          requestedUri =
-              verify(
-                    () => funnelcakeApiClient.getNotifications(
-                      pubkey: userPubkey,
-                      cursor: any(named: 'cursor'),
-                      requestUri: captureAny(named: 'requestUri'),
-                      authHeaders: any(named: 'authHeaders'),
-                      limit: any(named: 'limit'),
-                    ),
-                  ).captured.single
-                  as Uri;
+          final captured = verify(
+            () => funnelcakeApiClient.getNotifications(
+              pubkey: userPubkey,
+              cursor: any(named: 'cursor'),
+              requestUri: captureAny(named: 'requestUri'),
+              authHeaders: any(named: 'authHeaders'),
+              limit: captureAny(named: 'limit'),
+            ),
+          ).captured;
+          requestedUri = captured.whereType<Uri>().single;
+          final requestedLimit = captured.whereType<int>().single;
 
           expect(requestedUri.toString(), equals(signedUrl));
+          expect(requestedLimit, equals(20));
         },
       );
 
@@ -695,19 +696,20 @@ void main() {
 
           await repository.getNotifications();
 
-          requestedUri =
-              verify(
-                    () => funnelcakeApiClient.getNotifications(
-                      pubkey: userPubkey,
-                      cursor: 'cursor_abc',
-                      requestUri: captureAny(named: 'requestUri'),
-                      authHeaders: any(named: 'authHeaders'),
-                      limit: any(named: 'limit'),
-                    ),
-                  ).captured.single
-                  as Uri;
+          final captured = verify(
+            () => funnelcakeApiClient.getNotifications(
+              pubkey: userPubkey,
+              cursor: 'cursor_abc',
+              requestUri: captureAny(named: 'requestUri'),
+              authHeaders: any(named: 'authHeaders'),
+              limit: captureAny(named: 'limit'),
+            ),
+          ).captured;
+          requestedUri = captured.whereType<Uri>().single;
+          final requestedLimit = captured.whereType<int>().single;
 
           expect(requestedUri.toString(), equals(signedUrl));
+          expect(requestedLimit, equals(20));
         },
       );
     });
@@ -2405,6 +2407,38 @@ void main() {
 
         expect(repository.hasPaginatedBeyondFirstPage, isFalse);
       });
+
+      test(
+        'resetPaginationDepth collapses the snapshot to the newest page',
+        () async {
+          stubProfiles({});
+          // A session that scrolled deep leaves more than a page of items in
+          // the long-lived snapshot. Build a 25-item first page with distinct,
+          // descending timestamps (n0 newest) so the newest-first order is
+          // deterministic and the trim back to the page size is observable.
+          stubNotifications([
+            for (var i = 0; i < 25; i++)
+              makeNotification(
+                id: 'n$i',
+                sourcePubkey: 'pub_$i',
+                sourceEventId: 'evt$i',
+                referencedEventId: 'video_$i',
+                createdAt: DateTime(2025).subtract(Duration(minutes: i)),
+              ),
+          ], hasMore: true);
+          await repository.getNotifications();
+          final before = (await repository.watchSnapshot().first).items;
+          expect(before, hasLength(25));
+          // Contract: trimming keeps the *newest* page — the first 20 rows of
+          // the newest-first snapshot, in order — not an arbitrary 20.
+          final expectedKeptIds = before.take(20).map((n) => n.id).toList();
+
+          repository.resetPaginationDepth();
+
+          final after = (await repository.watchSnapshot().first).items;
+          expect(after.map((n) => n.id).toList(), equals(expectedKeptIds));
+        },
+      );
     });
 
     group('markAsRead', () {
