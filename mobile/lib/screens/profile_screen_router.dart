@@ -26,7 +26,6 @@ import 'package:openvine/utils/npub_hex.dart';
 import 'package:openvine/utils/share_position_origin.dart';
 import 'package:openvine/widgets/profile/blocked_user_screen.dart';
 import 'package:openvine/widgets/profile/profile_grid.dart';
-import 'package:openvine/widgets/profile/profile_loading_view.dart';
 import 'package:openvine/widgets/profile/profile_video_feed_view.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:unified_logger/unified_logger.dart';
@@ -83,36 +82,34 @@ class _ProfileScreenRouterState extends ConsumerState<ProfileScreenRouter>
   Widget build(BuildContext context) {
     Log.info('🧭 ProfileScreenRouter.build', name: 'ProfileScreenRouter');
 
-    // Read derived context from router
-    final pageContext = ref.watch(pageContextProvider);
+    // Resolve this branch's route context. Until the scoped provider's
+    // Stream.value emits (the very first sub-frame), fall back to parsing the
+    // branch's own location synchronously so the first frame already renders
+    // the real profile layout — settings button included — instead of a blank
+    // placeholder. GoRouterState.of(context) is a direct widget read, so it
+    // observes this branch's route (matching the scoped override in
+    // app_router.dart), not the globally-active tab's.
+    final routeContext =
+        ref.watch(pageContextProvider).asData?.value ??
+        parseRoute(GoRouterState.of(context).uri.path);
 
     // Check if this is own profile grid view (needs own scaffold)
-    final isOwnProfileGrid = pageContext.maybeWhen(
-      data: (ctx) {
-        if (ctx.type != RouteType.profile) return false;
-        if (ctx.videoIndex != null) return false; // Video mode uses shell
-        final currentNpub = ref.read(authServiceProvider).currentNpub;
-        return ctx.npub == 'me' || ctx.npub == currentNpub;
-      },
-      orElse: () => false,
-    );
+    final currentNpub = ref.read(authServiceProvider).currentNpub;
+    final isOwnProfileGrid =
+        routeContext.type == RouteType.profile &&
+        routeContext.videoIndex == null && // Video mode uses shell
+        (routeContext.npub == 'me' || routeContext.npub == currentNpub);
 
-    final content = switch (pageContext) {
-      AsyncLoading() => const ProfileLoadingView(),
-      AsyncError(:final error) => Center(
-        child: Text(context.l10n.profileErrorPrefix(error)),
-      ),
-      AsyncData(:final value) => _ProfileContentView(
-        routeContext: value,
-        scrollController: _scrollController,
-        onFetchProfile: _fetchProfileIfNeeded,
-        onEditProfile: _editProfile,
-        onOpenClips: _openClips,
-        onMore: _more,
-        onShareProfile: _shareProfile,
-        refreshNotifier: _refreshNotifier,
-      ),
-    };
+    final content = _ProfileContentView(
+      routeContext: routeContext,
+      scrollController: _scrollController,
+      onFetchProfile: _fetchProfileIfNeeded,
+      onEditProfile: _editProfile,
+      onOpenClips: _openClips,
+      onMore: _more,
+      onShareProfile: _shareProfile,
+      refreshNotifier: _refreshNotifier,
+    );
 
     if (isOwnProfileGrid) {
       final userIdHex = ref.read(authServiceProvider).currentPublicKeyHex;
@@ -122,7 +119,13 @@ class _ProfileScreenRouterState extends ConsumerState<ProfileScreenRouter>
       );
 
       if (userIdHex == null || profileRepository == null) {
-        return const _ProfileScaffold(body: ProfileLoadingView());
+        // profileRepository isn't ready yet (cold start before the
+        // signer-backed client is up). Render the real profile layout — its
+        // header, stats, and video grid degrade to skeletons while
+        // MyProfileBloc is absent — instead of a separate loading view. Once
+        // the repository resolves, the BlocProvider below mounts and the
+        // layout fills in with real data.
+        return _ProfileScaffold(body: content);
       }
 
       return BlocProvider<MyProfileBloc>(
@@ -509,11 +512,15 @@ class _ProfileDataView extends ConsumerWidget {
         );
       },
       child: switch (feedState.status) {
-        ProfileFeedStatus.initial ||
-        ProfileFeedStatus.loading => const ProfileLoadingView(),
         ProfileFeedStatus.failure => Center(
           child: Text(context.l10n.profileFeedError),
         ),
+        // During the cold load we render the real layout (header/stats
+        // skeletonize themselves; the videos tab shows a skeleton grid)
+        // instead of a separate placeholder, so the load→ready transition
+        // does not pop.
+        ProfileFeedStatus.initial ||
+        ProfileFeedStatus.loading ||
         ProfileFeedStatus.ready => ProfileViewSwitcher(
           npub: npub,
           userIdHex: userIdHex,
@@ -521,7 +528,9 @@ class _ProfileDataView extends ConsumerWidget {
           displayName: displayName,
           profileStats: profileStats,
           videos: feedState.videos,
-          isLoadingVideos: feedState.isInitialLoad,
+          isLoadingVideos:
+              feedState.status != ProfileFeedStatus.ready ||
+              feedState.isInitialLoad,
           videoIndex: videoIndex,
           scrollController: scrollController,
           onEditProfile: onEditProfile,
