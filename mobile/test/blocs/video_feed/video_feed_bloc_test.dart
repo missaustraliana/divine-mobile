@@ -15,6 +15,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:models/models.dart';
 import 'package:openvine/blocs/video_feed/home_feed_cache.dart';
 import 'package:openvine/blocs/video_feed/video_feed_bloc.dart';
+import 'package:openvine/observability/reportable_error.dart';
 import 'package:profile_repository/profile_repository.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -270,6 +271,127 @@ void main() {
               .having((s) => s.videos.length, 'videos count', pageSize)
               .having((s) => s.mode, 'mode', FeedMode.following)
               .having((s) => s.hasMore, 'hasMore', true),
+        ],
+      );
+
+      blocTest<VideoFeedBloc, VideoFeedBlocState>(
+        'applies background Nostr enrichment to following feed videos',
+        setUp: () {
+          final authors = ['author1'];
+          final compactVideo = createTestVideo('video-1').copyWith(
+            rawTags: const {
+              'd': 'video-1',
+              'url': 'https://example.com/video-1.mp4',
+              'title': 'REST row',
+              'thumb': 'https://example.com/video-1.jpg',
+            },
+          );
+
+          when(() => mockFollowRepository.followingPubkeys).thenReturn(authors);
+          when(
+            () => mockVideosRepository.getHomeFeedVideos(
+              authors: authors,
+              videoRefs: any(named: 'videoRefs'),
+              userPubkey: any(named: 'userPubkey'),
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          ).thenAnswer((_) async => HomeFeedResult(videos: [compactVideo]));
+        },
+        build: () => VideoFeedBloc(
+          videosRepository: mockVideosRepository,
+          followRepository: mockFollowRepository,
+          curatedListRepository: mockCuratedListRepository,
+          enrichVideos: (videos) async => [
+            videos.single.copyWith(
+              rawTags: {
+                ...videos.single.rawTags,
+                'verification': 'verified_mobile',
+                'proofmode': '{}',
+              },
+            ),
+          ],
+        ),
+        act: (bloc) =>
+            bloc.add(const VideoFeedStarted(mode: FeedMode.following)),
+        wait: const Duration(milliseconds: 100),
+        expect: () => [
+          const VideoFeedBlocState(mode: FeedMode.following),
+          isA<VideoFeedBlocState>()
+              .having((s) => s.status, 'status', VideoFeedStatus.success)
+              .having(
+                (s) => s.videos.single.hasProofMode,
+                'proof before',
+                isFalse,
+              ),
+          isA<VideoFeedBlocState>()
+              .having((s) => s.status, 'status', VideoFeedStatus.success)
+              .having(
+                (s) => s.videos.single.hasProofMode,
+                'proof after',
+                isTrue,
+              )
+              .having(
+                (s) => s.videos.single.rawTags['verification'],
+                'verification tag',
+                'verified_mobile',
+              ),
+        ],
+      );
+
+      blocTest<VideoFeedBloc, VideoFeedBlocState>(
+        'reports unexpected background enrichment failures as Reportable',
+        setUp: () {
+          final authors = ['author1'];
+          final compactVideo = createTestVideo('video-1').copyWith(
+            rawTags: const {
+              'd': 'video-1',
+              'url': 'https://example.com/video-1.mp4',
+              'title': 'REST row',
+              'thumb': 'https://example.com/video-1.jpg',
+            },
+          );
+
+          when(() => mockFollowRepository.followingPubkeys).thenReturn(authors);
+          when(
+            () => mockVideosRepository.getHomeFeedVideos(
+              authors: authors,
+              videoRefs: any(named: 'videoRefs'),
+              userPubkey: any(named: 'userPubkey'),
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          ).thenAnswer((_) async => HomeFeedResult(videos: [compactVideo]));
+        },
+        build: () => VideoFeedBloc(
+          videosRepository: mockVideosRepository,
+          followRepository: mockFollowRepository,
+          curatedListRepository: mockCuratedListRepository,
+          enrichVideos: (_) async => throw StateError('enrichment broke'),
+        ),
+        act: (bloc) =>
+            bloc.add(const VideoFeedStarted(mode: FeedMode.following)),
+        wait: const Duration(milliseconds: 100),
+        expect: () => [
+          const VideoFeedBlocState(mode: FeedMode.following),
+          isA<VideoFeedBlocState>()
+              .having((s) => s.status, 'status', VideoFeedStatus.success)
+              .having((s) => s.videos.length, 'videos count', 1),
+        ],
+        errors: () => [
+          isA<Reportable<Object>>()
+              .having(
+                (error) => error.context,
+                'context',
+                '_scheduleNostrEnrichment',
+              )
+              .having(
+                (error) => error.unwrap(),
+                'inner error',
+                isA<StateError>(),
+              ),
         ],
       );
 
@@ -1077,9 +1199,9 @@ void main() {
           final followingResult = Completer<HomeFeedResult>();
           final newVideosResult = Completer<List<VideoEvent>>();
 
-          when(() => mockFollowRepository.followingPubkeys).thenReturn([
-            'pubkey',
-          ]);
+          when(
+            () => mockFollowRepository.followingPubkeys,
+          ).thenReturn(['pubkey']);
           when(
             () => mockVideosRepository.getHomeFeedVideos(
               authors: any(named: 'authors'),
@@ -1285,14 +1407,10 @@ void main() {
           final bloc = createBloc();
           addTearDown(bloc.close);
 
-          bloc.add(
-            const VideoFeedSourceChanged(VideoFeedSource.following()),
-          );
+          bloc.add(const VideoFeedSourceChanged(VideoFeedSource.following()));
           await pumpEventQueue();
 
-          bloc.add(
-            const VideoFeedSourceChanged(VideoFeedSource.newVideos()),
-          );
+          bloc.add(const VideoFeedSourceChanged(VideoFeedSource.newVideos()));
           await pumpEventQueue();
 
           newVideosResult.complete(newVideos);

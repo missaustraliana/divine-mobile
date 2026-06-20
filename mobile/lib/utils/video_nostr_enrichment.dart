@@ -1,10 +1,108 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:models/models.dart' hide LogCategory;
 import 'package:nostr_client/nostr_client.dart';
 import 'package:nostr_sdk/nostr_sdk.dart' show Filter;
 import 'package:unified_logger/unified_logger.dart';
 import 'package:videos_repository/videos_repository.dart';
+
+const _proofCriticalRawTagKeys = <String>{
+  'verification',
+  'proofmode',
+  'device_attestation',
+  'c2pa_manifest_id',
+  'identity_binding',
+  'identity_verifier',
+  'identity_portable',
+};
+
+/// Bounded, time-based throttle for REST rows that still need relay
+/// enrichment after a previous lookup missed.
+///
+/// Misses are retried after [retryDelay] rather than suppressed forever, so a
+/// transient relay miss/timeout can still recover on a later feed pass.
+class NostrTagEnrichmentAttemptTracker {
+  NostrTagEnrichmentAttemptTracker({
+    this.retryDelay = const Duration(minutes: 5),
+    this.maxEntries = 500,
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now;
+
+  final Duration retryDelay;
+  final int maxEntries;
+  final DateTime Function() _now;
+  final _nextAttemptAtById = <String, DateTime>{};
+
+  bool shouldAttempt(String id) {
+    final retryAt = _nextAttemptAtById[id.toLowerCase()];
+    return retryAt == null || !_now().isBefore(retryAt);
+  }
+
+  void recordAttemptResults({
+    required Iterable<String> attemptedIds,
+    required Iterable<String> enrichedIds,
+  }) {
+    final now = _now();
+    final enriched = {for (final id in enrichedIds) id.toLowerCase()};
+
+    for (final id in enriched) {
+      _nextAttemptAtById.remove(id);
+    }
+
+    for (final id in attemptedIds) {
+      final key = id.toLowerCase();
+      if (!enriched.contains(key)) {
+        _nextAttemptAtById[key] = now.add(retryDelay);
+      }
+    }
+
+    _prune(now);
+  }
+
+  @visibleForTesting
+  bool isThrottling(String id) =>
+      _nextAttemptAtById.containsKey(id.toLowerCase());
+
+  void _prune(DateTime now) {
+    _nextAttemptAtById.removeWhere((_, retryAt) => !now.isBefore(retryAt));
+    if (_nextAttemptAtById.length <= maxEntries) return;
+
+    final entries = _nextAttemptAtById.entries.toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    final overflow = _nextAttemptAtById.length - maxEntries;
+    for (final entry in entries.take(overflow)) {
+      _nextAttemptAtById.remove(entry.key);
+    }
+  }
+}
+
+/// Returns whether a REST-sourced video should be fetched from Nostr for the
+/// full event tag set.
+///
+/// Funnelcake has returned both very compact rows with fewer than four tags
+/// and semi-compact rows with ordinary media tags (`d`, `url`, `title`,
+/// thumbnail) but no proof-critical tags. The old raw tag count check missed
+/// the latter, which can hide Human-Made / ProofMode badges until the backend
+/// includes compact proof summaries on all feed rows.
+bool needsNostrTagEnrichment(VideoEvent video) {
+  if (video.rawTags.length < 4) return true;
+  if (video.proofSummary != null) return false;
+  if (video.hasProofMode || video.hasBasicProof) return false;
+
+  final rawTagKeys = video.rawTags.keys.toSet();
+  if (rawTagKeys.intersection(_proofCriticalRawTagKeys).isNotEmpty) {
+    return false;
+  }
+
+  final hasCoreMediaTags =
+      rawTagKeys.contains('d') &&
+      rawTagKeys.contains('title') &&
+      (rawTagKeys.contains('url') ||
+          rawTagKeys.contains('thumb') ||
+          rawTagKeys.contains('thumbnail'));
+  return hasCoreMediaTags;
+}
 
 /// Enrich REST API videos with full Nostr event data.
 ///
@@ -22,15 +120,13 @@ Future<List<VideoEvent>> enrichVideosWithNostrTags(
   List<VideoEvent> videos, {
   required NostrClient nostrService,
   String callerName = 'VideoEnrichment',
+  NostrTagEnrichmentAttemptTracker? attemptTracker,
 }) async {
   if (videos.isEmpty) return videos;
 
-  // Collect IDs of videos that need enrichment.
-  // It's possible that stat's are already added like 'views', 'loops', 'id'
-  // which is the reason we check for < 4 tags to identify
-  // videos missing the full tag set.
   final idsToEnrich = videos
-      .where((v) => v.rawTags.length < 4)
+      .where(needsNostrTagEnrichment)
+      .where((v) => attemptTracker?.shouldAttempt(v.id) ?? true)
       .map((v) => v.id)
       .toList();
 
@@ -47,7 +143,13 @@ Future<List<VideoEvent>> enrichVideosWithNostrTags(
         .queryEvents([filter])
         .timeout(const Duration(seconds: 5));
 
-    if (nostrEvents.isEmpty) return videos;
+    if (nostrEvents.isEmpty) {
+      attemptTracker?.recordAttemptResults(
+        attemptedIds: idsToEnrich,
+        enrichedIds: const [],
+      );
+      return videos;
+    }
 
     // Build a lookup map: event ID -> parsed VideoEvent for enrichment
     final nostrEventsMap = <String, VideoEvent>{};
@@ -68,7 +170,18 @@ Future<List<VideoEvent>> enrichVideosWithNostrTags(
       }
     }
 
-    if (nostrEventsMap.isEmpty) return videos;
+    if (nostrEventsMap.isEmpty) {
+      attemptTracker?.recordAttemptResults(
+        attemptedIds: idsToEnrich,
+        enrichedIds: const [],
+      );
+      return videos;
+    }
+
+    attemptTracker?.recordAttemptResults(
+      attemptedIds: idsToEnrich,
+      enrichedIds: nostrEventsMap.keys,
+    );
 
     // Merge Nostr-parsed fields into REST API videos
     return videos.map((video) {
@@ -148,6 +261,10 @@ Future<List<VideoEvent>> enrichVideosWithNostrTags(
       return video;
     }).toList();
   } catch (e) {
+    attemptTracker?.recordAttemptResults(
+      attemptedIds: idsToEnrich,
+      enrichedIds: const [],
+    );
     // Non-fatal: return original videos if enrichment fails
     Log.warning(
       '$callerName: Failed to enrich with Nostr tags: $e',
@@ -172,12 +289,14 @@ List<VideoEvent> enrichVideosInBackground(
   required NostrClient nostrService,
   required void Function(List<VideoEvent> enrichedVideos) onEnriched,
   String callerName = 'VideoEnrichment',
+  NostrTagEnrichmentAttemptTracker? attemptTracker,
 }) {
   unawaited(
     enrichVideosWithNostrTags(
       videos,
       nostrService: nostrService,
       callerName: callerName,
+      attemptTracker: attemptTracker,
     ).then((enriched) {
       // Only call back if enrichment actually changed something
       if (enriched != videos) {

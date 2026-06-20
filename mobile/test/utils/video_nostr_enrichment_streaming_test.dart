@@ -33,6 +33,68 @@ void main() {
     registerFallbackValue(<Filter>[]);
   });
 
+  group('needsNostrTagEnrichment', () {
+    test('selects compact REST rows with sparse raw tags', () {
+      final video = _createTestVideo(
+        id: 'v1',
+        rawTags: {'views': '10', 'loops': '5'},
+      );
+
+      expect(needsNostrTagEnrichment(video), isTrue);
+    });
+
+    test('selects semi-compact REST rows missing proof-critical tags', () {
+      final video = _createTestVideo(
+        id: 'v1',
+        rawTags: {
+          'd': 'v1',
+          'url': 'https://example.com/v1.mp4',
+          'title': 'Semi compact',
+          'thumb': 'https://example.com/v1.jpg',
+        },
+      );
+
+      expect(needsNostrTagEnrichment(video), isTrue);
+    });
+
+    test('skips rows that already have compact proof summary', () {
+      final video =
+          _createTestVideo(
+            id: 'v1',
+            rawTags: {
+              'd': 'v1',
+              'url': 'https://example.com/v1.mp4',
+              'title': 'Already summarized',
+              'thumb': 'https://example.com/v1.jpg',
+            },
+          ).copyWith(
+            proofSummary: const ProofVerificationSummary(
+              status: 'present',
+              level: 'basic_proof',
+              version: 1,
+              checks: {'proofmode_present': true},
+            ),
+          );
+
+      expect(needsNostrTagEnrichment(video), isFalse);
+    });
+
+    test('skips rows that already have proof-critical raw tags', () {
+      final video = _createTestVideo(
+        id: 'v1',
+        rawTags: {
+          'd': 'v1',
+          'url': 'https://example.com/v1.mp4',
+          'title': 'Already proof tagged',
+          'thumb': 'https://example.com/v1.jpg',
+          'proofmode': '{}',
+        },
+      );
+
+      expect(needsNostrTagEnrichment(video), isFalse);
+    });
+  });
+
   group('enrichVideosInBackground', () {
     late _MockNostrClient mockNostrService;
 
@@ -131,6 +193,46 @@ void main() {
       expect(enriched.first.contentWarningLabels, equals(['nudity']));
     });
 
+    test('throttles unresolved rows until the retry delay expires', () async {
+      var now = DateTime(2026);
+      final tracker = NostrTagEnrichmentAttemptTracker(
+        now: () => now,
+      );
+      final videos = [_createTestVideo(id: 'v1')];
+
+      when(
+        () => mockNostrService.queryEvents(any()),
+      ).thenAnswer((_) async => []);
+
+      await enrichVideosWithNostrTags(
+        videos,
+        nostrService: mockNostrService,
+        attemptTracker: tracker,
+      );
+
+      verify(() => mockNostrService.queryEvents(any())).called(1);
+      expect(tracker.isThrottling('v1'), isTrue);
+      clearInteractions(mockNostrService);
+
+      await enrichVideosWithNostrTags(
+        videos,
+        nostrService: mockNostrService,
+        attemptTracker: tracker,
+      );
+
+      verifyNever(() => mockNostrService.queryEvents(any()));
+
+      now = now.add(const Duration(minutes: 5));
+
+      await enrichVideosWithNostrTags(
+        videos,
+        nostrService: mockNostrService,
+        attemptTracker: tracker,
+      );
+
+      verify(() => mockNostrService.queryEvents(any())).called(1);
+    });
+
     test('enrichment failure does not affect initial return', () async {
       final videos = [_createTestVideo(id: 'v1')];
 
@@ -156,34 +258,37 @@ void main() {
       expect(onEnrichedCalled, isFalse);
     });
 
-    test('does not call onEnriched when no enrichment needed', () async {
-      final videos = [
-        _createTestVideo(
-          id: 'v1',
-          rawTags: {
-            'url': 'https://example.com/v1.mp4',
-            'title': 'Already enriched',
-            'd': 'v1',
-            'proof': 'c2pa-hash',
+    test(
+      'does not call onEnriched when proof tags are already present',
+      () async {
+        final videos = [
+          _createTestVideo(
+            id: 'v1',
+            rawTags: {
+              'url': 'https://example.com/v1.mp4',
+              'title': 'Already enriched',
+              'd': 'v1',
+              'c2pa_manifest_id': 'c2pa-hash',
+            },
+          ),
+        ];
+
+        // queryEvents should not be called since badge-critical tags are present.
+        final result = enrichVideosInBackground(
+          videos,
+          nostrService: mockNostrService,
+          onEnriched: (_) {
+            fail('onEnriched should not be called');
           },
-        ),
-      ];
+        );
 
-      // queryEvents should not be called since rawTags.length >= 4
-      final result = enrichVideosInBackground(
-        videos,
-        nostrService: mockNostrService,
-        onEnriched: (_) {
-          fail('onEnriched should not be called');
-        },
-      );
+        expect(result, same(videos));
 
-      expect(result, same(videos));
+        // Wait to ensure no callback
+        await Future<void>.delayed(const Duration(milliseconds: 100));
 
-      // Wait to ensure no callback
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-
-      verifyNever(() => mockNostrService.queryEvents(any()));
-    });
+        verifyNever(() => mockNostrService.queryEvents(any()));
+      },
+    );
   });
 }
