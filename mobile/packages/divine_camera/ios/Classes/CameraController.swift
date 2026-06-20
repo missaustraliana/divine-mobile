@@ -21,7 +21,15 @@ class CameraController: NSObject {
     private var audioInput: AVCaptureDeviceInput?
     private var videoOutput: AVCaptureVideoDataOutput?
     private var audioOutput: AVCaptureAudioDataOutput?
-    
+
+    /// Still-photo output for single-frame capture (stop-motion). Added at
+    /// session setup alongside the video data output; AVCapturePhotoOutput
+    /// coexists with AVCaptureVideoDataOutput (unlike AVCaptureMovieFileOutput).
+    private var photoOutput: AVCapturePhotoOutput?
+    /// Retains in-flight photo capture delegates until their completion fires —
+    /// AVCapturePhotoOutput does not retain its delegate.
+    private var activePhotoDelegates: [PhotoCaptureDelegate] = []
+
     // AVAssetWriter for video recording (replaces AVCaptureMovieFileOutput)
     private var assetWriter: AVAssetWriter?
     private var videoWriterInput: AVAssetWriterInput?
@@ -718,7 +726,27 @@ class CameraController: NSObject {
         } else {
             DivineCameraLog.shared.error("DivineCamera: Cannot add video output to session", name: "DivineCamera.Setup")
         }
-        
+
+        // Still-photo output for single-frame (stop-motion) capture. Safe to add
+        // here: AVCapturePhotoOutput does not conflict with the video data output.
+        let photoOutput = AVCapturePhotoOutput()
+        if session.canAddOutput(photoOutput) {
+            session.addOutput(photoOutput)
+            self.photoOutput = photoOutput
+            if let connection = photoOutput.connection(with: .video) {
+                if connection.isVideoOrientationSupported {
+                    connection.videoOrientation = .portrait
+                }
+                if connection.isVideoMirroringSupported {
+                    let isFront = currentLens == .front
+                    connection.isVideoMirrored = isFront && mirrorFrontCameraOutput
+                }
+            }
+            DivineCameraLog.shared.debug("DivineCamera: Photo output added successfully")
+        } else {
+            DivineCameraLog.shared.error("DivineCamera: Cannot add photo output to session", name: "DivineCamera.Setup")
+        }
+
         // NOTE: AVCaptureAudioDataOutput is also added lazily in startRecording().
         
         // NOTE: MovieOutput is intentionally NOT added here during initialization.
@@ -1168,6 +1196,15 @@ class CameraController: NSObject {
                         videoConnection.isVideoMirrored = isFront && self.mirrorFrontCameraOutput
                     }
                 }
+                if let photoConnection = self.photoOutput?.connection(with: .video) {
+                    if photoConnection.isVideoOrientationSupported {
+                        photoConnection.videoOrientation = .portrait
+                    }
+                    let isFront = newDevice.position == .front
+                    if photoConnection.isVideoMirroringSupported {
+                        photoConnection.isVideoMirrored = isFront && self.mirrorFrontCameraOutput
+                    }
+                }
             } catch {
                 // Re-add old input if failed
                 if let oldInput = self.videoInput {
@@ -1224,6 +1261,7 @@ class CameraController: NSObject {
                 enableScreenFlash()
                 currentTorchMode = .on
                 isAutoFlashMode = false
+                currentFlashMode = .off
                 return true
             } else if mode == "auto" {
                 // Auto mode for front camera - will check brightness when recording starts
@@ -1264,7 +1302,11 @@ class CameraController: NSObject {
                 DivineCameraLog.shared.debug("DivineCamera: Auto flash mode enabled - will check brightness when recording starts")
                 
             case "on":
+                if device.isTorchModeSupported(.off) {
+                    device.torchMode = .off
+                }
                 currentFlashMode = .on
+                currentTorchMode = .off
                 isAutoFlashMode = false
                 
             case "torch":
@@ -1272,6 +1314,7 @@ class CameraController: NSObject {
                     device.torchMode = .on
                 }
                 currentTorchMode = .on
+                currentFlashMode = .off
                 isAutoFlashMode = false
                 
             default:
@@ -2095,7 +2138,16 @@ class CameraController: NSObject {
             return "off"
         }
     }
-    
+
+    private func photoFlashMode(for output: AVCapturePhotoOutput) -> AVCaptureDevice.FlashMode {
+        let requestedMode = currentFlashMode
+        let supportedModes = output.supportedFlashModes
+        if supportedModes.contains(NSNumber(value: requestedMode.rawValue)) {
+            return requestedMode
+        }
+        return .off
+    }
+
     /// Releases all camera resources.
     func release() {
         // Restore screen brightness if screen flash was enabled
@@ -2153,6 +2205,48 @@ class CameraController: NSObject {
 // MARK: - FlutterTexture
 
 extension CameraController: FlutterTexture {
+    /// Captures a single still photo and writes it to disk as JPEG.
+    ///
+    /// Completion is invoked with a result map (`filePath`, `width`, `height`)
+    /// on success, or nil plus an error message on failure. Rejected while a
+    /// video recording is in progress.
+    func capturePhoto(
+        outputDirectory: String?,
+        useCache: Bool,
+        completion: @escaping ([String: Any]?, String?) -> Void
+    ) {
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            guard let photoOutput = self.photoOutput else {
+                completion(nil, "Photo output not available")
+                return
+            }
+            guard !self.isRecording else {
+                completion(nil, "Cannot capture photo while recording")
+                return
+            }
+
+            let settings = AVCapturePhotoSettings(
+                format: [AVVideoCodecKey: AVVideoCodecType.jpeg]
+            )
+            settings.flashMode = self.photoFlashMode(for: photoOutput)
+
+            let delegate = PhotoCaptureDelegate(
+                outputDirectory: outputDirectory,
+                useCache: useCache
+            )
+            delegate.onFinished = { [weak self, weak delegate] map, error in
+                completion(map, error)
+                guard let self = self, let delegate = delegate else { return }
+                self.sessionQueue.async {
+                    self.activePhotoDelegates.removeAll { $0 === delegate }
+                }
+            }
+            self.activePhotoDelegates.append(delegate)
+            photoOutput.capturePhoto(with: settings, delegate: delegate)
+        }
+    }
+
     func copyPixelBuffer() -> Unmanaged<CVPixelBuffer>? {
         pixelBufferLock.lock()
         defer { pixelBufferLock.unlock() }

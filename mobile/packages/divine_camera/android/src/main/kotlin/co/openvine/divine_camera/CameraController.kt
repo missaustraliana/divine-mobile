@@ -8,6 +8,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -16,6 +17,7 @@ import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Surface
@@ -52,6 +54,11 @@ class CameraController(
     private var preview: Preview? = null
     private var videoCapture: VideoCapture<Recorder>? = null
     private var recording: Recording? = null
+
+    // Still-photo use case for single-frame (stop-motion) capture. Null when the
+    // device cannot bind it concurrently with Preview + VideoCapture, in which
+    // case photo capture is unavailable but video keeps working.
+    private var imageCapture: ImageCapture? = null
 
     private var textureEntry: TextureRegistry.SurfaceTextureEntry? = null
     private var flutterSurfaceTexture: SurfaceTexture? = null
@@ -893,12 +900,7 @@ class CameraController(
             DivineCameraLog.d(TAG, "Binding use cases to lifecycle...")
 
             // Bind use cases to camera
-            camera = provider.bindToLifecycle(
-                activity as LifecycleOwner,
-                cameraSelector,
-                preview,
-                videoCapture
-            )
+            camera = bindUseCasesWithPhoto(provider, cameraSelector)
 
             DivineCameraLog.d(TAG, "Camera bound successfully")
 
@@ -1045,12 +1047,7 @@ class CameraController(
                 .build()
 
             // Bind use cases to the new camera
-            camera = provider.bindToLifecycle(
-                activity as LifecycleOwner,
-                cameraSelector,
-                preview,
-                videoCapture
-            )
+            camera = bindUseCasesWithPhoto(provider, cameraSelector)
 
             // Get camera info from new camera
             camera?.let { cam ->
@@ -1100,6 +1097,8 @@ class CameraController(
                     enableScreenFlash()
                     isTorchEnabled = true
                     isAutoFlashMode = false
+                    currentFlashMode = ImageCapture.FLASH_MODE_OFF
+                    applyPhotoFlashMode()
                     return true
                 } else if (mode == "auto") {
                     // Auto mode for front camera - will check brightness when recording starts
@@ -1107,6 +1106,7 @@ class CameraController(
                     isTorchEnabled = false
                     isAutoFlashMode = true
                     currentFlashMode = ImageCapture.FLASH_MODE_AUTO
+                    applyPhotoFlashMode()
                     DivineCameraLog.d(TAG, "Auto flash mode enabled for front camera")
                     return true
                 } else {
@@ -1145,8 +1145,10 @@ class CameraController(
                     cam.cameraControl.enableTorch(true)
                     isTorchEnabled = true
                     isAutoFlashMode = false
+                    currentFlashMode = ImageCapture.FLASH_MODE_OFF
                 }
             }
+            applyPhotoFlashMode()
             true
         } catch (e: Exception) {
             DivineCameraLog.e(TAG, "Failed to set flash mode", e)
@@ -1623,12 +1625,7 @@ class CameraController(
                 )
                 .build()
 
-            camera = provider.bindToLifecycle(
-                activity as LifecycleOwner,
-                cameraSelector,
-                preview,
-                videoCapture
-            )
+            camera = bindUseCasesWithPhoto(provider, cameraSelector)
 
             camera?.let { cam ->
                 val zoomState =
@@ -1801,6 +1798,116 @@ class CameraController(
         AudioStats.AUDIO_STATE_ENCODER_ERROR -> "ENCODER_ERROR"
         AudioStats.AUDIO_STATE_SOURCE_ERROR -> "SOURCE_ERROR"
         else -> "UNKNOWN($state)"
+    }
+
+    /**
+     * Binds Preview + VideoCapture + ImageCapture, falling back to
+     * Preview + VideoCapture when the device cannot support all three
+     * concurrently. When the photo use case is dropped, [imageCapture] is left
+     * null (photo capture unavailable) and video recording keeps working.
+     */
+    private fun bindUseCasesWithPhoto(
+        provider: ProcessCameraProvider,
+        cameraSelector: CameraSelector
+    ): Camera? {
+        val owner = activity as LifecycleOwner
+        val photo = ImageCapture.Builder()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setTargetAspectRatio(AspectRatio.RATIO_16_9)
+            .setTargetRotation(currentTargetRotation())
+            .setFlashMode(currentFlashMode)
+            .build()
+        return try {
+            val bound = provider.bindToLifecycle(
+                owner, cameraSelector, preview, videoCapture, photo
+            )
+            imageCapture = photo
+            bound
+        } catch (e: Exception) {
+            DivineCameraLog.e(
+                TAG,
+                "Cannot bind ImageCapture with Preview+VideoCapture; photo " +
+                    "capture disabled on this device: ${e.message}"
+            )
+            imageCapture = null
+            provider.unbindAll()
+            provider.bindToLifecycle(owner, cameraSelector, preview, videoCapture)
+        }
+    }
+
+    /**
+     * Captures a single still photo and writes it to disk as JPEG.
+     * @param outputDirectory If provided, saves the photo there; otherwise uses
+     *   the cache or files directory per [useCache].
+     * @param useCache If true, saves to the cache directory (temporary),
+     *   otherwise the files directory (permanent).
+     * @param callback Result map (`filePath`, `width`, `height`) on success, or
+     *   null plus an error message on failure. Invoked on the main thread.
+     */
+    fun capturePhoto(
+        outputDirectory: String?,
+        useCache: Boolean,
+        callback: (Map<String, Any?>?, String?) -> Unit
+    ) {
+        val capture = imageCapture
+        if (capture == null) {
+            callback(null, "Photo capture not available")
+            return
+        }
+        if (isRecording) {
+            callback(null, "Cannot capture photo while recording")
+            return
+        }
+
+        capture.targetRotation = currentTargetRotation()
+        capture.flashMode = currentFlashMode
+
+        val outputDir = when {
+            outputDirectory != null -> File(outputDirectory)
+            useCache -> context.cacheDir
+            else -> context.filesDir
+        }
+        if (!outputDir.exists()) outputDir.mkdirs()
+        val photoFile = File(outputDir, "IMG_${System.currentTimeMillis()}.jpg")
+        val options = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+
+        capture.takePicture(
+            options,
+            cameraExecutor,
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    val bounds = BitmapFactory.Options().apply {
+                        inJustDecodeBounds = true
+                    }
+                    BitmapFactory.decodeFile(photoFile.absolutePath, bounds)
+                    val map = mapOf(
+                        "filePath" to photoFile.absolutePath,
+                        "width" to bounds.outWidth.takeIf { it > 0 },
+                        "height" to bounds.outHeight.takeIf { it > 0 }
+                    )
+                    mainHandler.post { callback(map, null) }
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    mainHandler.post {
+                        callback(null, exception.message ?: "Photo capture failed")
+                    }
+                }
+            }
+        )
+    }
+
+    @Suppress("DEPRECATION")
+    private fun currentTargetRotation(): Int {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            activity.display?.rotation ?: Surface.ROTATION_0
+        } else {
+            activity.windowManager.defaultDisplay.rotation
+        }
+    }
+
+    private fun applyPhotoFlashMode() {
+        imageCapture?.flashMode = currentFlashMode
     }
 
     /**
