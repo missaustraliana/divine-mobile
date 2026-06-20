@@ -5263,6 +5263,34 @@ class AppLocalizationsKo extends AppLocalizations {
   String get dmReactionAddCustomA11yLabel => 'Add custom emoji reaction';
 
   @override
+  String dmReelReplyComposerHint(String name) {
+    return '$name님에게 메시지…';
+  }
+
+  @override
+  String get dmReelReplyComposerHintSelf => '나에게 답장…';
+
+  @override
+  String get dmReelReplyComposerSemanticLabel => '이 릴스에 답장';
+
+  @override
+  String get dmReelReplyViewChat => '채팅 보기';
+
+  @override
+  String get dmReelReplyViewChatA11yLabel => '채팅 열기';
+
+  @override
+  String get dmReelReplySentAnnouncement => '답장을 보냈습니다';
+
+  @override
+  String dmReelReactionSentAnnouncement(String emoji) {
+    return '$emoji 반응함';
+  }
+
+  @override
+  String get dmReelReplyFailed => '보내지 못했습니다';
+
+  @override
   String dmReactionChipOwnA11yLabel(String emoji) {
     return 'Your reaction: $emoji';
   }

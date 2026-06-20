@@ -5,6 +5,7 @@
 
 import 'dart:async';
 
+import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -772,22 +773,25 @@ void main() {
         ).thenAnswer((_) async => null);
       });
 
-      Widget buildWithVideoMessage({required String message}) =>
-          testMaterialApp(
-            home: Scaffold(
-              body: MessageBubble(
-                message: message,
-                timestamp: '2:30 PM',
-                isSent: true,
-              ),
-            ),
-            mockNostrService: mockNostrClient,
-            additionalOverrides: [
-              videoEventServiceProvider.overrideWithValue(
-                mockVideoEventService,
-              ),
-            ],
-          );
+      Widget buildWithVideoMessage({
+        required String message,
+        DmSharedVideoRef? sharedVideoRef,
+      }) => testMaterialApp(
+        home: Scaffold(
+          body: MessageBubble(
+            message: message,
+            timestamp: '2:30 PM',
+            isSent: true,
+            sharedVideoRef: sharedVideoRef,
+          ),
+        ),
+        mockNostrService: mockNostrClient,
+        additionalOverrides: [
+          videoEventServiceProvider.overrideWithValue(
+            mockVideoEventService,
+          ),
+        ],
+      );
 
       testWidgets('shows loading spinner before video resolves', (
         tester,
@@ -825,7 +829,132 @@ void main() {
         expect(find.text('My Cool Video'), findsOneWidget);
       });
 
-      testWidgets('falls back to link text when video not found', (
+      testWidgets('renders from structured q-tag ref without a legacy URL', (
+        tester,
+      ) async {
+        when(
+          () => mockVideoEventService.getVideoEventByVineId('abc123'),
+        ).thenReturn(testVideo);
+
+        await tester.pumpWidget(
+          buildWithVideoMessage(
+            message:
+                'watch this\n'
+                'nostr:naddr1qqxnzd3cxqmrzv3exgmr2wfeqy',
+            sharedVideoRef: const DmSharedVideoRef(
+              coordinateOrId: '34236:$_testHexPubkey:abc123',
+              videoKind: DmSharedVideoKind.addressableShortVideo,
+              relayHint: 'wss://relay.example',
+              authorPubkey: _testHexPubkey,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(VideoThumbnailWidget), findsOneWidget);
+        expect(find.text('My Cool Video'), findsOneWidget);
+        expect(find.text('watch this'), findsOneWidget);
+        expect(find.textContaining('nostr:'), findsNothing);
+        verify(
+          () => mockVideoEventService.getVideoEventByVineId('abc123'),
+        ).called(greaterThanOrEqualTo(1));
+      });
+
+      testWidgets('renders the shared-video bubble on a neutral dark frame', (
+        tester,
+      ) async {
+        when(
+          () => mockVideoEventService.getVideoById('abc123'),
+        ).thenReturn(testVideo);
+
+        await tester.pumpWidget(
+          buildWithVideoMessage(message: 'https://divine.video/video/abc123'),
+        );
+        await tester.pumpAndSettle();
+
+        // The shared-video bubble uses VineTheme.neutral10 (#1B1C1C) — the
+        // Figma `part/video thumbnail` share frame — not the bright sent-text
+        // accent, so the thumbnail reads as a media card (isSent is true here).
+        final bubble = tester.widget<Container>(
+          find.ancestor(
+            of: find.byType(VideoThumbnailWidget),
+            matching: find.byWidgetPredicate(
+              (w) => w is Container && w.decoration is BoxDecoration,
+            ),
+          ),
+        );
+        final decoration = bubble.decoration! as BoxDecoration;
+        expect(decoration.color, VineTheme.neutral10);
+        expect(decoration.color, isNot(VineTheme.primaryAccessible));
+      });
+
+      testWidgets('shared-video card matches Figma geometry', (tester) async {
+        when(
+          () => mockVideoEventService.getVideoById('abc123'),
+        ).thenReturn(testVideo);
+
+        await tester.pumpWidget(
+          buildWithVideoMessage(message: 'https://divine.video/video/abc123'),
+        );
+        await tester.pumpAndSettle();
+
+        // Thumbnail clips at 16 px corners (Figma `part/video thumbnail`
+        // radius/16), not the previous 8 px.
+        final clip = tester.widget<ClipRRect>(
+          find.ancestor(
+            of: find.byType(VideoThumbnailWidget),
+            matching: find.byType(ClipRRect),
+          ),
+        );
+        expect(clip.borderRadius, BorderRadius.circular(16));
+
+        // Bubble frame uses 16 px horizontal / 12 px vertical padding
+        // (Figma spacing/16 + spacing/12), matching the text bubbles.
+        final bubble = tester.widget<Container>(
+          find.ancestor(
+            of: find.byType(VideoThumbnailWidget),
+            matching: find.byWidgetPredicate(
+              (w) => w is Container && w.decoration is BoxDecoration,
+            ),
+          ),
+        );
+        expect(
+          bubble.padding,
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        );
+      });
+
+      testWidgets('drops the nostr: citation line beneath the card', (
+        tester,
+      ) async {
+        when(
+          () => mockVideoEventService.getVideoById('abc123'),
+        ).thenReturn(testVideo);
+
+        await tester.pumpWidget(
+          buildWithVideoMessage(
+            // The q-tag share appends a NIP-21 citation after the URL; it must
+            // not render as a redundant "View video" link beside the card.
+            message:
+                'https://divine.video/video/abc123\n'
+                'nostr:naddr1qqxnzd3cxqmrzv3exgmr2wfeqy',
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(VideoThumbnailWidget), findsOneWidget);
+        final redundantLink = find.byWidgetPredicate(
+          (w) =>
+              w is RichText &&
+              (w.text.toPlainText().contains('nostr:') ||
+                  w.text.toPlainText().contains(
+                    AppLocalizationsEn().clickableTextViewVideoLink,
+                  )),
+        );
+        expect(redundantLink, findsNothing);
+      });
+
+      testWidgets('shows the unavailable card when video not found', (
         tester,
       ) async {
         await tester.pumpWidget(
@@ -835,6 +964,12 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        expect(
+          find.text(AppLocalizationsEn().notificationsVideoUnavailable),
+          findsOneWidget,
+        );
+        expect(find.byType(VideoThumbnailWidget), findsNothing);
+        // The URL is no longer rendered as a tappable link.
         final richTextFinder = find.byWidgetPredicate(
           (widget) =>
               widget is RichText &&
@@ -842,11 +977,10 @@ void main() {
                 'https://divine.video/video/unknown-id',
               ),
         );
-        expect(richTextFinder, findsOneWidget);
-        expect(find.byType(VideoThumbnailWidget), findsNothing);
+        expect(richTextFinder, findsNothing);
       });
 
-      testWidgets('tapping unresolved Divine video link navigates in-app', (
+      testWidgets('unresolved video card is not a tappable link', (
         tester,
       ) async {
         final router = _messageRouter('https://divine.video/video/unknown-id');
@@ -865,13 +999,13 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        _linkRecognizer(
-          tester,
-          'https://divine.video/video/unknown-id',
-        ).onTap!();
-        await tester.pumpAndSettle();
-
-        expect(find.text('video:unknown-id'), findsOneWidget);
+        // The unavailable card replaces the old tappable link — nothing to
+        // tap, so navigation never happens.
+        expect(
+          find.text(AppLocalizationsEn().notificationsVideoUnavailable),
+          findsOneWidget,
+        );
+        expect(find.text('video:unknown-id'), findsNothing);
       });
 
       testWidgets('preserves surrounding text alongside video preview', (

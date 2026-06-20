@@ -21,6 +21,7 @@ import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/router/app_router.dart';
 import 'package:openvine/screens/comments/comments_screen.dart';
+import 'package:openvine/screens/feed/dm_reply_context.dart';
 import 'package:openvine/screens/feed/feed_auto_advance_coordinator.dart';
 import 'package:openvine/screens/feed/feed_auto_advance_cubit.dart';
 import 'package:openvine/screens/feed/feed_settings_menu.dart';
@@ -30,6 +31,8 @@ import 'package:openvine/widgets/branded_loading_indicator.dart';
 import 'package:openvine/widgets/nav_rounded_shell.dart';
 import 'package:openvine/widgets/video_feed_item/feed_videos.dart';
 import 'package:openvine/widgets/video_feed_item/inline_comment_composer_bar.dart';
+import 'package:openvine/widgets/video_feed_item/reaction_overlay.dart';
+import 'package:openvine/widgets/video_feed_item/reel_dm_reply_bar.dart';
 import 'package:unified_logger/unified_logger.dart';
 
 /// Always centers — including contain-fit (non-portrait) videos.
@@ -153,6 +156,7 @@ class PooledFullscreenVideoFeedScreen extends ConsumerWidget {
     this.sourceDetail,
     this.autoOpenComments = false,
     this.onPageChanged,
+    this.dmReplyContext,
     super.key,
   });
 
@@ -167,6 +171,10 @@ class PooledFullscreenVideoFeedScreen extends ConsumerWidget {
   final String? contextTitle;
   final ViewTrafficSource trafficSource;
   final String? sourceDetail;
+
+  /// Present when the reel was opened from a DM thread — drives the in-player
+  /// reply/reaction bar. Null on feed/profile opens.
+  final DmReplyContext? dmReplyContext;
 
   /// When true, opens the comments sheet immediately after the first frame.
   ///
@@ -225,6 +233,7 @@ class PooledFullscreenVideoFeedScreen extends ConsumerWidget {
         sourceDetail: sourceDetail,
         autoOpenComments: autoOpenComments,
         onPageChanged: onPageChanged,
+        dmReplyContext: dmReplyContext,
       ),
     );
   }
@@ -244,6 +253,7 @@ class FullscreenFeedContent extends ConsumerStatefulWidget {
     this.sourceDetail,
     this.autoOpenComments = false,
     this.onPageChanged,
+    this.dmReplyContext,
     super.key,
   });
 
@@ -266,6 +276,10 @@ class FullscreenFeedContent extends ConsumerStatefulWidget {
   /// Used by embedded surfaces to keep the URL in sync.
   final void Function(int index)? onPageChanged;
 
+  /// Present when the reel was opened from a DM thread — drives the in-player
+  /// reply/reaction bar in the body footer.
+  final DmReplyContext? dmReplyContext;
+
   @override
   ConsumerState<FullscreenFeedContent> createState() =>
       _FullscreenFeedContentState();
@@ -275,6 +289,15 @@ class _FullscreenFeedContentState extends ConsumerState<FullscreenFeedContent>
     with RouteAware, WidgetsBindingObserver {
   late final ValueNotifier<double> _pagePosition;
   final _feedVideosKey = GlobalKey<FeedVideosState>();
+
+  /// Whether the in-player DM reply composer is focused. When true the reel
+  /// pauses so the user can type without the video playing under the keyboard.
+  bool _replyComposerFocused = false;
+
+  /// Emoji currently being animated by the full-screen reaction overlay (null
+  /// when idle). [_reactionNonce] remounts the overlay so repeated taps replay.
+  String? _reactionEmoji;
+  int _reactionNonce = 0;
 
   /// Feed-scoped Auto playback state; exposed to descendants via
   /// `BlocProvider.value` in [build].
@@ -532,8 +555,20 @@ class _FullscreenFeedContentState extends ConsumerState<FullscreenFeedContent>
               // so the action column / author info land at the same gap
               // above the comment bar. The bar's own `SafeArea`-style
               // padding handles the home-indicator visually.
+              // When the reel is opened FROM a DM, only the private DM reply
+              // bar is shown — the public comment composer is suppressed so a
+              // private-context reply can't be mistaken for (or accidentally
+              // posted as) a public comment. Public commenting is still one
+              // tap away via the right-rail comment button. Matches TikTok/IG.
               final showCommentBar =
-                  currentUserPubkey != null && state.currentVideo != null;
+                  widget.dmReplyContext == null &&
+                  currentUserPubkey != null &&
+                  state.currentVideo != null;
+
+              final showDmReplyBar =
+                  widget.dmReplyContext != null &&
+                  currentUserPubkey != null &&
+                  state.currentVideo != null;
 
               final appBar = DiVineAppBar(
                 title: widget.contextTitle ?? '',
@@ -599,66 +634,110 @@ class _FullscreenFeedContentState extends ConsumerState<FullscreenFeedContent>
                   preferredSize: appBar.preferredSize,
                   child: TextFieldTapRegion(child: appBar),
                 ),
-                body: Column(
+                body: Stack(
                   children: [
-                    Expanded(
-                      // Match the home feed: when the comment bar is on
-                      // screen, the video carries the same rounded
-                      // bottom corners as `video_feed_page.dart`, so
-                      // the corners reveal [VineTheme.navGreen] (the
-                      // outer color [NavRoundedShell] paints). It
-                      // shares its hex (`#00150D`) with the comment
-                      // bar's [VineTheme.surfaceBackground], so the
-                      // rounded cutouts seam continuously into the bar.
-                      child: Stack(
-                        children: [
-                          VideoTapShield(
-                            child: _MaybeRoundFeedBottom(
-                              roundCorners: showCommentBar,
-                              child: MediaQuery.removePadding(
-                                context: context,
-                                removeBottom: true,
-                                child: FeedVideos(
-                                  key: _feedVideosKey,
-                                  videos: state.videos,
-                                  contextTitle: widget.contextTitle,
-                                  currentIndex: state.currentIndex,
-                                  hasMore: state.canLoadMore,
-                                  isLoadingMore: state.isLoadingMore,
-                                  trafficSource: widget.trafficSource,
-                                  sourceDetail: widget.sourceDetail,
-                                  onActiveVideoChanged: (video, index) {
-                                    _resumeAutoAdvanceAfterSwipe();
-                                    FeedPerformanceTracker()
-                                        .startVideoSwipeTracking(video.id);
-                                    context.read<FullscreenFeedBloc>().add(
-                                      FullscreenFeedIndexChanged(index),
-                                    );
-                                    widget.onPageChanged?.call(index);
-                                  },
-                                  onNearEnd: () {
-                                    if (state.canLoadMore) {
-                                      _triggerLoadMore();
-                                    }
-                                  },
+                    Column(
+                      children: [
+                        Expanded(
+                          // Match the home feed: when the comment bar is on
+                          // screen, the video carries the same rounded
+                          // bottom corners as `video_feed_page.dart`, so
+                          // the corners reveal [VineTheme.navGreen] (the
+                          // outer color [NavRoundedShell] paints). It
+                          // shares its hex (`#00150D`) with the comment
+                          // bar's [VineTheme.surfaceBackground], so the
+                          // rounded cutouts seam continuously into the bar.
+                          child: Stack(
+                            children: [
+                              VideoTapShield(
+                                child: _MaybeRoundFeedBottom(
+                                  roundCorners: showCommentBar,
+                                  child: MediaQuery.removePadding(
+                                    context: context,
+                                    removeBottom: true,
+                                    child: FeedVideos(
+                                      key: _feedVideosKey,
+                                      // Pause the reel while the DM reply composer
+                                      // is focused so it doesn't play under the
+                                      // keyboard.
+                                      isActive: !_replyComposerFocused,
+                                      videos: state.videos,
+                                      contextTitle: widget.contextTitle,
+                                      currentIndex: state.currentIndex,
+                                      hasMore: state.canLoadMore,
+                                      isLoadingMore: state.isLoadingMore,
+                                      trafficSource: widget.trafficSource,
+                                      sourceDetail: widget.sourceDetail,
+                                      onActiveVideoChanged: (video, index) {
+                                        _resumeAutoAdvanceAfterSwipe();
+                                        FeedPerformanceTracker()
+                                            .startVideoSwipeTracking(video.id);
+                                        context.read<FullscreenFeedBloc>().add(
+                                          FullscreenFeedIndexChanged(index),
+                                        );
+                                        widget.onPageChanged?.call(index);
+                                      },
+                                      onNearEnd: () {
+                                        if (state.canLoadMore) {
+                                          _triggerLoadMore();
+                                        }
+                                      },
+                                    ),
+                                  ),
                                 ),
                               ),
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 16,
+                                child: LoadingMorePill(
+                                  isVisible:
+                                      state.isLoadingMore &&
+                                      state.currentIndex >=
+                                          state.videos.length - 1,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (showCommentBar) const InlineCommentComposerBar(),
+                        if (showDmReplyBar)
+                          ReelReplyBridge(
+                            setComposerFocused: (focused) {
+                              if (mounted && focused != _replyComposerFocused) {
+                                setState(
+                                  () => _replyComposerFocused = focused,
+                                );
+                              }
+                            },
+                            playReaction: (emoji) {
+                              if (mounted) {
+                                setState(() {
+                                  _reactionEmoji = emoji;
+                                  _reactionNonce++;
+                                });
+                              }
+                            },
+                            child: ReelDmReplyBarHost(
+                              dmReplyContext: widget.dmReplyContext!,
                             ),
                           ),
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 16,
-                            child: LoadingMorePill(
-                              isVisible:
-                                  state.isLoadingMore &&
-                                  state.currentIndex >= state.videos.length - 1,
-                            ),
-                          ),
-                        ],
-                      ),
+                      ],
                     ),
-                    if (showCommentBar) const InlineCommentComposerBar(),
+                    // Full-screen TikTok/IG-style reaction pop, centered over
+                    // the reel.
+                    if (_reactionEmoji != null)
+                      Positioned.fill(
+                        child: ReactionOverlay(
+                          key: ValueKey(_reactionNonce),
+                          emoji: _reactionEmoji!,
+                          onComplete: () {
+                            if (mounted) {
+                              setState(() => _reactionEmoji = null);
+                            }
+                          },
+                        ),
+                      ),
                   ],
                 ),
               );

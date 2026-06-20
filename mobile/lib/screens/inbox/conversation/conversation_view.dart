@@ -14,6 +14,7 @@ import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/l10n/localized_time_formatter.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/user_profile_providers.dart';
+import 'package:openvine/screens/feed/dm_reply_context.dart';
 import 'package:openvine/screens/inbox/conversation/widgets/widgets.dart';
 import 'package:openvine/screens/other_profile_screen.dart';
 import 'package:openvine/services/collaborator_invite_parser.dart';
@@ -180,6 +181,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                             child: _ConversationContent(
                               currentPubkey: currentPubkey,
                               otherPubkey: otherPubkey,
+                              participantPubkeys: widget.participantPubkeys,
                               displayName: displayName,
                               imageUrl: profile?.picture,
                               nip05: profile?.shortDisplayNip05,
@@ -293,6 +295,7 @@ class _ConversationContent extends StatelessWidget {
   const _ConversationContent({
     required this.currentPubkey,
     required this.otherPubkey,
+    required this.participantPubkeys,
     required this.displayName,
     this.imageUrl,
     this.nip05,
@@ -301,6 +304,7 @@ class _ConversationContent extends StatelessWidget {
 
   final String currentPubkey;
   final String otherPubkey;
+  final List<String> participantPubkeys;
   final String displayName;
   final String? imageUrl;
   final String? nip05;
@@ -339,6 +343,7 @@ class _ConversationContent extends StatelessWidget {
                 : _MessageList(
                     messages: selected.messages,
                     currentPubkey: currentPubkey,
+                    participantPubkeys: participantPubkeys,
                     senderDisplayName: displayName,
                   ),
         };
@@ -351,11 +356,13 @@ class _MessageList extends StatelessWidget {
   const _MessageList({
     required this.messages,
     required this.currentPubkey,
+    required this.participantPubkeys,
     required this.senderDisplayName,
   });
 
   final List<DmMessage> messages;
   final String currentPubkey;
+  final List<String> participantPubkeys;
   final String senderDisplayName;
 
   Future<void> _onMessageLongPress(
@@ -462,6 +469,24 @@ class _MessageList extends StatelessWidget {
             index == 0 ||
             messages[index - 1].senderPubkey != message.senderPubkey;
 
+        // participantPubkeys excludes self, so a length > 1 is a group.
+        final isGroup = participantPubkeys.length > 1;
+        final isReelShare =
+            message.hasSharedVideo ||
+            tryExtractDivineVideoUrl(message.content) != null;
+
+        // Context for the in-player reply/reaction bar when this bubble's
+        // shared reel is opened.
+        final dmReplyContext = DmReplyContext(
+          conversationId: message.conversationId,
+          participantPubkeys: participantPubkeys,
+          isGroup: isGroup,
+          sharedReelMessageId: message.id,
+          messageAuthorPubkey: message.senderPubkey,
+          hintName: senderDisplayName,
+          isOwnMessage: isSent,
+        );
+
         Widget buildBubbleWithReactions(DmDeliveryStatus status) {
           final bubble = MessageBubble(
             message: message.content,
@@ -477,6 +502,8 @@ class _MessageList extends StatelessWidget {
             onLongPress: () =>
                 _onMessageLongPress(context, message, isSent, status),
             deliveryStatus: status,
+            dmReplyContext: dmReplyContext,
+            sharedVideoRef: message.sharedVideoRef,
           );
           return Column(
             crossAxisAlignment: isSent
@@ -484,14 +511,23 @@ class _MessageList extends StatelessWidget {
                 : CrossAxisAlignment.start,
             children: [
               bubble,
-              ReactionsRow(
-                conversationId: message.conversationId,
-                messageId: message.id,
-                messageAuthorPubkey: message.senderPubkey,
-                ownerPubkey: currentPubkey,
-                isSentByMe: isSent,
-                otherParticipantName: senderDisplayName,
-              ),
+              // Groups show each member's reaction on a shared reel
+              // individually; everything else uses the aggregated chips.
+              if (isGroup && isReelShare)
+                PerPersonReactionsRow(
+                  messageId: message.id,
+                  ownerPubkey: currentPubkey,
+                  isSentByMe: isSent,
+                )
+              else
+                ReactionsRow(
+                  conversationId: message.conversationId,
+                  messageId: message.id,
+                  messageAuthorPubkey: message.senderPubkey,
+                  ownerPubkey: currentPubkey,
+                  isSentByMe: isSent,
+                  otherParticipantName: senderDisplayName,
+                ),
             ],
           );
         }

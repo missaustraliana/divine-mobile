@@ -5517,6 +5517,34 @@ class AppLocalizationsBg extends AppLocalizations {
   String get dmReactionAddCustomA11yLabel => 'Add custom emoji reaction';
 
   @override
+  String dmReelReplyComposerHint(String name) {
+    return 'Съобщение до $name…';
+  }
+
+  @override
+  String get dmReelReplyComposerHintSelf => 'Отговорете на себе си…';
+
+  @override
+  String get dmReelReplyComposerSemanticLabel => 'Отговор на този рийл';
+
+  @override
+  String get dmReelReplyViewChat => 'Виж чата';
+
+  @override
+  String get dmReelReplyViewChatA11yLabel => 'Отвори чата';
+
+  @override
+  String get dmReelReplySentAnnouncement => 'Отговорът е изпратен';
+
+  @override
+  String dmReelReactionSentAnnouncement(String emoji) {
+    return 'Реагирахте с $emoji';
+  }
+
+  @override
+  String get dmReelReplyFailed => 'Изпращането е неуспешно';
+
+  @override
   String dmReactionChipOwnA11yLabel(String emoji) {
     return 'Your reaction: $emoji';
   }

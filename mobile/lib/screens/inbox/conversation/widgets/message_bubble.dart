@@ -18,6 +18,7 @@ import 'package:openvine/providers/nostr_client_provider.dart';
 import 'package:openvine/providers/user_profile_providers.dart';
 import 'package:openvine/router/nav_extensions.dart';
 import 'package:openvine/router/universal_link_resolver.dart';
+import 'package:openvine/screens/feed/dm_reply_context.dart';
 import 'package:openvine/screens/hashtag_screen_router.dart';
 import 'package:openvine/screens/inbox/conversation/widgets/video_link_preview_cubit.dart';
 import 'package:openvine/screens/search_results/view/search_results_page.dart';
@@ -38,6 +39,15 @@ final _emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
 /// the title isn't duplicated alongside the overlay-footer rendering.
 final _quotedTitleRegex = RegExp(r'^".*"$');
 
+/// Matches a line that is just a NIP-21 `nostr:` citation (or bare entity).
+/// The share body carries a `nostr:naddr…`/`nevent…` reference for other
+/// clients to resolve, but in-app it duplicates the tappable video card, so
+/// the bubble drops it rather than rendering a redundant "View video" link.
+final _nostrRefLineRegex = RegExp(
+  r'^(?:nostr:)?(?:naddr|nevent|note|npub|nprofile)1[0-9a-z]+$',
+  caseSensitive: false,
+);
+
 /// Width of the video share card thumbnail (also used to cap the
 /// surrounding bubble's max width so the bubble doesn't grow wider
 /// than the card when a personal note wraps below it).
@@ -46,10 +56,18 @@ const double _videoCardWidth = 248;
 /// Height of the video share card thumbnail.
 const double _videoCardHeight = 350;
 
+/// Corner radius of the video share card thumbnail across all states
+/// (resolved, loading, unavailable). Matches the Figma
+/// `part/video thumbnail` component's radius/16.
+const double _videoCardRadius = 16;
+
 /// A single chat message bubble.
 ///
-/// Sent messages (right-aligned): primaryAccessible background.
-/// Received messages (left-aligned): surfaceContainer background.
+/// Text bubbles — sent (right-aligned): primaryAccessible background;
+/// received (left-aligned): surfaceContainer background. Shared-video
+/// bubbles use a neutral dark frame (neutral10) in both directions so the
+/// thumbnail reads as a media card, matching the Figma
+/// `part/video thumbnail` share bubble.
 ///
 /// Grouping behaviour:
 /// - Only the first message in a group shows a timestamp (inside the bubble,
@@ -69,6 +87,8 @@ class MessageBubble extends StatelessWidget {
     this.isLastInGroup = true,
     this.onLongPress,
     this.deliveryStatus = DmDeliveryStatus.delivered,
+    this.dmReplyContext,
+    this.sharedVideoRef,
     super.key,
   });
 
@@ -93,6 +113,13 @@ class MessageBubble extends StatelessWidget {
   /// without churn.
   final DmDeliveryStatus deliveryStatus;
 
+  /// Context for the in-player reply/reaction bar, used when this bubble's
+  /// shared reel is tapped open. Null in non-DM call sites / tests.
+  final DmReplyContext? dmReplyContext;
+
+  /// Structured q-tag video reference parsed from the DM rumor, when present.
+  final DmSharedVideoRef? sharedVideoRef;
+
   @override
   Widget build(BuildContext context) {
     // NIP-17 rumor bodies (and any sender-controlled text reaching the
@@ -102,7 +129,10 @@ class MessageBubble extends StatelessWidget {
     // well-formed input.
     final safeMessage = StringUtils.sanitizeUtf16(message);
     final videoMatch = divineVideoUrlRegex.firstMatch(safeMessage);
-    final videoStableId = videoMatch?.group(1);
+    final structuredVideo = _videoTargetFromRef(sharedVideoRef);
+    final videoStableId = videoMatch?.group(1) ?? structuredVideo?.stableId;
+    final videoAuthorPubkey = structuredVideo?.authorPubkey;
+    final videoKind = structuredVideo?.videoKind;
 
     // Slice the message body around the video URL.
     //
@@ -121,8 +151,17 @@ class MessageBubble extends StatelessWidget {
     final String? personalMessage;
     final String? textAfterUrl;
     if (videoMatch != null) {
-      final after = safeMessage.substring(videoMatch.end).trim();
-      textAfterUrl = after.isEmpty ? null : after;
+      // Drop the machine-readable `nostr:` citation line (kept on the wire for
+      // other clients) so it doesn't render as a redundant "View video" link
+      // beside the tappable card.
+      final afterLines = safeMessage
+          .substring(videoMatch.end)
+          .split('\n')
+          .map((line) => line.trim())
+          .where((line) => line.isNotEmpty)
+          .where((line) => !_nostrRefLineRegex.hasMatch(line))
+          .toList();
+      textAfterUrl = afterLines.isEmpty ? null : afterLines.join('\n');
 
       final beforeLines = safeMessage
           .substring(0, videoMatch.start)
@@ -130,8 +169,19 @@ class MessageBubble extends StatelessWidget {
           .map((line) => line.trim())
           .where((line) => line.isNotEmpty)
           .where((line) => !_quotedTitleRegex.hasMatch(line))
+          .where((line) => !_nostrRefLineRegex.hasMatch(line))
           .toList();
       personalMessage = beforeLines.isEmpty ? null : beforeLines.join('\n');
+    } else if (structuredVideo != null) {
+      final lines = safeMessage
+          .split('\n')
+          .map((line) => line.trim())
+          .where((line) => line.isNotEmpty)
+          .where((line) => !_quotedTitleRegex.hasMatch(line))
+          .where((line) => !_nostrRefLineRegex.hasMatch(line))
+          .toList();
+      personalMessage = lines.isEmpty ? null : lines.join('\n');
+      textAfterUrl = null;
     } else {
       personalMessage = null;
       textAfterUrl = null;
@@ -177,14 +227,19 @@ class MessageBubble extends StatelessWidget {
                     ? _videoCardWidth + 32
                     : MediaQuery.sizeOf(context).width * 0.75,
               ),
-              // Video bubbles use symmetric 16 px padding so the thumbnail
-              // sits in an even frame; text bubbles keep the tighter
-              // vertical rhythm (12) for compact reading flow.
-              padding: hasVideo
-                  ? const EdgeInsets.all(16)
-                  : const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              // Both text and video bubbles use 16 px horizontal / 12 px
+              // vertical padding (Figma spacing/16 + spacing/12) so the
+              // thumbnail and text sit in the same frame rhythm.
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: isSent
+                // Shared-video bubbles sit on a neutral dark frame
+                // (neutral10, #1B1C1C) in both directions so the thumbnail
+                // reads as a media card rather than a bright accent pill —
+                // matching the Figma `part/video thumbnail` share bubble.
+                // Text bubbles keep the sent/received accent split.
+                color: hasVideo
+                    ? VineTheme.neutral10
+                    : isSent
                     ? VineTheme.primaryAccessible
                     : VineTheme.surfaceContainer,
                 borderRadius: _borderRadiusFor(effectiveIsLastInGroup),
@@ -210,7 +265,10 @@ class MessageBubble extends StatelessWidget {
                   if (videoStableId != null) ...[
                     _VideoLinkPreview(
                       videoStableId: videoStableId,
+                      authorPubkey: videoAuthorPubkey,
+                      videoKind: videoKind,
                       isSent: isSent,
+                      dmReplyContext: dmReplyContext,
                     ),
                     // Optional personal note (text before the URL minus
                     // the quoted title) sits directly under the
@@ -221,6 +279,7 @@ class MessageBubble extends StatelessWidget {
                         child: _MessageText(
                           message: personalMessage,
                           isSent: isSent,
+                          dmReplyContext: dmReplyContext,
                         ),
                       ),
                     if (textAfterUrl != null)
@@ -229,10 +288,15 @@ class MessageBubble extends StatelessWidget {
                         child: _MessageText(
                           message: textAfterUrl,
                           isSent: isSent,
+                          dmReplyContext: dmReplyContext,
                         ),
                       ),
                   ] else
-                    _MessageText(message: safeMessage, isSent: isSent),
+                    _MessageText(
+                      message: safeMessage,
+                      isSent: isSent,
+                      dmReplyContext: dmReplyContext,
+                    ),
                   if (isSent && deliveryStatus != DmDeliveryStatus.delivered)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
@@ -260,6 +324,42 @@ class MessageBubble extends StatelessWidget {
   }
 }
 
+class _SharedVideoTarget {
+  const _SharedVideoTarget({
+    required this.stableId,
+    required this.videoKind,
+    this.authorPubkey,
+  });
+
+  final String stableId;
+  final int videoKind;
+  final String? authorPubkey;
+}
+
+_SharedVideoTarget? _videoTargetFromRef(DmSharedVideoRef? ref) {
+  if (ref == null) return null;
+  if (!ref.isAddressable) {
+    return _SharedVideoTarget(
+      stableId: ref.coordinateOrId,
+      videoKind: ref.videoKind.kind,
+      authorPubkey: ref.authorPubkey,
+    );
+  }
+
+  final coordParts = ref.coordinateOrId.split(':');
+  if (coordParts.length < 3) return null;
+  final kind = int.tryParse(coordParts[0]);
+  final author = coordParts[1];
+  final dTag = coordParts.sublist(2).join(':');
+  if (kind == null || dTag.isEmpty) return null;
+
+  return _SharedVideoTarget(
+    stableId: dTag,
+    videoKind: kind,
+    authorPubkey: author.isNotEmpty ? author : ref.authorPubkey,
+  );
+}
+
 /// Trusted domains that open without an external-link warning.
 const _trustedDomains = {
   'divine.video',
@@ -285,10 +385,15 @@ bool _isTrustedDomain(String host) {
 /// [LinkifiedTextSpanBuilder] so URLs / @mentions / #hashtags / nostr
 /// references inside, e.g., a `**bold**` run remain tappable.
 class _MessageText extends ConsumerStatefulWidget {
-  const _MessageText({required this.message, required this.isSent});
+  const _MessageText({
+    required this.message,
+    required this.isSent,
+    this.dmReplyContext,
+  });
 
   final String message;
   final bool isSent;
+  final DmReplyContext? dmReplyContext;
 
   @override
   ConsumerState<_MessageText> createState() => _MessageTextState();
@@ -390,7 +495,13 @@ class _MessageTextState extends ConsumerState<_MessageText> {
   }
 
   void _navigateToVideo(String routeReference) {
-    context.push(VideoDetailScreen.pathForId(routeReference));
+    final dmReplyContext = widget.dmReplyContext;
+    context.push(
+      VideoDetailScreen.pathForId(routeReference),
+      extra: dmReplyContext != null
+          ? VideoDetailRouteExtra(dmReplyContext: dmReplyContext)
+          : null,
+    );
   }
 
   void _navigateToSearch(String username) {
@@ -478,10 +589,19 @@ class _MessageTextState extends ConsumerState<_MessageText> {
 /// and renders state via [BlocBuilder]. Falls back to a tappable link when
 /// the video cannot be resolved.
 class _VideoLinkPreview extends ConsumerWidget {
-  const _VideoLinkPreview({required this.videoStableId, required this.isSent});
+  const _VideoLinkPreview({
+    required this.videoStableId,
+    required this.isSent,
+    this.authorPubkey,
+    this.videoKind,
+    this.dmReplyContext,
+  });
 
   final String videoStableId;
   final bool isSent;
+  final String? authorPubkey;
+  final int? videoKind;
+  final DmReplyContext? dmReplyContext;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -490,15 +610,17 @@ class _VideoLinkPreview extends ConsumerWidget {
         videoStableId: videoStableId,
         videoEventService: ref.read(videoEventServiceProvider),
         nostrClient: ref.read(nostrServiceProvider),
+        authorPubkey: authorPubkey,
+        videoKind: videoKind,
       ),
       child: BlocBuilder<VideoLinkPreviewCubit, VideoLinkPreviewState>(
         builder: (context, state) => switch (state) {
           VideoLinkPreviewLoading() => _buildLoadingPlaceholder(),
-          VideoLinkPreviewNotFound() => _MessageText(
-            message: 'https://divine.video/video/$videoStableId',
-            isSent: isSent,
+          VideoLinkPreviewNotFound() => const _VideoUnavailableCard(),
+          VideoLinkPreviewResolved(:final video) => _VideoCard(
+            video: video,
+            dmReplyContext: dmReplyContext,
           ),
-          VideoLinkPreviewResolved(:final video) => _VideoCard(video: video),
         },
       ),
     );
@@ -506,7 +628,7 @@ class _VideoLinkPreview extends ConsumerWidget {
 
   static Widget _buildLoadingPlaceholder() {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(_videoCardRadius),
       child: Container(
         width: _videoCardWidth,
         height: _videoCardHeight,
@@ -526,13 +648,49 @@ class _VideoLinkPreview extends ConsumerWidget {
   }
 }
 
+/// Non-tappable placeholder shown when a shared video can't be resolved
+/// (deleted, blocked, or unreachable). Deliberately has no tap target so a
+/// dead reel can never open the player or a reply bar.
+class _VideoUnavailableCard extends StatelessWidget {
+  const _VideoUnavailableCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(_videoCardRadius),
+      child: Container(
+        width: _videoCardWidth,
+        height: _videoCardHeight,
+        color: VineTheme.cardBackground,
+        alignment: Alignment.center,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const DivineIcon(
+              icon: DivineIconName.warningCircle,
+              color: VineTheme.onSurfaceMuted,
+              size: 32,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              context.l10n.notificationsVideoUnavailable,
+              style: VineTheme.bodyMediumFont(color: VineTheme.onSurfaceMuted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Tappable 248×350 card showing a video thumbnail with the title and loop
 /// count rendered inside a gradient overlay footer. Mirrors the
 /// `part/video thumbnail` Figma component used elsewhere in the app.
 class _VideoCard extends ConsumerWidget {
-  const _VideoCard({required this.video});
+  const _VideoCard({required this.video, this.dmReplyContext});
 
   final VideoEvent video;
+  final DmReplyContext? dmReplyContext;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -549,9 +707,15 @@ class _VideoCard extends ConsumerWidget {
     };
     final hasAuthor = authorName != null && authorName.isNotEmpty;
     return GestureDetector(
-      onTap: () => context.push(VideoDetailScreen.pathForId(video.id)),
+      onTap: () => context.push(
+        VideoDetailScreen.pathForId(video.id),
+        extra: VideoDetailRouteExtra(
+          initialVideo: video,
+          dmReplyContext: dmReplyContext,
+        ),
+      ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(_videoCardRadius),
         child: SizedBox(
           width: _videoCardWidth,
           height: _videoCardHeight,
