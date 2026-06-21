@@ -21,10 +21,8 @@ import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/nostr_client_provider.dart';
 import 'package:openvine/providers/user_profile_providers.dart';
-import 'package:openvine/screens/apps/nostr_app_sandbox_screen.dart';
 import 'package:openvine/screens/apps/web_iframe_sandbox_screen.dart';
 import 'package:openvine/screens/key_management_screen.dart';
-import 'package:openvine/utils/nostr_apps_platform_support.dart';
 import 'package:openvine/widgets/branded_loading_scaffold.dart';
 import 'package:openvine/widgets/profile/nostr_info_sheet_content.dart';
 import 'package:openvine/widgets/profile/verified_accounts_row.dart';
@@ -145,19 +143,32 @@ class ProfileSetupScreenView extends ConsumerStatefulWidget {
       _ProfileSetupScreenViewState();
 }
 
-class _ProfileSetupScreenViewState
-    extends ConsumerState<ProfileSetupScreenView> {
+class _ProfileSetupScreenViewState extends ConsumerState<ProfileSetupScreenView>
+    with WidgetsBindingObserver {
   final _nameController = TextEditingController();
   final _bioController = TextEditingController();
   final _websiteController = TextEditingController();
   final _pictureController = TextEditingController();
   final _nip05Controller = TextEditingController();
   final ImagePicker _picker = ImagePicker();
+  bool _refreshProfileOnResume = false;
 
   static const _kInputBorder = UnderlineInputBorder(
     borderRadius: BorderRadius.zero,
     borderSide: BorderSide(color: VineTheme.neutral10),
   );
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.resumed || !_refreshProfileOnResume) {
+      return;
+    }
+
+    _refreshProfileOnResume = false;
+    context.read<MyProfileBloc>().add(const MyProfileFetchRequested());
+  }
+
   static const _kHintStyle = TextStyle(color: VineTheme.lightText);
 
   // Focus nodes for tracking field focus state
@@ -181,6 +192,7 @@ class _ProfileSetupScreenViewState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Rebuild when display name changes so save button updates.
     _nameController.addListener(_onFocusChange);
     _websiteFocusNode.addListener(_onFocusChange);
@@ -196,6 +208,7 @@ class _ProfileSetupScreenViewState
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _nameController.removeListener(_onFocusChange);
     _nameController.dispose();
     _bioController.dispose();
@@ -477,36 +490,24 @@ class _ProfileSetupScreenViewState
               prev.verifierStatus != curr.verifierStatus &&
               curr.verifierStatus == VerifierStatus.launchRequested,
           listener: (context, state) async {
-            final editorBloc = context.read<ProfileEditorBloc>();
-            final myProfileBloc = context.read<MyProfileBloc>();
-            final verifyer = preloadedNostrApps.firstWhere(
-              (app) => app.slug == 'verifyer',
+            final launched = await launchVerifierFlow(
+              editorBloc: context.read<ProfileEditorBloc>(),
+              myProfileBloc: context.read<MyProfileBloc>(),
+              pushVerifierRoute: (location, {extra}) async {
+                await context.push(location, extra: extra);
+              },
             );
-            if (nostrAppsSandboxSupported) {
-              // Native (iOS / Android / macOS): full webview_flutter
-              // sandbox with NIP-07 bridge injection.
-              await context.push(
-                NostrAppSandboxScreen.pathForAppId(verifyer.id),
-                extra: verifyer,
-              );
-            } else if (kIsWeb) {
-              // Flutter web: webview_flutter is unavailable, but we can
-              // host the verifyer in an <iframe> with a postMessage
-              // NIP-07 bridge to Divine's web signer.
-              await context.push(
-                WebIframeSandboxScreen.pathForAppId(verifyer.id),
-                extra: verifyer,
-              );
-            } else {
-              // Last-resort fallback for any future platform without
-              // either capability — open in the system browser.
-              await launchUrl(
-                Uri.parse(verifyer.launchUrl),
-                mode: LaunchMode.externalApplication,
+            if (launched && !kIsWeb && mounted) {
+              _refreshProfileOnResume = true;
+            }
+            if (!launched && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(context.l10n.relaySettingsCouldNotOpenBrowser),
+                  backgroundColor: VineTheme.error,
+                ),
               );
             }
-            editorBloc.add(const VerifierWebViewDismissed());
-            myProfileBloc.add(const MyProfileFetchRequested());
           },
         ),
       ],
@@ -1868,6 +1869,57 @@ class _VerifiedAccountsSection extends StatelessWidget {
       ),
     );
   }
+}
+
+typedef VerifierRoutePusher =
+    Future<void> Function(String location, {Object? extra});
+
+/// Opens the Divine verifyer.
+///
+/// Native in-app WebViews cannot complete the verifyer's login flow because it
+/// leaves `verifyer.divine.video` for `login.divine.video` and OAuth providers.
+/// Those hand-offs need real browser tabs, cookies, and redirects, so native
+/// platforms launch the system browser. Flutter web keeps the existing iframe
+/// signer bridge because it runs in the browser and does not use
+/// `webview_flutter`. Web refreshes after the iframe route returns; native
+/// refreshes from the screen's app-resume callback.
+@visibleForTesting
+Future<bool> launchVerifierFlow({
+  required ProfileEditorBloc editorBloc,
+  required MyProfileBloc myProfileBloc,
+  VerifierRoutePusher? pushVerifierRoute,
+  bool isWeb = kIsWeb,
+}) async {
+  final verifyer = preloadedNostrApps.firstWhere(
+    (app) => app.slug == 'verifyer',
+  );
+
+  var launched = false;
+  try {
+    if (isWeb && pushVerifierRoute != null) {
+      await pushVerifierRoute(
+        WebIframeSandboxScreen.pathForAppId(verifyer.id),
+        extra: verifyer,
+      );
+      launched = true;
+    } else {
+      launched = await launchUrl(
+        Uri.parse(verifyer.launchUrl),
+        mode: LaunchMode.externalApplication,
+      );
+    }
+  } catch (error) {
+    UnifiedLogger.warning(
+      'Failed to open Divine verifyer: $error',
+      name: 'ProfileSetupScreen',
+    );
+  }
+
+  editorBloc.add(const VerifierLaunchHandled());
+  if (launched && isWeb) {
+    myProfileBloc.add(const MyProfileFetchRequested());
+  }
+  return launched;
 }
 
 class _GetVerifiedTile extends StatelessWidget {
