@@ -126,6 +126,20 @@ class _MockNostrSigner extends Mock implements NostrSigner {}
 
 class _FakeEvent extends Fake implements Event {}
 
+class _FakeDmDecryptWorker implements DmDecryptWorker {
+  int closeCount = 0;
+
+  @override
+  Future<List<DecryptedRumorResult>> decryptBatch(
+    List<Map<String, dynamic>> events,
+  ) async => const <DecryptedRumorResult>[];
+
+  @override
+  void close() {
+    closeCount++;
+  }
+}
+
 /// Test double for [DmSyncState] that stores values in memory and captures
 /// [recordSeen] calls for assertions.
 class _FakeDmSyncState implements DmSyncState {
@@ -361,6 +375,7 @@ void main() {
       PendingGiftWrapsDao? pendingGiftWrapsDao,
       DmReactionsRepository? reactionsRepository,
       NostrSigner? signer,
+      DmDecryptIsolateSpawner? decryptIsolateSpawner,
     }) {
       return DmRepository(
         nostrClient: mockNostrClient,
@@ -373,6 +388,7 @@ void main() {
         signer: signer ?? LocalNostrSigner(_validPrivateKey),
         rumorDecryptor: rumorDecryptor,
         nip04Decryptor: nip04Decryptor,
+        decryptIsolateSpawner: decryptIsolateSpawner,
         syncState: syncState,
         reactionsRepository: reactionsRepository,
         errorReporter: (error, stackTrace, {required site}) {
@@ -3346,6 +3362,79 @@ void main() {
         ..drainVersionOverride = DmSyncState.currentDrainVersion;
 
       test(
+        'stale drain spawn cannot close or clear the next drain worker',
+        () async {
+          when(() => mockNostrClient.connectedRelayCount).thenReturn(2);
+
+          final firstWorker = _FakeDmDecryptWorker();
+          final secondWorker = _FakeDmDecryptWorker();
+          final firstSpawn = Completer<DmDecryptWorker>();
+          final firstSpawnRequested = Completer<void>();
+          final secondSpawnRequested = Completer<void>();
+          var spawnCount = 0;
+
+          Future<DmDecryptWorker> spawner(String privateKeyHex) {
+            spawnCount++;
+            if (spawnCount == 1) {
+              firstSpawnRequested.complete();
+              return firstSpawn.future;
+            }
+            secondSpawnRequested.complete();
+            return Future<DmDecryptWorker>.value(secondWorker);
+          }
+
+          final secondQueryStarted = Completer<void>();
+          final secondQueryResult = Completer<List<Event>>();
+          when(
+            () => mockNostrClient.queryEvents(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              useCache: any(named: 'useCache'),
+            ),
+          ).thenAnswer((inv) async {
+            final filters =
+                inv.positionalArguments.first as List<nostr_filter.Filter>;
+            final filter = filters.single;
+            if (filter.p?.contains(senderPub) ?? false) {
+              secondQueryStarted.complete();
+              return secondQueryResult.future;
+            }
+            return const <Event>[];
+          });
+
+          final repository = createRepository(
+            userPubkey: recipientPub,
+            signer: _IsolateLocalSigner(recipientPriv),
+            syncState: drainPending(),
+            decryptIsolateSpawner: spawner,
+          );
+
+          final firstDrain = repository.backfillHistoryIfNeeded();
+          await firstSpawnRequested.future;
+
+          repository.setCredentials(
+            userPubkey: senderPub,
+            signer: _IsolateLocalSigner(senderPriv),
+            messageService: mockMessageService,
+          );
+          final secondDrain = repository.backfillHistoryIfNeeded();
+          await secondSpawnRequested.future;
+          await secondQueryStarted.future;
+
+          firstSpawn.complete(firstWorker);
+          await firstDrain;
+
+          expect(firstWorker.closeCount, 1);
+          expect(secondWorker.closeCount, 0);
+
+          secondQueryResult.complete(const <Event>[]);
+          await secondDrain;
+
+          expect(secondWorker.closeCount, 1);
+        },
+      );
+
+      test(
         'batches a drain page of real gift wraps and persists each message '
         'without a per-event decryptor',
         () async {
@@ -3556,6 +3645,74 @@ void main() {
 
           // The loop ran past the yield boundary and reached relay exhaustion.
           expect(syncState.drainCompleteOverride, isTrue);
+        },
+      );
+
+      test(
+        'batches a page larger than decryptBatchSize across multiple isolate '
+        'hops and persists every message with its own content',
+        () async {
+          when(() => mockNostrClient.connectedRelayCount).thenReturn(2);
+          // 25 real wraps => 2 hops fed to the same long-lived isolate
+          // (20 + 5 at decryptBatchSize = 20). Distinct content per wrap, so a
+          // chunk-correlation bug would surface as a missing/duplicated entry.
+          const count = 25;
+          final persistedContents = <String>{};
+          when(
+            () => mockDirectMessagesDao.insertMessage(
+              id: any(named: 'id'),
+              conversationId: any(named: 'conversationId'),
+              senderPubkey: any(named: 'senderPubkey'),
+              content: any(named: 'content'),
+              createdAt: any(named: 'createdAt'),
+              giftWrapId: any(named: 'giftWrapId'),
+              messageKind: any(named: 'messageKind'),
+              replyToId: any(named: 'replyToId'),
+              subject: any(named: 'subject'),
+              fileType: any(named: 'fileType'),
+              encryptionAlgorithm: any(named: 'encryptionAlgorithm'),
+              decryptionKey: any(named: 'decryptionKey'),
+              decryptionNonce: any(named: 'decryptionNonce'),
+              fileHash: any(named: 'fileHash'),
+              originalFileHash: any(named: 'originalFileHash'),
+              fileSize: any(named: 'fileSize'),
+              dimensions: any(named: 'dimensions'),
+              blurhash: any(named: 'blurhash'),
+              thumbnailUrl: any(named: 'thumbnailUrl'),
+              ownerPubkey: any(named: 'ownerPubkey'),
+              tagsJson: any(named: 'tagsJson'),
+            ),
+          ).thenAnswer((inv) async {
+            persistedGiftWrapIds.add(
+              inv.namedArguments[#giftWrapId] as String,
+            );
+            persistedContents.add(inv.namedArguments[#content] as String);
+          });
+
+          final wraps = <Event>[
+            for (var i = 0; i < count; i++)
+              await _buildGiftWrap(
+                rumor: rumorFor('multichunk $i', createdAt: 1700000500 + i),
+                senderPrivateKey: senderPriv,
+                recipientPubkey: recipientPub,
+                outerCreatedAt: 1700000000 + i,
+              ),
+          ];
+          stubDrainPage(wraps);
+
+          final syncState = drainPending();
+          final repository = createRepository(
+            userPubkey: recipientPub,
+            signer: _IsolateLocalSigner(recipientPriv),
+            syncState: syncState,
+          );
+
+          await repository.backfillHistoryIfNeeded();
+
+          expect(
+            persistedContents,
+            {for (var i = 0; i < count; i++) 'multichunk $i'},
+          );
         },
       );
     });
