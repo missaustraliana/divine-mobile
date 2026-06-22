@@ -100,6 +100,17 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final authService = ref.watch(authServiceProvider);
     final currentPubkey = authService.currentPublicKeyHex ?? '';
 
+    // Reactors to hide from the reaction pill + who-reacted sheet: the
+    // repository's canonical feed-hide set (blocked ∪ muted ∪ muted-by ∪
+    // blocked-by), the same union `shouldFilterFromFeeds` enforces app-wide.
+    // Watching blocklistVersionProvider rebuilds this view — re-reading the
+    // set and re-passing it to every ReactionsRow — on any block/unblock/mute
+    // change while the thread is open.
+    ref.watch(blocklistVersionProvider);
+    final blockedReactors = ref
+        .read(contentBlocklistRepositoryProvider)
+        .feedHiddenPubkeys;
+
     // Resolve other participant's profile for the app bar + empty state
     final otherPubkey = widget.participantPubkeys.isNotEmpty
         ? widget.participantPubkeys.first
@@ -182,6 +193,7 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                               currentPubkey: currentPubkey,
                               otherPubkey: otherPubkey,
                               participantPubkeys: widget.participantPubkeys,
+                              blockedPubkeys: blockedReactors,
                               displayName: displayName,
                               imageUrl: profile?.picture,
                               nip05: profile?.shortDisplayNip05,
@@ -296,6 +308,7 @@ class _ConversationContent extends StatelessWidget {
     required this.currentPubkey,
     required this.otherPubkey,
     required this.participantPubkeys,
+    required this.blockedPubkeys,
     required this.displayName,
     this.imageUrl,
     this.nip05,
@@ -305,6 +318,9 @@ class _ConversationContent extends StatelessWidget {
   final String currentPubkey;
   final String otherPubkey;
   final List<String> participantPubkeys;
+
+  /// Effective block/mute set; reactions from these pubkeys are hidden.
+  final Set<String> blockedPubkeys;
   final String displayName;
   final String? imageUrl;
   final String? nip05;
@@ -344,6 +360,7 @@ class _ConversationContent extends StatelessWidget {
                     messages: selected.messages,
                     currentPubkey: currentPubkey,
                     participantPubkeys: participantPubkeys,
+                    blockedPubkeys: blockedPubkeys,
                     senderDisplayName: displayName,
                   ),
         };
@@ -381,12 +398,16 @@ class _MessageList extends StatelessWidget {
     required this.messages,
     required this.currentPubkey,
     required this.participantPubkeys,
+    required this.blockedPubkeys,
     required this.senderDisplayName,
   });
 
   final List<DmMessage> messages;
   final String currentPubkey;
   final List<String> participantPubkeys;
+
+  /// Effective block/mute set; reactions from these pubkeys are hidden.
+  final Set<String> blockedPubkeys;
   final String senderDisplayName;
 
   Future<void> _onMessageLongPress(
@@ -553,6 +574,7 @@ class _MessageList extends StatelessWidget {
                 messageAuthorPubkey: message.senderPubkey,
                 ownerPubkey: currentPubkey,
                 isSentByMe: isSent,
+                blockedPubkeys: blockedPubkeys,
               ),
             ],
           );
