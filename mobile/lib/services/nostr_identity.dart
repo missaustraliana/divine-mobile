@@ -38,6 +38,27 @@ sealed class NostrIdentity implements NostrSigner {
   /// signers (NIP-46 bunker, NIP-55 Amber, NIP-07 extension) are human-paced —
   /// the user reads a prompt and approves — so they must NOT be timed out.
   bool get signsRemotelyNonInteractive;
+
+  /// Whether this identity produces signatures in-process with a private key
+  /// it holds directly.
+  ///
+  /// True for local key signers, and for Keycast when a matching local key is
+  /// present. False for external/remote signers (NIP-46 bunker, NIP-55 Amber,
+  /// NIP-07 extension), whose returned signature crosses a trust boundary.
+  ///
+  /// A caller that has just signed an event can skip re-verifying the
+  /// signature when this is true: re-verifying a signature we produced
+  /// ourselves only exercises the crypto library and costs a full schnorr
+  /// verification per event. Structural validation (event id == hash) is
+  /// cheap and should still run regardless.
+  ///
+  /// Contract upheld for the caller: when this is true, every event returned
+  /// by [signEvent] carries a signature that needs no external verification.
+  /// [KeycastNostrIdentity] keeps that true even in its rare
+  /// local-sign-fails → RPC fallback by verifying the RPC result before
+  /// returning it, so the flag is a guarantee about the returned event, not
+  /// merely the capability that a local key exists.
+  bool get signsWithLocalKey;
 }
 
 /// Identity backed by a local [SecureKeyContainer] with a private key.
@@ -63,6 +84,9 @@ class LocalNostrIdentity extends NostrIdentity implements IsolateDecryptSigner {
 
   @override
   bool get signsRemotelyNonInteractive => false;
+
+  @override
+  bool get signsWithLocalKey => true;
 
   @override
   bool get canDecryptInIsolate => _signer.canDecryptInIsolate;
@@ -136,6 +160,20 @@ class KeycastNostrIdentity extends NostrIdentity
         name: 'KeycastNostrIdentity',
         category: LogCategory.auth,
       );
+      // signsWithLocalKey is true for this identity, so the caller skips its
+      // post-sign verify. This fallback result came from the remote RPC — a
+      // trust boundary — so verify it here to honor that contract; otherwise a
+      // tampered/wrong-key RPC signature would slip through unverified. #5450.
+      final rpcSigned = await _rpcSigner.signEvent(event);
+      if (rpcSigned != null && !rpcSigned.isSigned) {
+        Log.error(
+          'Keycast RPC fallback returned an invalid signature; rejecting',
+          name: 'KeycastNostrIdentity',
+          category: LogCategory.auth,
+        );
+        return null;
+      }
+      return rpcSigned;
     }
     return _rpcSigner.signEvent(event);
   }
@@ -168,6 +206,9 @@ class KeycastNostrIdentity extends NostrIdentity
   /// is present, signing is in-process and fast — not timed out.
   @override
   bool get signsRemotelyNonInteractive => _localSigner == null;
+
+  @override
+  bool get signsWithLocalKey => _localSigner != null;
 
   @override
   bool get canDecryptInIsolate => _localSigner?.canDecryptInIsolate ?? false;
@@ -257,6 +298,9 @@ class BunkerNostrIdentity extends NostrIdentity {
   bool get signsRemotelyNonInteractive => false;
 
   @override
+  bool get signsWithLocalKey => false;
+
+  @override
   Future<Map?> getRelays() => _remoteSigner.getRelays();
 
   @override
@@ -308,6 +352,9 @@ class AmberNostrIdentity extends NostrIdentity {
   // human-paced and must not be timed out.
   @override
   bool get signsRemotelyNonInteractive => false;
+
+  @override
+  bool get signsWithLocalKey => false;
 
   @override
   Future<Map?> getRelays() => _amberSigner.getRelays();
@@ -363,6 +410,9 @@ class Nip07NostrIdentity extends NostrIdentity {
   // signing is human-paced and must not be timed out.
   @override
   bool get signsRemotelyNonInteractive => false;
+
+  @override
+  bool get signsWithLocalKey => false;
 
   @override
   Future<Map?> getRelays() => _nip07Signer.getRelays();
