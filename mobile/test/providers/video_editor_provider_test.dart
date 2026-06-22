@@ -4,6 +4,7 @@
 import 'dart:async';
 
 import 'package:characters/characters.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -210,20 +211,14 @@ void main() {
         final notifier = container.read(videoEditorProvider.notifier);
 
         notifier.updateMetadata(description: 'short text');
-        expect(
-          container.read(videoEditorProvider).description,
-          'short text',
-        );
+        expect(container.read(videoEditorProvider).description, 'short text');
       });
 
       test('trims whitespace before applying the grapheme limit', () {
         final notifier = container.read(videoEditorProvider.notifier);
 
         notifier.updateMetadata(description: '   hello world   ');
-        expect(
-          container.read(videoEditorProvider).description,
-          'hello world',
-        );
+        expect(container.read(videoEditorProvider).description, 'hello world');
       });
     });
 
@@ -855,10 +850,7 @@ void main() {
             .finalRenderedClip;
         expect(updatedClip, isNotNull);
         expect(updatedClip!.thumbnailPath, '/docs/cover.jpg');
-        expect(
-          updatedClip.thumbnailTimestamp,
-          const Duration(seconds: 2),
-        );
+        expect(updatedClip.thumbnailTimestamp, const Duration(seconds: 2));
       });
 
       test('persists the cover position on state so it survives a '
@@ -1432,6 +1424,163 @@ void main() {
             'the durable cover path must persist so the drafts list keeps '
             'showing the selected cover after finalRenderedClip is cleared',
       );
+    });
+  });
+
+  group('saveAsDraft', () {
+    late _MockDraftStorageService mockDraftStorage;
+    late ProviderContainer container;
+
+    setUpAll(() {
+      registerFallbackValue(
+        DivineVideoDraft.create(
+          id: 'fallback',
+          clips: const [],
+          title: '',
+          description: '',
+          hashtags: const {},
+          selectedApproach: 'video',
+        ),
+      );
+    });
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      mockDraftStorage = _MockDraftStorageService();
+      container = ProviderContainer(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          draftStorageServiceProvider.overrideWithValue(mockDraftStorage),
+        ],
+      );
+    });
+
+    tearDown(() {
+      container.dispose();
+    });
+
+    test('returns true and clears isSavingDraft on success', () async {
+      when(() => mockDraftStorage.saveDraft(any())).thenAnswer((_) async {});
+      when(() => mockDraftStorage.deleteDraft(any())).thenAnswer((_) async {});
+
+      final result = await container
+          .read(videoEditorProvider.notifier)
+          .saveAsDraft(enforceCreateNewDraft: true);
+
+      expect(result, isTrue);
+      expect(
+        container.read(videoEditorProvider).isSavingDraft,
+        isFalse,
+        reason: 'a successful save must re-enable the save button',
+      );
+    });
+
+    test('clears isSavingDraft and returns false when the write hangs', () {
+      // Reproduces the dead "Save for later" button: a draft write that never
+      // resolves must not leave isSavingDraft stuck true for the session.
+      when(
+        () => mockDraftStorage.saveDraft(any()),
+      ).thenAnswer((_) => Completer<void>().future);
+
+      fakeAsync((async) {
+        final notifier = container.read(videoEditorProvider.notifier);
+        bool? result;
+        notifier
+            .saveAsDraft(enforceCreateNewDraft: true)
+            .then((value) => result = value);
+
+        expect(
+          container.read(videoEditorProvider).isSavingDraft,
+          isTrue,
+          reason: 'the button is disabled while a save is in flight',
+        );
+
+        async.elapse(
+          VideoEditorConstants.draftSaveTimeout + const Duration(seconds: 1),
+        );
+
+        expect(result, isFalse, reason: 'a timed-out save reports failure');
+        expect(
+          container.read(videoEditorProvider).isSavingDraft,
+          isFalse,
+          reason: 'a timed-out save must re-enable the save button',
+        );
+      });
+    });
+
+    test('returns false while a previous save is still in flight', () {
+      when(
+        () => mockDraftStorage.saveDraft(any()),
+      ).thenAnswer((_) => Completer<void>().future);
+
+      fakeAsync((async) {
+        final notifier = container.read(videoEditorProvider.notifier);
+        unawaited(notifier.saveAsDraft(enforceCreateNewDraft: true));
+        async.flushMicrotasks();
+
+        bool? secondResult;
+        notifier
+            .saveAsDraft(enforceCreateNewDraft: true)
+            .then((value) => secondResult = value);
+        async.flushMicrotasks();
+
+        expect(
+          secondResult,
+          isFalse,
+          reason: 'concurrent saves are rejected by the in-flight guard',
+        );
+      });
+    });
+
+    test('does not abandon autosave cleanup after a successful draft save', () {
+      // The autosave delete must run to completion: an abandoned delete could
+      // later wipe a new session's recovery point. So a stalled cleanup keeps
+      // isSavingDraft true and the save unresolved rather than being dropped.
+      when(() => mockDraftStorage.saveDraft(any())).thenAnswer((_) async {});
+
+      fakeAsync((async) {
+        // Create the completer inside the fake zone so completing it later is
+        // driven by `async.flushMicrotasks()` rather than the root zone.
+        final cleanup = Completer<void>();
+        when(
+          () => mockDraftStorage.deleteDraft(any()),
+        ).thenAnswer((_) => cleanup.future);
+
+        final notifier = container.read(videoEditorProvider.notifier);
+        bool? result;
+        notifier
+            .saveAsDraft(enforceCreateNewDraft: true)
+            .then((value) => result = value);
+
+        // Let the write resolve so we are parked on the pending cleanup.
+        async.flushMicrotasks();
+        // Time passing must not abandon the cleanup.
+        async.elapse(
+          VideoEditorConstants.draftSaveTimeout + const Duration(seconds: 5),
+        );
+
+        expect(
+          result,
+          isNull,
+          reason: 'the save stays in flight while the cleanup is pending',
+        );
+        expect(
+          container.read(videoEditorProvider).isSavingDraft,
+          isTrue,
+          reason: 'the autosave cleanup is not abandoned on a timeout',
+        );
+
+        cleanup.complete();
+        async.flushMicrotasks();
+
+        expect(result, isTrue);
+        expect(
+          container.read(videoEditorProvider).isSavingDraft,
+          isFalse,
+          reason: 'the save resolves once the cleanup lands',
+        );
+      });
     });
   });
 }

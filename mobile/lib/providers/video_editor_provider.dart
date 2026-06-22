@@ -678,7 +678,13 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
   /// Save the current video project as a draft.
   ///
   /// Persists clips and metadata to local storage for later editing.
-  /// Returns `true` on success, `false` on failure.
+  /// Returns `true` on success, `false` on failure — including when the write
+  /// exceeds [VideoEditorConstants.draftSaveTimeout].
+  ///
+  /// The write is bounded so a stalled save can't wedge the button. The
+  /// autosave cleanup that follows is deliberately *not* bounded (see the call
+  /// site): it must run to completion, so a stalled cleanup keeps the save in
+  /// flight — and the button disabled — until it lands.
   Future<bool> saveAsDraft({bool enforceCreateNewDraft = false}) async {
     if (state.isSavingDraft) return false;
 
@@ -695,9 +701,16 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
     );
 
     try {
-      await _draftService.saveDraft(getActiveDraft(draftId: draftId));
+      await _draftService
+          .saveDraft(getActiveDraft(draftId: draftId))
+          .timeout(VideoEditorConstants.draftSaveTimeout);
 
-      // Remove the autosaved draft
+      // Drop the now-redundant autosave recovery point. This must run to
+      // completion — never timed out or fire-and-forget: the delete targets the
+      // fixed `draft_autosave` id, so an abandoned one that resolved later would
+      // wipe the recovery point of whatever editor session is active by then,
+      // corrupting that session. Blocking here (the button stays disabled until
+      // it lands) is the safe trade-off; only the write above needs a timeout.
       await removeAutosavedDraft();
 
       Log.info(
@@ -705,9 +718,6 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
         name: 'VideoEditorNotifier',
         category: .video,
       );
-
-      state = state.copyWith(isSavingDraft: false);
-      return true;
     } catch (e, stackTrace) {
       Log.error(
         '❌ Failed to save draft: $e',
@@ -716,9 +726,16 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
         error: e,
         stackTrace: stackTrace,
       );
-      state = state.copyWith(isSavingDraft: false);
       return false;
+    } finally {
+      // Always clear the flag — a timed-out or failed save must re-enable the
+      // save button. Guard against a dispose that races the timeout.
+      if (ref.mounted) {
+        state = state.copyWith(isSavingDraft: false);
+      }
     }
+
+    return true;
   }
 
   /// Restore a draft from local storage.
