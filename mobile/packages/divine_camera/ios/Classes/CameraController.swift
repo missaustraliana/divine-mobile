@@ -1634,6 +1634,16 @@ class CameraController: NSObject {
                 return .cinematicExtended
             }
             return .cinematic
+        case "previewOptimized":
+            if #available(iOS 17.0, *) {
+                return .previewOptimized
+            }
+            return nil
+        case "lowLatency":
+            if #available(iOS 26.0, *) {
+                return .lowLatency
+            }
+            return nil
         case "auto":
             return .auto
         default:
@@ -1656,11 +1666,26 @@ class CameraController: NSObject {
         case .auto:
             return "auto"
         default:
+            if #available(iOS 26.0, *), mode == .lowLatency {
+                return "lowLatency"
+            }
+            if #available(iOS 17.0, *), mode == .previewOptimized {
+                return "previewOptimized"
+            }
             if #available(iOS 13.0, *), mode == .cinematicExtended {
                 return "cinematicExtended"
             }
             return "off"
         }
+    }
+
+    private static func isPreviewOptimized(
+        _ mode: AVCaptureVideoStabilizationMode
+    ) -> Bool {
+        if #available(iOS 17.0, *) {
+            return mode == .previewOptimized
+        }
+        return false
     }
 
     /// Sets the requested video stabilization mode and applies it to the
@@ -1673,8 +1698,13 @@ class CameraController: NSObject {
             )
             return false
         }
+        let previous = requestedStabilizationMode
         requestedStabilizationMode = parsed
-        return applyVideoStabilization()
+        let applied = applyVideoStabilization()
+        if !applied {
+            requestedStabilizationMode = previous
+        }
+        return applied
     }
 
     /// Applies `requestedStabilizationMode` to the video connection. The
@@ -1694,6 +1724,15 @@ class CameraController: NSObject {
                 )
             }
             return requestedStabilizationMode == .off
+        }
+        if Self.isPreviewOptimized(requestedStabilizationMode) {
+            DivineCameraLog.shared.warning(
+                "Preview optimized stabilization requires a preview layer or "
+                    + "preview-sized AVCaptureVideoDataOutput; the recorder "
+                    + "uses a full-resolution data output",
+                name: "DivineCamera.Stabilization"
+            )
+            return false
         }
         // .auto lets AVFoundation pick a supported mode; for explicit modes
         // verify the active format actually supports the request.
@@ -1738,14 +1777,51 @@ class CameraController: NSObject {
         if #available(iOS 13.0, *) {
             candidates.append((.cinematicExtended, "cinematicExtended"))
         }
-        for (mode, name) in candidates
-        where format.isVideoStabilizationModeSupported(mode) {
-            modes.append(name)
+        // previewOptimized is intentionally omitted for this recorder. Apple
+        // only supports it on connections with a preview layer or preview-sized
+        // AVCaptureVideoDataOutput, while this controller records from the
+        // full-resolution data output that backs the Flutter texture.
+        if #available(iOS 26.0, *) {
+            candidates.append((.lowLatency, "lowLatency"))
+        }
+        var probed: [String] = []
+        for (mode, name) in candidates {
+            let supported = format.isVideoStabilizationModeSupported(mode)
+            probed.append("\(name)=\(supported)")
+            if supported { modes.append(name) }
         }
         if modes.count > 1 {
             modes.append("auto")
         }
+        DivineCameraLog.shared.debug(
+            "Available stabilization modes: [\(modes.joined(separator: ", "))] "
+                + "(probed \(probed.joined(separator: ", ")))",
+            name: "DivineCamera.Stabilization"
+        )
         return modes
+    }
+
+    /// The stabilization mode to surface in the camera state.
+    ///
+    /// For explicit modes we report the connection's actual
+    /// `activeVideoStabilizationMode`, not the requested one, so a silent
+    /// system fallback is reflected honestly — e.g. `previewOptimized`
+    /// requested on the recorder's full-resolution data output resolves to a
+    /// nearby mode. `auto` is reported verbatim because it expresses intent
+    /// ("let the system pick") rather than a concrete target, and an idle
+    /// session falls back to the requested value to avoid surfacing a
+    /// transient `.off` before the connection has configured.
+    private func reportedStabilizationString() -> String {
+        guard requestedStabilizationMode != .auto,
+            captureSession?.isRunning == true,
+            let connection = videoOutput?.connection(with: .video),
+            connection.isVideoStabilizationSupported
+        else {
+            return Self.stabilizationString(from: requestedStabilizationMode)
+        }
+        return Self.stabilizationString(
+            from: connection.activeVideoStabilizationMode
+        )
     }
 
     /// Starts video recording using AVAssetWriter.
@@ -2110,9 +2186,7 @@ class CameraController: NSObject {
             "textureId": textureId,
             "availableLenses": getAvailableLenses(),
             "currentLensMetadata": getCurrentLensMetadata() as Any,
-            "videoStabilizationMode": Self.stabilizationString(
-                from: requestedStabilizationMode
-            ),
+            "videoStabilizationMode": reportedStabilizationString(),
             "availableVideoStabilizationModes": availableStabilizationModes,
             // Mirror Android: "supported" means the active format offers at
             // least one mode beyond "off", so the UI affordance matches the
