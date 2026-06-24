@@ -78,8 +78,10 @@ void main() {
       MediaCacheManager? mediaCache,
       BlossomAuthService? blossomAuthService,
       OnRemoveVideo? onRemoveVideo,
+      OnVideoConfirmedUnavailable? onVideoConfirmedUnavailable,
       MediaAvailabilityChecker? availabilityChecker,
       BlockAuthorFilter? blockFilter,
+      UnavailableVideoFilter? unavailableFilter,
     }) => FullscreenFeedBloc(
       videosStream: videosController.stream,
       initialIndex: initialIndex,
@@ -90,8 +92,10 @@ void main() {
       mediaCache: mediaCache ?? mockMediaCache,
       blossomAuthService: blossomAuthService,
       onRemoveVideo: onRemoveVideo,
+      onVideoConfirmedUnavailable: onVideoConfirmedUnavailable,
       availabilityChecker: availabilityChecker,
       blockFilter: blockFilter,
+      unavailableFilter: unavailableFilter,
     );
 
     test('initial state has correct values', () {
@@ -1282,6 +1286,65 @@ void main() {
       );
     });
 
+    group('unavailableFilter (persisted 404)', () {
+      blocTest<FullscreenFeedBloc, FullscreenFeedState>(
+        'filters known-unavailable videos from incoming stream lists',
+        build: () => createBloc(unavailableFilter: (id) => id == 'broken'),
+        act: (bloc) async {
+          bloc.add(const FullscreenFeedStarted());
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          videosController.add([
+            createTestVideo('a'),
+            createTestVideo('broken'),
+            createTestVideo('c'),
+          ]);
+        },
+        wait: const Duration(milliseconds: 100),
+        expect: () => [
+          isA<FullscreenFeedState>().having(
+            (s) => s.videos.map((v) => v.id).toList(),
+            'video ids',
+            ['a', 'c'],
+          ),
+        ],
+      );
+
+      // Static sources (liked / saved / reposts / curated lists) re-emit
+      // unfiltered by-id lists, so a known-unavailable video must stay out
+      // across a re-push — the gap this filter closes for #5237.
+      blocTest<FullscreenFeedBloc, FullscreenFeedState>(
+        'keeps known-unavailable videos out across a source re-push',
+        build: () => createBloc(unavailableFilter: (id) => id == 'broken'),
+        act: (bloc) async {
+          bloc.add(const FullscreenFeedStarted());
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          videosController.add([
+            createTestVideo('a'),
+            createTestVideo('broken'),
+          ]);
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          videosController.add([
+            createTestVideo('a'),
+            createTestVideo('broken'),
+            createTestVideo('c'),
+          ]);
+        },
+        wait: const Duration(milliseconds: 150),
+        expect: () => [
+          isA<FullscreenFeedState>().having(
+            (s) => s.videos.map((v) => v.id).toList(),
+            'video ids',
+            ['a'],
+          ),
+          isA<FullscreenFeedState>().having(
+            (s) => s.videos.map((v) => v.id).toList(),
+            'video ids',
+            ['a', 'c'],
+          ),
+        ],
+      );
+    });
+
     group('FullscreenFeedVideoUnavailable', () {
       MediaAvailabilityChecker checkerReturning(int statusCode) {
         final client = MockClient((_) async => http.Response('', statusCode));
@@ -1366,6 +1429,54 @@ void main() {
             availabilityChecker: throwingChecker(),
           );
         },
+        seed: () => FullscreenFeedState(
+          status: FullscreenFeedStatus.ready,
+          videos: [createTestVideo('video1')],
+        ),
+        act: (bloc) => bloc.add(const FullscreenFeedVideoUnavailable('video1')),
+        wait: const Duration(milliseconds: 100),
+        expect: () => <FullscreenFeedState>[],
+      );
+
+      blocTest<FullscreenFeedBloc, FullscreenFeedState>(
+        'calls onVideoConfirmedUnavailable when HEAD confirms 404',
+        build: () => createBloc(
+          onVideoConfirmedUnavailable: expectAsync1<void, String>((id) {
+            expect(id, equals('video1'));
+          }),
+          availabilityChecker: checkerReturning(404),
+        ),
+        seed: () => FullscreenFeedState(
+          status: FullscreenFeedStatus.ready,
+          videos: [createTestVideo('video1')],
+        ),
+        act: (bloc) => bloc.add(const FullscreenFeedVideoUnavailable('video1')),
+        wait: const Duration(milliseconds: 100),
+      );
+
+      blocTest<FullscreenFeedBloc, FullscreenFeedState>(
+        'does not call onVideoConfirmedUnavailable on transient error (200)',
+        build: () => createBloc(
+          onVideoConfirmedUnavailable: (_) =>
+              fail('should not persist on non-404'),
+          availabilityChecker: checkerReturning(200),
+        ),
+        seed: () => FullscreenFeedState(
+          status: FullscreenFeedStatus.ready,
+          videos: [createTestVideo('video1')],
+        ),
+        act: (bloc) => bloc.add(const FullscreenFeedVideoUnavailable('video1')),
+        wait: const Duration(milliseconds: 100),
+        expect: () => <FullscreenFeedState>[],
+      );
+
+      blocTest<FullscreenFeedBloc, FullscreenFeedState>(
+        'does not call onVideoConfirmedUnavailable when HEAD throws',
+        build: () => createBloc(
+          onVideoConfirmedUnavailable: (_) =>
+              fail('should not persist on network error'),
+          availabilityChecker: throwingChecker(),
+        ),
         seed: () => FullscreenFeedState(
           status: FullscreenFeedStatus.ready,
           videos: [createTestVideo('video1')],

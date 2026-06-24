@@ -209,6 +209,46 @@ class PooledFullscreenVideoFeedScreen extends ConsumerWidget {
         .read(videoEventServiceProvider)
         .removedVideoIds;
 
+    // Persist confirmed-404 ids so the video stays filtered out of every list
+    // surface (feed, profile, hashtag, grids) across restarts. The bloc only
+    // fires this after a HEAD request confirms a hard 404 (#5237).
+    void persistConfirmedUnavailable(String videoId) {
+      unawaited(
+        ref
+            .read(brokenVideoTrackerProvider.future)
+            .then(
+              (tracker) => tracker.markVideoBroken(
+                videoId,
+                'Confirmed 404 in fullscreen feed',
+              ),
+            )
+            .catchError((Object error) {
+              Log.warning(
+                'Failed to persist confirmed-unavailable video: $error',
+                name: 'PooledFullscreenVideoFeedScreen',
+                category: LogCategory.video,
+              );
+            }),
+      );
+    }
+
+    // Filter videos confirmed unavailable (persisted hard 404) out of the
+    // fullscreen list at the stream boundary. This covers static / by-id
+    // sources (liked, saved, reposts, collabs, curated lists) whose
+    // repositories don't run the central feed filters, so a video that 404'd
+    // in a previous session won't reappear when opened fullscreen. Reads live
+    // tracker state on every call via the provider (rather than capturing a
+    // snapshot in `create:`, which would stay `null` if the tracker's async
+    // init hadn't resolved by first build and never recover): before init
+    // resolves it filters nothing; once it resolves, every subsequent source
+    // re-push is filtered. See #5237.
+    bool unavailableFilter(String videoId) => ref
+        .read(brokenVideoTrackerProvider)
+        .maybeWhen(
+          data: (tracker) => tracker.isVideoBroken(videoId),
+          orElse: () => false,
+        );
+
     return MultiBlocProvider(
       providers: [
         BlocProvider(
@@ -220,9 +260,11 @@ class PooledFullscreenVideoFeedScreen extends ConsumerWidget {
             hasMoreStream: feedRepository.watchHasMore(source),
             removedIdsStream: removedIdsStream,
             onLoadMore: () => unawaited(feedRepository.loadMore(source)),
+            onVideoConfirmedUnavailable: persistConfirmedUnavailable,
             mediaCache: mediaCache,
             blossomAuthService: blossomAuthService,
             blockFilter: blockFilter,
+            unavailableFilter: unavailableFilter,
           )..add(const FullscreenFeedStarted()),
         ),
         BlocProvider(create: (_) => VideoPlaybackStatusCubit()),
