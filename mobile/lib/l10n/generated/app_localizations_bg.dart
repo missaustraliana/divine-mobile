@@ -8059,6 +8059,60 @@ class AppLocalizationsBg extends AppLocalizations {
   String get videoEditorSpeedSheetTitle => 'Скорост на клипа';
 
   @override
+  String get videoEditorTransitionSheetTitle => 'Преход';
+
+  @override
+  String get videoEditorTransitionNone => 'Без';
+
+  @override
+  String get videoEditorTransitionDissolve => 'Преливане';
+
+  @override
+  String get videoEditorTransitionFadeToBlack => 'Затъмняване';
+
+  @override
+  String get videoEditorTransitionFadeToWhite => 'Избеляване';
+
+  @override
+  String get videoEditorTransitionSlide => 'Плъзгане';
+
+  @override
+  String get videoEditorTransitionPush => 'Избутване';
+
+  @override
+  String get videoEditorTransitionWipe => 'Избърсване';
+
+  @override
+  String get videoEditorTransitionButtonSemanticLabel =>
+      'Редактиране на преход';
+
+  @override
+  String get videoEditorTransitionDuration => 'Продължителност';
+
+  @override
+  String get videoEditorTransitionCurve => 'Крива';
+
+  @override
+  String get videoEditorTransitionDirection => 'Посока';
+
+  @override
+  String get videoEditorTransitionDirectionLeft => 'Ляво';
+
+  @override
+  String get videoEditorTransitionDirectionRight => 'Дясно';
+
+  @override
+  String get videoEditorTransitionDirectionUp => 'Нагоре';
+
+  @override
+  String get videoEditorTransitionDirectionDown => 'Надолу';
+
+  @override
+  String videoEditorTransitionCurveOptionSemanticLabel(int number) {
+    return 'Крива на анимация $number';
+  }
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'Завършете редактирането на времевата линия';
 

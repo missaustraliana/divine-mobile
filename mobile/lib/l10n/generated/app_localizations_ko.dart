@@ -7726,6 +7726,59 @@ class AppLocalizationsKo extends AppLocalizations {
   String get videoEditorSpeedSheetTitle => '클립 속도';
 
   @override
+  String get videoEditorTransitionSheetTitle => '전환';
+
+  @override
+  String get videoEditorTransitionNone => '없음';
+
+  @override
+  String get videoEditorTransitionDissolve => '디졸브';
+
+  @override
+  String get videoEditorTransitionFadeToBlack => '검은색으로 페이드';
+
+  @override
+  String get videoEditorTransitionFadeToWhite => '흰색으로 페이드';
+
+  @override
+  String get videoEditorTransitionSlide => '슬라이드';
+
+  @override
+  String get videoEditorTransitionPush => '밀기';
+
+  @override
+  String get videoEditorTransitionWipe => '와이프';
+
+  @override
+  String get videoEditorTransitionButtonSemanticLabel => '전환 편집';
+
+  @override
+  String get videoEditorTransitionDuration => '길이';
+
+  @override
+  String get videoEditorTransitionCurve => '커브';
+
+  @override
+  String get videoEditorTransitionDirection => '방향';
+
+  @override
+  String get videoEditorTransitionDirectionLeft => '왼쪽';
+
+  @override
+  String get videoEditorTransitionDirectionRight => '오른쪽';
+
+  @override
+  String get videoEditorTransitionDirectionUp => '위';
+
+  @override
+  String get videoEditorTransitionDirectionDown => '아래';
+
+  @override
+  String videoEditorTransitionCurveOptionSemanticLabel(int number) {
+    return '애니메이션 곡선 $number';
+  }
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel => '타임라인 편집 완료';
 
   @override

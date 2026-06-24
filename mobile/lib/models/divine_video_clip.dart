@@ -9,6 +9,7 @@ import 'package:models/models.dart' as model show AspectRatio;
 import 'package:openvine/utils/path_resolver.dart';
 import 'package:path/path.dart' as p;
 import 'package:pro_video_editor/pro_video_editor.dart';
+import 'package:unified_logger/unified_logger.dart';
 
 class DivineVideoClip {
   DivineVideoClip({
@@ -33,6 +34,7 @@ class DivineVideoClip {
     this.reversedVideoPath,
     this.proofManifestJson,
     this.deletedAt,
+    this.transition,
   }) : _thumbnailTimestamp = thumbnailTimestamp,
        _originalAspectRatio = originalAspectRatio;
 
@@ -90,6 +92,13 @@ class DivineVideoClip {
   /// only populated when the clip is loaded via the trash-bin path.
   final DateTime? deletedAt;
 
+  /// How this clip transitions into the **next** clip on the timeline
+  /// (dissolve, fade-to-black, slide, …), or `null` for a hard cut.
+  ///
+  /// Ignored on the last clip (there is no following clip). Drives both the
+  /// live editor preview and the final rendered composition.
+  final ClipTransition? transition;
+
   double get durationInSeconds => duration.inMilliseconds / 1000.0;
 
   /// Effective duration after trimming (clamped to zero).
@@ -116,6 +125,19 @@ class DivineVideoClip {
     if (speed <= 0 || speed == 1.0) return sourceDuration;
     return Duration(
       microseconds: (sourceDuration.inMicroseconds / speed).round(),
+    );
+  }
+
+  /// Inverse of [sourceDurationToPlaybackDuration]: converts a wall-clock
+  /// (playback) duration into the span of this clip's source media it covers
+  /// once [playbackSpeed] is applied.
+  ///
+  /// A 1 s wall-clock span on a 2× clip maps to 2 s of source media.
+  Duration playbackDurationToSourceDuration(Duration playbackDuration) {
+    final speed = playbackSpeed ?? 1.0;
+    if (speed <= 0 || speed == 1.0) return playbackDuration;
+    return Duration(
+      microseconds: (playbackDuration.inMicroseconds * speed).round(),
     );
   }
 
@@ -168,6 +190,8 @@ class DivineVideoClip {
     String? proofManifestJson,
     bool clearProofManifestJson = false,
     DateTime? deletedAt,
+    ClipTransition? transition,
+    bool clearTransition = false,
   }) {
     final isNewLogicalClip = id != null && id != this.id;
 
@@ -207,6 +231,7 @@ class DivineVideoClip {
           ? null
           : (proofManifestJson ?? this.proofManifestJson),
       deletedAt: deletedAt ?? this.deletedAt,
+      transition: clearTransition ? null : (transition ?? this.transition),
     );
   }
 
@@ -240,6 +265,7 @@ class DivineVideoClip {
       if (reversedVideoPath != null)
         'reversedVideoPath': p.basename(reversedVideoPath!),
       if (proofManifestJson != null) 'proofManifestJson': proofManifestJson,
+      if (transition != null) 'transition': transition!.toMap(),
     };
   }
 
@@ -305,7 +331,30 @@ class DivineVideoClip {
         useOriginalPath: useOriginalPath,
       ),
       proofManifestJson: json['proofManifestJson'] as String?,
+      transition: _transitionFromJson(json['transition']),
     );
+  }
+
+  /// Parses a persisted [ClipTransition], degrading to `null` (a hard cut) when
+  /// the stored type/curve/direction names can't be resolved — e.g. a
+  /// forward-incompatible draft written by a newer build, or partial
+  /// corruption. `ClipTransition.fromMap` resolves enums via `byName`, which
+  /// throws on an unknown name; since a draft deserializes every clip through
+  /// `fromJson`, an unguarded throw here would abort the *whole* draft load.
+  /// Mirrors the `targetAspectRatio` `orElse` fallback above.
+  static ClipTransition? _transitionFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    try {
+      return ClipTransition.fromMap(raw.cast<String, dynamic>());
+    } catch (error, stackTrace) {
+      Log.error(
+        'Dropping unparseable clip transition; falling back to a hard cut',
+        name: 'DivineVideoClip',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return null;
+    }
   }
 
   @override

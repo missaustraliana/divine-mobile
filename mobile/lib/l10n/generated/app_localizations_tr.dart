@@ -7957,6 +7957,59 @@ class AppLocalizationsTr extends AppLocalizations {
   String get videoEditorSpeedSheetTitle => 'Klip Hızı';
 
   @override
+  String get videoEditorTransitionSheetTitle => 'Geçiş';
+
+  @override
+  String get videoEditorTransitionNone => 'Yok';
+
+  @override
+  String get videoEditorTransitionDissolve => 'Erime';
+
+  @override
+  String get videoEditorTransitionFadeToBlack => 'Siyaha solma';
+
+  @override
+  String get videoEditorTransitionFadeToWhite => 'Beyaza solma';
+
+  @override
+  String get videoEditorTransitionSlide => 'Kaydırma';
+
+  @override
+  String get videoEditorTransitionPush => 'İtme';
+
+  @override
+  String get videoEditorTransitionWipe => 'Silme';
+
+  @override
+  String get videoEditorTransitionButtonSemanticLabel => 'Geçişi düzenle';
+
+  @override
+  String get videoEditorTransitionDuration => 'Süre';
+
+  @override
+  String get videoEditorTransitionCurve => 'Eğri';
+
+  @override
+  String get videoEditorTransitionDirection => 'Yön';
+
+  @override
+  String get videoEditorTransitionDirectionLeft => 'Sol';
+
+  @override
+  String get videoEditorTransitionDirectionRight => 'Sağ';
+
+  @override
+  String get videoEditorTransitionDirectionUp => 'Yukarı';
+
+  @override
+  String get videoEditorTransitionDirectionDown => 'Aşağı';
+
+  @override
+  String videoEditorTransitionCurveOptionSemanticLabel(int number) {
+    return 'Animasyon eğrisi $number';
+  }
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'Zaman çizelgesi düzenlemeyi bitir';
 

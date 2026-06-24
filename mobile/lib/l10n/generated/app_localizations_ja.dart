@@ -7702,6 +7702,59 @@ class AppLocalizationsJa extends AppLocalizations {
   String get videoEditorSpeedSheetTitle => 'クリップの速度';
 
   @override
+  String get videoEditorTransitionSheetTitle => 'トランジション';
+
+  @override
+  String get videoEditorTransitionNone => 'なし';
+
+  @override
+  String get videoEditorTransitionDissolve => 'ディゾルブ';
+
+  @override
+  String get videoEditorTransitionFadeToBlack => '黒にフェード';
+
+  @override
+  String get videoEditorTransitionFadeToWhite => '白にフェード';
+
+  @override
+  String get videoEditorTransitionSlide => 'スライド';
+
+  @override
+  String get videoEditorTransitionPush => 'プッシュ';
+
+  @override
+  String get videoEditorTransitionWipe => 'ワイプ';
+
+  @override
+  String get videoEditorTransitionButtonSemanticLabel => 'トランジションを編集';
+
+  @override
+  String get videoEditorTransitionDuration => '長さ';
+
+  @override
+  String get videoEditorTransitionCurve => 'カーブ';
+
+  @override
+  String get videoEditorTransitionDirection => '方向';
+
+  @override
+  String get videoEditorTransitionDirectionLeft => '左';
+
+  @override
+  String get videoEditorTransitionDirectionRight => '右';
+
+  @override
+  String get videoEditorTransitionDirectionUp => '上';
+
+  @override
+  String get videoEditorTransitionDirectionDown => '下';
+
+  @override
+  String videoEditorTransitionCurveOptionSemanticLabel(int number) {
+    return 'アニメーションカーブ $number';
+  }
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel => 'タイムライン編集を終了';
 
   @override

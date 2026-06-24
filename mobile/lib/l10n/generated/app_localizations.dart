@@ -13922,6 +13922,108 @@ abstract class AppLocalizations {
   /// **'Clip Speed'**
   String get videoEditorSpeedSheetTitle;
 
+  /// Title of the bottom sheet for choosing the transition between two adjacent clips.
+  ///
+  /// In en, this message translates to:
+  /// **'Transition'**
+  String get videoEditorTransitionSheetTitle;
+
+  /// Transition option for a hard cut between clips (no transition).
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get videoEditorTransitionNone;
+
+  /// Transition option that cross-dissolves one clip into the next.
+  ///
+  /// In en, this message translates to:
+  /// **'Dissolve'**
+  String get videoEditorTransitionDissolve;
+
+  /// Transition option that dips through black between clips.
+  ///
+  /// In en, this message translates to:
+  /// **'Fade to black'**
+  String get videoEditorTransitionFadeToBlack;
+
+  /// Transition option that dips through white between clips.
+  ///
+  /// In en, this message translates to:
+  /// **'Fade to white'**
+  String get videoEditorTransitionFadeToWhite;
+
+  /// Transition option where the next clip slides in over the current one.
+  ///
+  /// In en, this message translates to:
+  /// **'Slide'**
+  String get videoEditorTransitionSlide;
+
+  /// Transition option where the next clip pushes the current one out of frame.
+  ///
+  /// In en, this message translates to:
+  /// **'Push'**
+  String get videoEditorTransitionPush;
+
+  /// Transition option where the next clip is progressively revealed over the current one.
+  ///
+  /// In en, this message translates to:
+  /// **'Wipe'**
+  String get videoEditorTransitionWipe;
+
+  /// Accessibility label for the button between two clips that opens the transition picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit transition'**
+  String get videoEditorTransitionButtonSemanticLabel;
+
+  /// Section label above the transition duration presets in the transition picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Duration'**
+  String get videoEditorTransitionDuration;
+
+  /// Section label above the transition easing-curve options in the transition picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Curve'**
+  String get videoEditorTransitionCurve;
+
+  /// Section label above the slide/push/wipe direction options in the transition picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Direction'**
+  String get videoEditorTransitionDirection;
+
+  /// Accessibility label for the left direction option of a slide/push/wipe transition.
+  ///
+  /// In en, this message translates to:
+  /// **'Left'**
+  String get videoEditorTransitionDirectionLeft;
+
+  /// Accessibility label for the right direction option of a slide/push/wipe transition.
+  ///
+  /// In en, this message translates to:
+  /// **'Right'**
+  String get videoEditorTransitionDirectionRight;
+
+  /// Accessibility label for the up direction option of a slide/push/wipe transition.
+  ///
+  /// In en, this message translates to:
+  /// **'Up'**
+  String get videoEditorTransitionDirectionUp;
+
+  /// Accessibility label for the down direction option of a slide/push/wipe transition.
+  ///
+  /// In en, this message translates to:
+  /// **'Down'**
+  String get videoEditorTransitionDirectionDown;
+
+  /// Accessibility label for an easing-curve option in the transition picker, identified by its position. The curve shape is shown visually as a glyph; screen readers announce the option number instead.
+  ///
+  /// In en, this message translates to:
+  /// **'Easing curve {number}'**
+  String videoEditorTransitionCurveOptionSemanticLabel(int number);
+
   /// No description provided for @videoEditorFinishTimelineEditingSemanticLabel.
   ///
   /// In en, this message translates to:

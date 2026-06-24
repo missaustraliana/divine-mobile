@@ -8075,6 +8075,59 @@ class AppLocalizationsDe extends AppLocalizations {
   String get videoEditorSpeedSheetTitle => 'Clip-Geschwindigkeit';
 
   @override
+  String get videoEditorTransitionSheetTitle => 'Übergang';
+
+  @override
+  String get videoEditorTransitionNone => 'Kein';
+
+  @override
+  String get videoEditorTransitionDissolve => 'Überblenden';
+
+  @override
+  String get videoEditorTransitionFadeToBlack => 'Schwarzblende';
+
+  @override
+  String get videoEditorTransitionFadeToWhite => 'Weißblende';
+
+  @override
+  String get videoEditorTransitionSlide => 'Schieben';
+
+  @override
+  String get videoEditorTransitionPush => 'Verdrängen';
+
+  @override
+  String get videoEditorTransitionWipe => 'Wischen';
+
+  @override
+  String get videoEditorTransitionButtonSemanticLabel => 'Übergang bearbeiten';
+
+  @override
+  String get videoEditorTransitionDuration => 'Dauer';
+
+  @override
+  String get videoEditorTransitionCurve => 'Kurve';
+
+  @override
+  String get videoEditorTransitionDirection => 'Richtung';
+
+  @override
+  String get videoEditorTransitionDirectionLeft => 'Links';
+
+  @override
+  String get videoEditorTransitionDirectionRight => 'Rechts';
+
+  @override
+  String get videoEditorTransitionDirectionUp => 'Oben';
+
+  @override
+  String get videoEditorTransitionDirectionDown => 'Unten';
+
+  @override
+  String videoEditorTransitionCurveOptionSemanticLabel(int number) {
+    return 'Animationskurve $number';
+  }
+
+  @override
   String get videoEditorFinishTimelineEditingSemanticLabel =>
       'Timeline-Bearbeitung abschließen';
 
