@@ -232,10 +232,8 @@ class NotificationRepository {
   Future<NotificationPage> getNotifications({
     String? cursor,
     String? cursorId,
-  }) async => (await _getNotificationsResult(
-    cursor: cursor,
-    cursorId: cursorId,
-  )).page;
+  }) async =>
+      (await _getNotificationsResult(cursor: cursor, cursorId: cursorId)).page;
 
   Future<({NotificationPage page, bool applied})> _getNotificationsResult({
     String? cursor,
@@ -431,6 +429,7 @@ class NotificationRepository {
           hasMore: true,
         ),
       );
+      unawaited(_enrichCachedPlaceholders(items));
     } on Exception catch (e, s) {
       Log.error(
         'Failed to hydrate notifications cache: $e',
@@ -440,6 +439,92 @@ class NotificationRepository {
         stackTrace: s,
       );
     }
+  }
+
+  Future<void> _enrichCachedPlaceholders(
+    List<NotificationItem> placeholders,
+  ) async {
+    final generation = _fetchGeneration;
+    try {
+      final pubkeys = placeholders
+          .map(
+            (item) => switch (item) {
+              VideoNotification(:final actors) => actors.first.pubkey,
+              ActorNotification(:final actor) => actor.pubkey,
+            },
+          )
+          .where((pubkey) => pubkey.isNotEmpty)
+          .toSet()
+          .toList();
+      final eventIds = placeholders
+          .whereType<VideoNotification>()
+          .map((item) => item.videoEventId)
+          .where((id) => id.isNotEmpty)
+          .toSet()
+          .toList();
+
+      if (pubkeys.isEmpty && eventIds.isEmpty) return;
+
+      final profilesFuture = pubkeys.isEmpty
+          ? Future.value(<String, UserProfile>{})
+          : _profileRepository.fetchBatchProfiles(pubkeys: pubkeys);
+      final videosFuture = _fetchVideoMetadata(eventIds);
+      final (profiles, videosById) = await (profilesFuture, videosFuture).wait;
+
+      if (generation != _fetchGeneration) return;
+
+      final current = _snapshot.value;
+      if (!_sameNotificationIds(current.items, placeholders)) return;
+
+      final enriched = current.items.map((item) {
+        return switch (item) {
+          VideoNotification(:final actors, :final videoEventId) => () {
+            final actor = actors.first;
+            final video = videosById[videoEventId];
+            return item.copyWith(
+              actors: _isCachedVideoPlaceholder(item)
+                  ? [_buildActor(actor.pubkey, profiles)]
+                  : actors,
+              videoThumbnailUrl:
+                  item.videoThumbnailUrl ?? _nonEmpty(video?.thumbnail),
+              videoTitle: item.videoTitle ?? _nonEmpty(video?.title),
+              videoAddressableId:
+                  item.videoAddressableId ??
+                  _recipientScopedVideoAddressableId(dTag: null, video: video),
+            );
+          }(),
+          ActorNotification(:final actor) => item.copyWith(
+            actor: _buildActor(actor.pubkey, profiles),
+          ),
+        };
+      }).toList();
+
+      _snapshot.add(current.copyWith(items: enriched));
+    } on Exception catch (e, s) {
+      Log.error(
+        'Failed to enrich cached notifications: $e',
+        name: 'NotificationRepository._enrichCachedPlaceholders',
+        category: LogCategory.storage,
+        error: e,
+        stackTrace: s,
+      );
+    }
+  }
+
+  static bool _isCachedVideoPlaceholder(VideoNotification item) =>
+      item.actors.length == 1 &&
+      item.totalCount == 1 &&
+      item.sourceEventIds.isEmpty;
+
+  static bool _sameNotificationIds(
+    List<NotificationItem> current,
+    List<NotificationItem> expected,
+  ) {
+    if (current.length != expected.length) return false;
+    for (var i = 0; i < current.length; i++) {
+      if (current[i].id != expected[i].id) return false;
+    }
+    return true;
   }
 
   /// Maps a [NotificationRow] into a placeholder [NotificationItem].
