@@ -110,6 +110,41 @@ class EventSignerAccountMismatchException implements Exception {
       '$actualPubkey but the active identity is $expectedPubkey';
 }
 
+/// Thrown by [AuthService.signInForAccount] when a returning-user sign-in
+/// does not restore the requested account — for example when an
+/// `importedKeys`/`automatic` account's identity keys are missing from secure
+/// storage, when a fallback authenticates a different primary account, or when
+/// [AuthService] lands in [AuthState.awaitingTosAcceptance] after an internal
+/// session-setup failure.
+///
+/// Previously these paths returned normally, leaving the caller (WelcomeBloc)
+/// believing the sign-in succeeded while the router kept the user pinned to
+/// `/welcome` — an invisible login loop. Throwing lets the caller route the
+/// user to the full login flow instead. See #5195.
+class AccountRestoreFailedException implements Exception {
+  const AccountRestoreFailedException(
+    this.pubkeyHex,
+    this.resolvedState, {
+    this.resolvedPubkeyHex,
+  });
+
+  /// The account (hex pubkey) whose restore was attempted.
+  final String pubkeyHex;
+
+  /// The [AuthState] the service resolved to.
+  final AuthState resolvedState;
+
+  /// The account (hex pubkey) that became active, if any.
+  final String? resolvedPubkeyHex;
+
+  @override
+  String toString() =>
+      'AccountRestoreFailedException: sign-in for $pubkeyHex resolved to '
+      '$resolvedState'
+      '${resolvedPubkeyHex == null ? '' : ' as $resolvedPubkeyHex'} '
+      'instead of the requested account';
+}
+
 /// Result of authentication operations
 class AuthResult {
   const AuthResult({
@@ -2279,14 +2314,47 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
           await _keyStorage.switchToIdentity(npub);
           await _setupUserSession(container, authSource);
         } else {
-          // Fall back to current primary keys
+          // Fall back to current PRIMARY keys only when they belong to the
+          // requested account. `_checkExistingAuth` intentionally restores
+          // whatever PRIMARY account is present, which is correct for app
+          // startup but unsafe for an explicit account-switch request.
           Log.warning(
             'signInForAccount: no saved identity keys for $npub — '
-            'falling back to _checkExistingAuth',
+            'checking PRIMARY key for same-account fallback',
             name: 'AuthService',
             category: LogCategory.auth,
           );
-          await _checkExistingAuth();
+          SecureKeyContainer? primary;
+          try {
+            if (await _keyStorage.hasKeys()) {
+              primary = await _keyStorage.getKeyContainer();
+            }
+          } catch (e, stack) {
+            Log.error(
+              'signInForAccount: failed to inspect PRIMARY key fallback: $e',
+              name: 'AuthService',
+              category: LogCategory.auth,
+            );
+            _reportStorageError(e, stack, 'signInForAccount primary fallback');
+          }
+
+          if (primary?.publicKeyHex == pubkeyHex) {
+            Log.info(
+              'signInForAccount: PRIMARY key matches requested account — '
+              'using same-account fallback',
+              name: 'AuthService',
+              category: LogCategory.auth,
+            );
+            await _setupUserSession(primary!, authSource);
+          } else {
+            Log.warning(
+              'signInForAccount: no restorable local keys for $pubkeyHex '
+              '(primaryPubkey=${primary?.publicKeyHex})',
+              name: 'AuthService',
+              category: LogCategory.auth,
+            );
+            _setAuthState(AuthState.unauthenticated);
+          }
         }
 
       case AuthenticationSource.none:
@@ -2296,6 +2364,33 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
           category: LogCategory.auth,
         );
         throw Exception('Cannot sign in with auth source "none"');
+    }
+
+    // Guard against silent restore failures. Several branches above can resolve
+    // normally without restoring the requested account:
+    //   - importedKeys/automatic whose identity keys are missing and no
+    //     matching PRIMARY key exists resolve unauthenticated.
+    //   - `_setupUserSession` swallows internal failures into
+    //     `awaitingTosAcceptance`.
+    // These previously left the caller believing the sign-in succeeded while
+    // the router kept the user on `/welcome`, or worse, authenticated the wrong
+    // local account. Surface the failure so the caller can route to the full
+    // login flow instead. See #5195.
+    final resolvedPubkeyHex = currentPublicKeyHex;
+    if (_authState != AuthState.authenticated ||
+        resolvedPubkeyHex != pubkeyHex) {
+      Log.warning(
+        'signInForAccount: resolved to $_authState '
+        '(resolvedPubkey=$resolvedPubkeyHex) for '
+        '$pubkeyHex — surfacing AccountRestoreFailedException',
+        name: 'AuthService',
+        category: LogCategory.auth,
+      );
+      throw AccountRestoreFailedException(
+        pubkeyHex,
+        _authState,
+        resolvedPubkeyHex: resolvedPubkeyHex,
+      );
     }
   }
 
