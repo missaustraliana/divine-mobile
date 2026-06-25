@@ -12,6 +12,7 @@ import 'package:openvine/extensions/aspect_ratio_extensions.dart';
 import 'package:openvine/extensions/complete_parameters_extensions.dart';
 import 'package:openvine/extensions/layer_animation_storage.dart';
 import 'package:openvine/models/divine_video_clip.dart';
+import 'package:openvine/models/video_editor/transition_geometry.dart';
 import 'package:openvine/services/crash_reporting_service.dart';
 import 'package:openvine/services/native_proofmode_service.dart';
 import 'package:openvine/services/video_editor/video_editor_audio_render.dart';
@@ -805,65 +806,6 @@ class VideoEditorRenderService {
       segments: segments,
       tempFilePaths: tempFilePaths,
     );
-  }
-
-  /// Maps each clip id to its outgoing transition, clamped to a duration both
-  /// the clip and its successor can sustain. Returns `null` for the last clip
-  /// (no following boundary) and whenever there is no room for a transition.
-  ///
-  /// Keyed by clip id rather than index so it stays correct even if the render
-  /// pipeline reorders clips.
-  @visibleForTesting
-  static Map<String, ClipTransition?> clampTransitions(
-    List<DivineVideoClip> clips,
-  ) {
-    final clamped = <String, ClipTransition?>{};
-    for (var i = 0; i < clips.length; i++) {
-      final transition = clips[i].transition;
-      final maxDuration = (i + 1 < clips.length && transition != null)
-          ? _maxTransitionDuration(
-              clips[i].playbackDuration,
-              clips[i + 1].playbackDuration,
-              transition.type,
-            )
-          : Duration.zero;
-      clamped[clips[i].id] = _clampTransition(transition, maxDuration);
-    }
-    return clamped;
-  }
-
-  /// The longest a boundary transition may last. An overlap
-  /// (dissolve/slide/push/wipe) blends both clips at once and must leave solo
-  /// (non-blended) content on each side, so it caps at half the shorter clip; a
-  /// dip (fadeToBlack/White) fades out then in (sequential), so it can run up to
-  /// twice the shorter clip. These match the seam preview's faithful range.
-  static Duration _maxTransitionDuration(
-    Duration a,
-    Duration b,
-    ClipTransitionType type,
-  ) {
-    final shorter = a < b ? a : b;
-    final isDip =
-        type == ClipTransitionType.fadeToBlack ||
-        type == ClipTransitionType.fadeToWhite;
-    return isDip
-        ? shorter * 2
-        : Duration(microseconds: shorter.inMicroseconds ~/ 2);
-  }
-
-  static ClipTransition? _clampTransition(
-    ClipTransition? transition,
-    Duration maxDuration,
-  ) {
-    if (transition == null || maxDuration <= Duration.zero) return null;
-    if (transition.duration <= maxDuration) return transition;
-    Log.debug(
-      '✂️ Clamping transition ${transition.duration.inMilliseconds}ms '
-      'to ${maxDuration.inMilliseconds}ms (clip too short)',
-      name: _logName,
-      category: .video,
-    );
-    return transition.copyWith(duration: maxDuration);
   }
 
   /// Analyzes all clips to determine their crop parameters.
