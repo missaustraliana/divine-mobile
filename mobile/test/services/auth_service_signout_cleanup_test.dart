@@ -115,6 +115,9 @@ void main() {
         () => mockCleanupService.claimLegacyRows(any()),
       ).thenAnswer((_) async {});
       when(
+        () => mockCleanupService.markOwnerScopedLegacyDataForUser(any()),
+      ).thenAnswer((_) async {});
+      when(
         () => mockKeyStorage.deleteIdentityKeyContainer(
           any(),
           biometricPrompt: any(named: 'biometricPrompt'),
@@ -174,7 +177,7 @@ void main() {
       ).called(1);
     });
 
-    test('destructive signOut passes deleteUserData: true', () async {
+    test('remove-device signOut preserves owner-scoped user data', () async {
       // Arrange
       when(() => mockKeyStorage.deleteKeys()).thenAnswer((_) async => {});
       when(
@@ -194,13 +197,49 @@ void main() {
         ),
       ).thenAnswer((_) async => newKeyContainer);
 
-      // Act: Sign out with key deletion
+      // Act: remove local login material without deleting local work.
       await authService.signOut(deleteKeys: true);
 
       // Assert: Keys should be deleted
       verify(() => mockKeyStorage.deleteKeys()).called(1);
 
-      // Assert: Cleanup called with deleteUserData=true (destructive)
+      // Assert: owner-scoped rows are preserved. Removing local login material
+      // should not destroy device-local drafts/clips.
+      verify(
+        () => mockCleanupService.clearUserSpecificData(
+          reason: 'explicit_logout',
+          userPubkey: any(named: 'userPubkey'),
+          // ignore: avoid_redundant_argument_values
+          deleteUserData: false,
+        ),
+      ).called(1);
+
+      // Note: After deleteKeys=true, a new identity is auto-created,
+      // which sets a new pubkey. So we verify cleanup was called,
+      // not that pubkey is null (since new identity sets it).
+    });
+
+    test('account deletion signOut deletes owner-scoped user data', () async {
+      // Arrange
+      when(() => mockKeyStorage.deleteKeys()).thenAnswer((_) async => {});
+      when(
+        () => mockKeyStorage.deleteIdentityKeyContainer(
+          any(),
+          biometricPrompt: any(named: 'biometricPrompt'),
+        ),
+      ).thenAnswer((_) async {});
+      when(() => mockKeyStorage.hasKeys()).thenAnswer((_) async => false);
+      when(() => mockKeyStorage.initialize()).thenAnswer((_) async => {});
+
+      final newKeyContainer = SecureKeyContainer.fromNsec(testNsec);
+      when(
+        () => mockKeyStorage.generateAndStoreKeys(
+          biometricPrompt: any(named: 'biometricPrompt'),
+        ),
+      ).thenAnswer((_) async => newKeyContainer);
+
+      await authService.signOut(deleteKeys: true, deleteLocalUserData: true);
+
       verify(
         () => mockCleanupService.clearUserSpecificData(
           reason: 'explicit_logout',
@@ -208,10 +247,6 @@ void main() {
           deleteUserData: true,
         ),
       ).called(1);
-
-      // Note: After deleteKeys=true, a new identity is auto-created,
-      // which sets a new pubkey. So we verify cleanup was called,
-      // not that pubkey is null (since new identity sets it).
     });
 
     test(
@@ -512,6 +547,41 @@ void main() {
         expect(authService.authState, equals(AuthState.unauthenticated));
         verify(() => mockKeyStorage.deleteKeys()).called(1);
       });
+
+      test(
+        'account deletion cleanup failure surfaces after teardown',
+        () async {
+          final keyContainer = SecureKeyContainer.fromNsec(testNsec);
+          authService.debugSetCurrentKeyContainer(keyContainer);
+          when(
+            () => mockCleanupService.clearUserSpecificData(
+              reason: 'explicit_logout',
+              userPubkey: keyContainer.publicKeyHex,
+              deleteUserData: true,
+            ),
+          ).thenThrow(StateError('database cleanup failed'));
+          when(() => mockKeyStorage.deleteKeys()).thenAnswer((_) async {});
+          when(
+            () => mockKeyStorage.deleteIdentityKeyContainer(
+              any(),
+              biometricPrompt: any(named: 'biometricPrompt'),
+            ),
+          ).thenAnswer((_) async {});
+          when(() => mockKeyStorage.hasKeys()).thenAnswer((_) async => false);
+          when(
+            () => mockKeyStorage.getKeyContainer(),
+          ).thenAnswer((_) async => null);
+
+          await expectLater(
+            authService.signOut(deleteKeys: true, deleteLocalUserData: true),
+            throwsA(isA<UserDataCleanupException>()),
+          );
+
+          verify(() => mockKeyStorage.deleteKeys()).called(1);
+          expect(authService.currentIdentity, isNull);
+          expect(authService.authState, equals(AuthState.unauthenticated));
+        },
+      );
 
       test('signOut with abortOnKeyDeletionFailure throws before cleanup '
           'when key deletion fails', () async {

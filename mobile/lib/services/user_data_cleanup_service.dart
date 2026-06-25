@@ -55,8 +55,6 @@ class UserDataCleanupService {
     // Viewing history
     'seen_video_ids',
     'seen_video_metrics',
-    // Drafts
-    'vine_drafts',
     // Labeler subscriptions
     'subscribed_labelers',
     'label_cache',
@@ -67,6 +65,14 @@ class UserDataCleanupService {
     'age_verified_16_plus',
     'terms_accepted_at',
   ];
+
+  /// Legacy owner-scoped preference keys that contain user data but may still
+  /// need to survive a same-user non-destructive logout.
+  static const List<String> ownerScopedLegacyKeys = [
+    'vine_drafts',
+  ];
+
+  static const String legacyDraftOwnerKey = 'vine_drafts_owner_pubkey_hex';
 
   /// Key prefixes for dynamic user-specific data (keys that embed pubkey/npub).
   /// Only cleared on identity change (different user), NOT on same-user logout.
@@ -101,15 +107,36 @@ class UserDataCleanupService {
       return true;
     }
 
-    // No stored pubkey - check if orphaned user data exists
+    // No stored pubkey - check if orphaned user data exists. Owner-scoped
+    // legacy data may belong to the same account after Remove from Device; keep
+    // it only when the preserved owner marker matches the logging-in pubkey.
     for (final key in userSpecificKeys) {
       if (_prefs.containsKey(key)) {
         return true;
       }
     }
+    for (final key in ownerScopedLegacyKeys) {
+      if (!_prefs.containsKey(key)) continue;
+      if (key == 'vine_drafts' &&
+          _prefs.getString(legacyDraftOwnerKey) == currentPubkeyHex) {
+        continue;
+      }
+      return true;
+    }
 
     // Fresh install, no cleanup needed
     return false;
+  }
+
+  /// Marks preserved legacy owner-scoped data as belonging to [userPubkey].
+  ///
+  /// Remove-from-device clears the current-session pubkey while intentionally
+  /// preserving local drafts. This marker lets the next same-user login migrate
+  /// those drafts without treating them as foreign orphaned data.
+  Future<void> markOwnerScopedLegacyDataForUser(String userPubkey) async {
+    if (_prefs.containsKey('vine_drafts')) {
+      await _prefs.setString(legacyDraftOwnerKey, userPubkey);
+    }
   }
 
   /// Clears all user-specific data from SharedPreferences.
@@ -155,6 +182,21 @@ class UserDataCleanupService {
       }
     }
 
+    if (deleteUserData || isIdentityChange) {
+      for (final key in ownerScopedLegacyKeys) {
+        if (_prefs.containsKey(key)) {
+          await _prefs.remove(key);
+          clearedCount++;
+          clearedKeys.add(key);
+        }
+      }
+      if (_prefs.containsKey(legacyDraftOwnerKey)) {
+        await _prefs.remove(legacyDraftOwnerKey);
+        clearedCount++;
+        clearedKeys.add(legacyDraftOwnerKey);
+      }
+    }
+
     // Clear user-specific database tables (DMs, conversations, notifications,
     // and optionally per-user DAO rows when deleteUserData is true)
     if (onDatabaseCleanup != null) {
@@ -168,12 +210,15 @@ class UserDataCleanupService {
           name: 'UserDataCleanupService',
           category: LogCategory.auth,
         );
-      } catch (e) {
+      } catch (e, stackTrace) {
         Log.error(
-          'Database cleanup failed: $e',
+          'Database cleanup failed: $e\n$stackTrace',
           name: 'UserDataCleanupService',
           category: LogCategory.auth,
         );
+        if (deleteUserData) {
+          rethrow;
+        }
       }
     }
 
@@ -238,4 +283,14 @@ class UserDataCleanupService {
       );
     }
   }
+}
+
+class UserDataCleanupException implements Exception {
+  const UserDataCleanupException(this.message, [this.cause]);
+
+  final String message;
+  final Object? cause;
+
+  @override
+  String toString() => cause == null ? message : '$message: $cause';
 }
