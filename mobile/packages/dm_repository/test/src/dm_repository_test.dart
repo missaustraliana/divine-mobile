@@ -445,6 +445,31 @@ void main() {
         ),
       ).thenAnswer((_) async => true);
 
+      // Global stubs for the #4977 read-state cursor surface so any path that
+      // touches the marker reconcile / debounced publish / drain floor has a
+      // default. Tests that assert on these restub or verify as needed.
+      when(
+        () => mockConversationsDao.applyReadCursor(
+          any(),
+          any(),
+          ownerPubkey: any(named: 'ownerPubkey'),
+        ),
+      ).thenAnswer((_) async => true);
+      when(
+        () => mockConversationsDao.lastSentTimestampsByConversation(
+          any(),
+          ownerPubkey: any(named: 'ownerPubkey'),
+        ),
+      ).thenAnswer((_) async => <String, int>{});
+      when(
+        () => mockMessageService.publishSelfApplicationMarker(
+          content: any(named: 'content'),
+          tags: any(named: 'tags'),
+          eventKind: any(named: 'eventKind'),
+          targetRelays: any(named: 'targetRelays'),
+        ),
+      ).thenAnswer((_) async => true);
+
       // Default stub for buildRumor — production sendMessage now calls
       // buildRumor first to enqueue a queue row keyed by the rumor's id
       // before publishing. Returning a real Event so .id is computed
@@ -494,6 +519,7 @@ void main() {
       // existing RC3 tests exercise the publish path; gating tests override.
       bool publishDmRelayListEnabled = true,
       String? dmInboxRelayUrl = 'wss://relay.divine.video',
+      Duration readMarkerDebounceDelay = const Duration(seconds: 3),
     }) {
       return DmRepository(
         nostrClient: mockNostrClient,
@@ -518,6 +544,7 @@ void main() {
         reactionsRepository: reactionsRepository,
         publishDmRelayListEnabled: publishDmRelayListEnabled,
         dmInboxRelayUrl: dmInboxRelayUrl,
+        readMarkerDebounceDelay: readMarkerDebounceDelay,
         errorReporter: (error, stackTrace, {required site}) {
           reporterCalls.add(_ReporterCall(error, stackTrace, site));
         },
@@ -3576,6 +3603,44 @@ void main() {
       );
 
       test(
+        'restores read state after the drain via the last-sent floor (#4977)',
+        () async {
+          when(() => mockNostrClient.connectedRelayCount).thenReturn(2);
+          when(
+            () => mockNostrClient.queryEvents(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              useCache: any(named: 'useCache'),
+            ),
+          ).thenAnswer((_) async => const <Event>[]);
+          // The drain recovered the user's own last-sent message in this convo.
+          when(
+            () => mockConversationsDao.lastSentTimestampsByConversation(
+              any(),
+              ownerPubkey: any(named: 'ownerPubkey'),
+            ),
+          ).thenAnswer((_) async => {'conv_floor': 1700000900});
+
+          final syncState = _FakeDmSyncState()
+            ..oldestOverride = 100
+            ..drainVersionOverride = DmSyncState.currentDrainVersion;
+          final repository = createRepository(syncState: syncState);
+
+          await repository.backfillHistoryIfNeeded();
+
+          // The floor advances that conversation's read cursor to the
+          // user's own last-sent timestamp.
+          verify(
+            () => mockConversationsDao.applyReadCursor(
+              'conv_floor',
+              1700000900,
+              ownerPubkey: any(named: 'ownerPubkey'),
+            ),
+          ).called(1);
+        },
+      );
+
+      test(
         'isHistoryRecoveryComplete reflects the persisted drain-complete flag '
         '(#5304)',
         () {
@@ -5127,6 +5192,400 @@ void main() {
           ),
         ).called(1);
       });
+    });
+
+    group('read-state marker (#4977)', () {
+      final tupleKey = (<String>[
+        _validPubkeyA,
+        _validPubkeyB,
+      ]..sort()).join(',');
+      final conversationId = DmRepository.computeConversationId([
+        _validPubkeyA,
+        _validPubkeyB,
+      ]);
+
+      ConversationRow readConversation({int? cursor}) => ConversationRow(
+        id: conversationId,
+        participantPubkeys: jsonEncode([_validPubkeyA, _validPubkeyB]),
+        isGroup: false,
+        createdAt: 1700000000,
+        lastMessageContent: 'Hi',
+        lastMessageTimestamp: 1700000200,
+        lastMessageSenderPubkey: _validPubkeyB,
+        isRead: cursor != null,
+        currentUserHasSent: true,
+        ownerPubkey: _validPubkeyA,
+        dmProtocol: 'nip17',
+        lastReadTimestamp: cursor,
+      );
+
+      test(
+        'reading a conversation publishes a debounced self-only read marker '
+        'keyed by the participant tuple',
+        () async {
+          when(
+            () => mockConversationsDao.getAllConversations(
+              ownerPubkey: any(named: 'ownerPubkey'),
+            ),
+          ).thenAnswer((_) async => [readConversation(cursor: 1700000200)]);
+
+          final repository = createRepository(
+            readMarkerDebounceDelay: Duration.zero,
+          );
+          await repository.markConversationAsRead(conversationId);
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+
+          final captured = verify(
+            () => mockMessageService.publishSelfApplicationMarker(
+              content: captureAny(named: 'content'),
+              tags: captureAny(named: 'tags'),
+              eventKind: any(named: 'eventKind'),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).captured;
+          expect(captured, isNotEmpty);
+          final payload = jsonDecode(captured[0] as String) as Map;
+          final tags = captured[1] as List<List<String>>;
+          expect(payload['v'], 1);
+          expect((payload['read'] as Map)[tupleKey], 1700000200);
+          expect(tags, contains(equals(['d', 'divine/dm-read/v1'])));
+
+          // Self-only: a read marker never goes out as a counterparty message.
+          verifyNever(
+            () => mockMessageService.sendRumor(
+              rumorEvent: any(named: 'rumorEvent'),
+              recipientPubkey: any(named: 'recipientPubkey'),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          );
+        },
+      );
+
+      test(
+        'does not publish a marker when no conversation has been read',
+        () async {
+          when(
+            () => mockConversationsDao.getAllConversations(
+              ownerPubkey: any(named: 'ownerPubkey'),
+            ),
+          ).thenAnswer((_) async => [readConversation()]);
+
+          final repository = createRepository(
+            readMarkerDebounceDelay: Duration.zero,
+          );
+          await repository.markConversationAsRead(conversationId);
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+
+          verifyNever(
+            () => mockMessageService.publishSelfApplicationMarker(
+              content: any(named: 'content'),
+              tags: any(named: 'tags'),
+              eventKind: any(named: 'eventKind'),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          );
+        },
+      );
+
+      test('coalesces a burst of reads into a single marker publish', () async {
+        when(
+          () => mockConversationsDao.getAllConversations(
+            ownerPubkey: any(named: 'ownerPubkey'),
+          ),
+        ).thenAnswer((_) async => [readConversation(cursor: 1700000200)]);
+
+        final repository = createRepository(
+          readMarkerDebounceDelay: const Duration(milliseconds: 60),
+        );
+        await repository.markConversationAsRead(conversationId);
+        await repository.markConversationAsRead(conversationId);
+        await repository.markConversationAsRead(conversationId);
+        await Future<void>.delayed(const Duration(milliseconds: 160));
+
+        verify(
+          () => mockMessageService.publishSelfApplicationMarker(
+            content: any(named: 'content'),
+            tags: any(named: 'tags'),
+            eventKind: any(named: 'eventKind'),
+            targetRelays: any(named: 'targetRelays'),
+          ),
+        ).called(1);
+      });
+
+      test(
+        'an incoming kind-30078 read marker advances cursors and is not '
+        'rendered as a message',
+        () async {
+          Event giftWrap() => Event.fromJson({
+            'id': _giftWrapEventId,
+            'pubkey':
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            'created_at': 1700000000,
+            'kind': EventKind.giftWrap,
+            'tags': [
+              ['p', _validPubkeyA],
+            ],
+            'content': 'encrypted',
+            'sig': '',
+          });
+          final markerRumor = Event.fromJson({
+            'id': _rumorEventId,
+            'pubkey': _validPubkeyA,
+            'created_at': 1700000300,
+            'kind': EventKind.appSpecificData,
+            'tags': [
+              ['d', 'divine/dm-read/v1'],
+            ],
+            'content': jsonEncode({
+              'v': 1,
+              'read': {tupleKey: 1700000300},
+            }),
+            'sig': '',
+          });
+
+          when(
+            () => mockDirectMessagesDao.hasGiftWrap(_giftWrapEventId),
+          ).thenAnswer((_) async => false);
+          final controller = StreamController<Event>();
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+            ),
+          ).thenAnswer((_) => controller.stream);
+
+          final repository = createRepository(
+            rumorDecryptor: (_, _) async => markerRumor,
+          );
+          await repository.startListening();
+          controller.add(giftWrap());
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+
+          verify(
+            () => mockConversationsDao.applyReadCursor(
+              conversationId,
+              1700000300,
+              ownerPubkey: any(named: 'ownerPubkey'),
+            ),
+          ).called(1);
+          verifyNever(
+            () => mockDirectMessagesDao.insertMessage(
+              id: any(named: 'id'),
+              conversationId: any(named: 'conversationId'),
+              senderPubkey: any(named: 'senderPubkey'),
+              content: any(named: 'content'),
+              createdAt: any(named: 'createdAt'),
+              giftWrapId: any(named: 'giftWrapId'),
+              messageKind: any(named: 'messageKind'),
+              replyToId: any(named: 'replyToId'),
+              subject: any(named: 'subject'),
+              fileType: any(named: 'fileType'),
+              encryptionAlgorithm: any(named: 'encryptionAlgorithm'),
+              decryptionKey: any(named: 'decryptionKey'),
+              decryptionNonce: any(named: 'decryptionNonce'),
+              fileHash: any(named: 'fileHash'),
+              originalFileHash: any(named: 'originalFileHash'),
+              fileSize: any(named: 'fileSize'),
+              dimensions: any(named: 'dimensions'),
+              blurhash: any(named: 'blurhash'),
+              thumbnailUrl: any(named: 'thumbnailUrl'),
+              ownerPubkey: any(named: 'ownerPubkey'),
+              tagsJson: any(named: 'tagsJson'),
+            ),
+          );
+        },
+      );
+
+      test(
+        'markConversationsAsRead marks the batch and schedules one publish',
+        () async {
+          when(
+            () => mockConversationsDao.markMultipleAsRead(
+              any(),
+              ownerPubkey: any(named: 'ownerPubkey'),
+            ),
+          ).thenAnswer((_) async {});
+          when(
+            () => mockConversationsDao.getAllConversations(
+              ownerPubkey: any(named: 'ownerPubkey'),
+            ),
+          ).thenAnswer((_) async => [readConversation(cursor: 1700000200)]);
+
+          final repository = createRepository(
+            readMarkerDebounceDelay: Duration.zero,
+          );
+          await repository.markConversationsAsRead([conversationId, 'other']);
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+
+          verify(
+            () => mockConversationsDao.markMultipleAsRead(
+              [conversationId, 'other'],
+              ownerPubkey: any(named: 'ownerPubkey'),
+            ),
+          ).called(1);
+          verify(
+            () => mockMessageService.publishSelfApplicationMarker(
+              content: any(named: 'content'),
+              tags: any(named: 'tags'),
+              eventKind: any(named: 'eventKind'),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).called(1);
+        },
+      );
+
+      test('markConversationsAsRead is a no-op for an empty list', () async {
+        final repository = createRepository(
+          readMarkerDebounceDelay: Duration.zero,
+        );
+        await repository.markConversationsAsRead([]);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        verifyNever(
+          () => mockConversationsDao.markMultipleAsRead(
+            any(),
+            ownerPubkey: any(named: 'ownerPubkey'),
+          ),
+        );
+        verifyNever(
+          () => mockMessageService.publishSelfApplicationMarker(
+            content: any(named: 'content'),
+            tags: any(named: 'tags'),
+            eventKind: any(named: 'eventKind'),
+            targetRelays: any(named: 'targetRelays'),
+          ),
+        );
+      });
+
+      test(
+        'a conversation with an unparseable participant list is skipped',
+        () async {
+          when(
+            () => mockConversationsDao.getAllConversations(
+              ownerPubkey: any(named: 'ownerPubkey'),
+            ),
+          ).thenAnswer(
+            (_) async => [
+              ConversationRow(
+                id: conversationId,
+                participantPubkeys: 'not-json',
+                isGroup: false,
+                createdAt: 1,
+                lastMessageTimestamp: 200,
+                lastMessageSenderPubkey: _validPubkeyB,
+                isRead: true,
+                currentUserHasSent: true,
+                ownerPubkey: _validPubkeyA,
+                dmProtocol: 'nip17',
+                lastReadTimestamp: 200,
+              ),
+            ],
+          );
+
+          final repository = createRepository(
+            readMarkerDebounceDelay: Duration.zero,
+          );
+          await repository.markConversationAsRead(conversationId);
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+
+          // The only conversation yields no tuple key → empty map → no publish.
+          verifyNever(
+            () => mockMessageService.publishSelfApplicationMarker(
+              content: any(named: 'content'),
+              tags: any(named: 'tags'),
+              eventKind: any(named: 'eventKind'),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          );
+        },
+      );
+
+      test('a read-marker publish failure is non-fatal', () async {
+        when(
+          () => mockConversationsDao.getAllConversations(
+            ownerPubkey: any(named: 'ownerPubkey'),
+          ),
+        ).thenThrow(StateError('db down'));
+
+        final repository = createRepository(
+          readMarkerDebounceDelay: Duration.zero,
+        );
+        // Must not throw out of the debounced timer.
+        await repository.markConversationAsRead(conversationId);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        verifyNever(
+          () => mockMessageService.publishSelfApplicationMarker(
+            content: any(named: 'content'),
+            tags: any(named: 'tags'),
+            eventKind: any(named: 'eventKind'),
+            targetRelays: any(named: 'targetRelays'),
+          ),
+        );
+      });
+
+      test(
+        'a marker with a foreign d-tag is ignored without ledgering',
+        () async {
+          final ledger = _InMemoryProcessedGiftWrapsDao();
+          final foreignMarker = Event.fromJson({
+            'id': _rumorEventId,
+            'pubkey': _validPubkeyA,
+            'created_at': 1700000300,
+            'kind': EventKind.appSpecificData,
+            'tags': [
+              ['d', 'some/other/app'],
+            ],
+            'content': jsonEncode({
+              'v': 1,
+              'read': {tupleKey: 1700000300},
+            }),
+            'sig': '',
+          });
+          when(
+            () => mockDirectMessagesDao.hasGiftWrap(_giftWrapEventId),
+          ).thenAnswer((_) async => false);
+          final controller = StreamController<Event>();
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+            ),
+          ).thenAnswer((_) => controller.stream);
+
+          final repository = createRepository(
+            processedGiftWrapsDao: ledger,
+            rumorDecryptor: (_, _) async => foreignMarker,
+          );
+          await repository.startListening();
+          controller.add(
+            Event.fromJson({
+              'id': _giftWrapEventId,
+              'pubkey':
+                  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+                  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              'created_at': 1700000000,
+              'kind': EventKind.giftWrap,
+              'tags': [
+                ['p', _validPubkeyA],
+              ],
+              'content': 'encrypted',
+              'sig': '',
+            }),
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+
+          verifyNever(
+            () => mockConversationsDao.applyReadCursor(
+              any(),
+              any(),
+              ownerPubkey: any(named: 'ownerPubkey'),
+            ),
+          );
+          expect(ledger.recorded, isNot(contains(_giftWrapEventId)));
+        },
+      );
     });
 
     // -----------------------------------------------------------------
