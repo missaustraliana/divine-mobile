@@ -44,6 +44,7 @@ workspace:
   - packages/dm_repository
   - packages/divine_video_player
   - packages/feed_repository
+  - packages/feed_tuning_repository
   - packages/infinite_video_feed
   - packages/follow_repository
   - packages/funnelcake_api_client
@@ -193,6 +194,9 @@ dependencies:
 
   # Feed Repository - ViewSource-resolved, lifecycle-stable video feeds (#3383)
   feed_repository:
+
+  # Feed Tuning Repository - publishes swipe "more/less like this" signals
+  feed_tuning_repository:
 
   # Curated List Repository - NIP-51 kind 30005 curated video lists
   curated_list_repository:
