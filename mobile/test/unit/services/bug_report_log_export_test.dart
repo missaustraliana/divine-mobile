@@ -50,4 +50,34 @@ void main() {
       expect(result.cancelled, isFalse);
     });
   });
+
+  group('buildRuntimeDiagnostics', () {
+    test('reports platform, CPU count and build mode', () {
+      final diagnostics = BugReportService.buildRuntimeDiagnostics();
+
+      expect(diagnostics, contains('Platform: '));
+      expect(diagnostics, contains('CPU Cores: '));
+      expect(diagnostics, contains('Build Mode: '));
+    });
+
+    test('reports process memory when ProcessInfo is supported', () {
+      final diagnostics = BugReportService.buildRuntimeDiagnostics();
+
+      // The production code omits this line if the ProcessInfo probe throws
+      // on an unsupported platform, so only assert its format when present.
+      if (diagnostics.contains('Process Memory: ')) {
+        expect(diagnostics, contains('Process Memory: RSS '));
+      }
+    });
+
+    test('reports a positive CPU core count', () {
+      final diagnostics = BugReportService.buildRuntimeDiagnostics();
+      final cpuLine = diagnostics
+          .split('\n')
+          .firstWhere((line) => line.startsWith('CPU Cores: '));
+      final cores = int.parse(cpuLine.substring('CPU Cores: '.length).trim());
+
+      expect(cores, greaterThan(0));
+    });
+  });
 }
