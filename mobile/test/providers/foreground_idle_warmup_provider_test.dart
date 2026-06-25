@@ -4,6 +4,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:follow_repository/follow_repository.dart';
+import 'package:funnelcake_api_client/funnelcake_api_client.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:openvine/constants/app_constants.dart';
 import 'package:openvine/notifications/services/notification_refresh_coordinator.dart';
@@ -30,6 +31,13 @@ class _MockNotificationRefreshCoordinator extends Mock
     implements NotificationRefreshCoordinator {}
 
 final _feedBuilds = <String>[];
+const _expectedEmptyFollowingWarmupBuilds = [
+  'forYou',
+  'newVideos',
+  'popular',
+  'popular:native',
+  'popular:classic',
+];
 
 class _TestForYouFeed extends ForYouFeed {
   @override
@@ -52,6 +60,11 @@ class _TestPopularVideosFeed extends PopularVideosFeed {
   Future<VideoFeedState> build() async {
     _feedBuilds.add('popular');
     return const VideoFeedState(videos: [], hasMoreContent: false);
+  }
+
+  @override
+  Future<void> preloadVariant(PopularVideosVariant variant) async {
+    _feedBuilds.add('popular:${variant.name}');
   }
 }
 
@@ -144,7 +157,7 @@ void main() {
             trigger: ForegroundIdleWarmupTrigger.videoPlaybackSettled,
           );
 
-      expect(_feedBuilds, ['forYou', 'newVideos', 'popular']);
+      expect(_feedBuilds, _expectedEmptyFollowingWarmupBuilds);
       verify(() => followRepository.followingPubkeys).called(1);
       verifyNever(
         () => videosRepository.getHomeFeedVideos(
@@ -156,6 +169,18 @@ void main() {
           skipCache: any(named: 'skipCache'),
         ),
       );
+    });
+
+    test('popular warmup preloads native and classic variants', () async {
+      final container = createContainer(following: const []);
+
+      await container
+          .read(foregroundIdleWarmupCoordinatorProvider)
+          .requestWarmup(
+            trigger: ForegroundIdleWarmupTrigger.videoPlaybackSettled,
+          );
+
+      expect(_feedBuilds, _expectedEmptyFollowingWarmupBuilds);
     });
 
     test('notification warmup uses foreground idle warmup reason', () async {
