@@ -240,6 +240,129 @@ void main() {
       });
     });
 
+    group('VideoRecorderZoomedByLongPress', () {
+      // minZoomLevel = 0.5, maxZoomLevel = 5, base = 1.0 (default),
+      // maxDragDistance = 240. Up is negative dy.
+      setUp(() {
+        when(
+          () => cameraService.setZoomLevel(any()),
+        ).thenAnswer((_) async => true);
+      });
+
+      test('a full upward drag reaches the camera max zoom', () async {
+        final bloc = buildBloc();
+        addTearDown(bloc.close);
+
+        bloc.add(const VideoRecorderZoomedByLongPress(Offset(0, -240)));
+        await pumpEventQueue();
+
+        expect(bloc.state.zoomLevel, closeTo(5.0, 0.01));
+      });
+
+      test('maps the upward drag exponentially, not linearly', () async {
+        final bloc = buildBloc();
+        addTearDown(bloc.close);
+
+        // Half the drag lands on the geometric midpoint sqrt(1 × 5) ≈ 2.236,
+        // not the linear midpoint of 3.0. This keeps the most-used low end
+        // (1×→2×) gentle instead of jumpy.
+        bloc.add(const VideoRecorderZoomedByLongPress(Offset(0, -120)));
+        await pumpEventQueue();
+
+        expect(bloc.state.zoomLevel, closeTo(2.2360, 0.01));
+        expect(bloc.state.zoomLevel, lessThan(3.0));
+      });
+
+      test(
+        'a downward drag zooms out below 1× toward the camera min',
+        () async {
+          final bloc = buildBloc();
+          addTearDown(bloc.close);
+
+          // A full downward drag (positive dy) reaches the ultra-wide min 0.5×.
+          bloc.add(const VideoRecorderZoomedByLongPress(Offset(0, 240)));
+          await pumpEventQueue();
+
+          expect(bloc.state.zoomLevel, closeTo(0.5, 0.01));
+          verify(() => cameraService.setZoomLevel(0.5)).called(1);
+        },
+      );
+
+      test('the downward drag is also mapped exponentially', () async {
+        final bloc = buildBloc();
+        addTearDown(bloc.close);
+
+        // Half the downward drag lands on sqrt(1 × 0.5) ≈ 0.707.
+        bloc.add(const VideoRecorderZoomedByLongPress(Offset(0, 120)));
+        await pumpEventQueue();
+
+        expect(bloc.state.zoomLevel, closeTo(0.7071, 0.01));
+      });
+
+      test(
+        'equal upward drag steps multiply zoom by a constant factor',
+        () async {
+          final bloc = buildBloc();
+          addTearDown(bloc.close);
+
+          // Uniform perceived sensitivity: the zoom at the midpoint squared
+          // equals base × the zoom at the endpoint (2.236² ≈ 1 × 5).
+          bloc.add(const VideoRecorderZoomedByLongPress(Offset(0, -120)));
+          await pumpEventQueue();
+          final midZoom = bloc.state.zoomLevel;
+
+          bloc.add(const VideoRecorderZoomedByLongPress(Offset(0, -240)));
+          await pumpEventQueue();
+          final endZoom = bloc.state.zoomLevel;
+
+          expect(midZoom * midZoom, closeTo(1.0 * endZoom, 0.05));
+        },
+      );
+    });
+
+    group('VideoRecorderLongPressZoomStarted', () {
+      setUp(() {
+        when(
+          () => cameraService.setZoomLevel(any()),
+        ).thenAnswer((_) async => true);
+      });
+
+      test('captures the current zoom as the drag base', () async {
+        // baseZoomLevel defaults to 1×; the gesture must re-anchor it to the
+        // live 3× zoom.
+        final bloc = buildBloc()
+          ..emit(const VideoRecorderBlocState(zoomLevel: 3));
+        addTearDown(bloc.close);
+
+        bloc.add(const VideoRecorderLongPressZoomStarted());
+        await pumpEventQueue();
+
+        expect(bloc.state.baseZoomLevel, 3.0);
+      });
+
+      test(
+        'anchors a following drag so it does not snap back to a stale base',
+        () async {
+          // Path-B regression: recording started elsewhere and a pinch moved
+          // zoom to 3× while baseZoomLevel is still the pinch-start 1×. Without
+          // the start capture the first drag would jump toward 1×.
+          final bloc = buildBloc()
+            ..emit(const VideoRecorderBlocState(zoomLevel: 3));
+          addTearDown(bloc.close);
+
+          bloc.add(const VideoRecorderLongPressZoomStarted());
+          await pumpEventQueue();
+          // A small upward drag (10% of the range) nudges zoom up from 3×,
+          // not down toward the stale 1× base (which would land near 1.17×).
+          bloc.add(const VideoRecorderZoomedByLongPress(Offset(0, -24)));
+          await pumpEventQueue();
+
+          expect(bloc.state.zoomLevel, greaterThan(3.0));
+          expect(bloc.state.zoomLevel, closeTo(3.155, 0.05));
+        },
+      );
+    });
+
     group('VideoRecorderFlashToggled', () {
       blocTest<VideoRecorderBloc, VideoRecorderBlocState>(
         'cycles off → torch → auto → off and persists each new mode',
