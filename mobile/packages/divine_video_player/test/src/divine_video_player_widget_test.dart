@@ -319,7 +319,8 @@ void main() {
         ),
       );
 
-      expect(find.byType(Stack), findsOneWidget);
+      // The placeholder is layered over the live surface (both present).
+      expect(find.text('Linux player view'), findsOneWidget);
       expect(find.text('Loading...'), findsOneWidget);
     });
 
@@ -342,6 +343,209 @@ void main() {
       await tester.pump();
 
       expect(find.text('Loading...'), findsNothing);
+    });
+
+    testWidgets(
+      'crossFadePlaceholder keeps placeholder when first frame already '
+      'rendered, then fades it out',
+      (tester) async {
+        // First frame is already rendered at mount — the default would
+        // hard-cut to surface, but crossFadePlaceholder keeps it for a fade.
+        final freshController = await initLinuxController(
+          firstFrameRendered: true,
+        );
+
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: DivineVideoPlayer(
+              controller: freshController,
+              placeholder: const Text('Loading...'),
+              crossFadePlaceholder: true,
+            ),
+          ),
+        );
+
+        // Placeholder is shown fully opaque despite the frame being ready.
+        expect(find.text('Loading...'), findsOneWidget);
+        expect(
+          tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity,
+          1.0,
+        );
+
+        // The already-complete future resolves and starts the fade-out.
+        await tester.pump();
+        expect(
+          tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity,
+          0.0,
+        );
+
+        // Once the fade completes the placeholder is removed from the tree.
+        await tester.pumpAndSettle();
+        expect(find.text('Loading...'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'fades placeholder out (starting fully opaque) and removes it once '
+      'first frame arrives',
+      (tester) async {
+        final linuxController = await initLinuxController();
+
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: DivineVideoPlayer(
+              controller: linuxController,
+              placeholder: const Text('Loading...'),
+            ),
+          ),
+        );
+
+        // The placeholder starts FULLY opaque (not fading in), so it is
+        // actually visible before the first frame swaps it out.
+        expect(find.text('Loading...'), findsOneWidget);
+        expect(
+          tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity,
+          1.0,
+        );
+
+        // First frame arrives after mount.
+        _FakeLinuxBackend.instance!.emitState(
+          const DivineVideoPlayerState(
+            status: PlaybackStatus.ready,
+            clipCount: 1,
+            isFirstFrameRendered: true,
+          ),
+        );
+        // First pump resolves the firstFrameRendered future (setState);
+        // second pump rebuilds and starts the fade-out.
+        await tester.pump();
+        await tester.pump();
+
+        // Fade started: target opacity is 0 but the placeholder is still
+        // mounted (mid fade), not hard-cut away.
+        expect(find.text('Loading...'), findsOneWidget);
+        expect(
+          tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity,
+          0.0,
+        );
+
+        // Once the fade completes the placeholder is removed from the tree.
+        await tester.pumpAndSettle();
+        expect(find.text('Loading...'), findsNothing);
+      },
+    );
+
+    testWidgets('skips placeholder fade when animations are disabled', (
+      tester,
+    ) async {
+      final linuxController = await initLinuxController();
+
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(disableAnimations: true),
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: DivineVideoPlayer(
+              controller: linuxController,
+              placeholder: const Text('Loading...'),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Loading...'), findsOneWidget);
+      expect(find.byType(AnimatedOpacity), findsOneWidget);
+
+      _FakeLinuxBackend.instance!.emitState(
+        const DivineVideoPlayerState(
+          status: PlaybackStatus.ready,
+          clipCount: 1,
+          isFirstFrameRendered: true,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Loading...'), findsNothing);
+      expect(find.byType(AnimatedOpacity), findsNothing);
+    });
+
+    testWidgets(
+      'is a one-shot: does not re-show the placeholder after setClips '
+      'reloads the same controller',
+      (tester) async {
+        final linuxController = await initLinuxController(
+          firstFrameRendered: true,
+        );
+
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: DivineVideoPlayer(
+              controller: linuxController,
+              placeholder: const Text('Loading...'),
+              crossFadePlaceholder: true,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Loading...'), findsNothing);
+
+        // Reloading clips on the SAME controller resets firstFrameRendered,
+        // but the overlay must stay gone — re-showing the thumbnail on every
+        // in-place clip swap (trim/reorder/speed) would flash stale content
+        // over the editor preview.
+        await linuxController.setClips(const [VideoClip(uri: '/next.mp4')]);
+        _FakeLinuxBackend.instance!.emitState(
+          const DivineVideoPlayerState(
+            status: PlaybackStatus.ready,
+            clipCount: 1,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Loading...'), findsNothing);
+      },
+    );
+
+    testWidgets('restarts the fade when the controller instance changes', (
+      tester,
+    ) async {
+      final firstController = await initLinuxController(
+        firstFrameRendered: true,
+      );
+
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: DivineVideoPlayer(
+            controller: firstController,
+            placeholder: const Text('Loading...'),
+            crossFadePlaceholder: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Loading...'), findsNothing);
+
+      // A genuinely different controller (e.g. account switch) that has not
+      // rendered its first frame yet must bring the placeholder back.
+      final secondController = await initLinuxController();
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: DivineVideoPlayer(
+            controller: secondController,
+            placeholder: const Text('Loading...'),
+            crossFadePlaceholder: true,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Loading...'), findsOneWidget);
     });
   });
 }
