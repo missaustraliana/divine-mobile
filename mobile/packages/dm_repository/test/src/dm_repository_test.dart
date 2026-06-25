@@ -423,6 +423,16 @@ void main() {
         await callback();
       });
 
+      // Global stub for markAsRead — every live-send path now marks the
+      // conversation read in the same transaction (#5515: sending implies
+      // read). Default to a successful flip so send tests don't restub it.
+      when(
+        () => mockConversationsDao.markAsRead(
+          any(),
+          ownerPubkey: any(named: 'ownerPubkey'),
+        ),
+      ).thenAnswer((_) async => true);
+
       // Default stub for buildRumor — production sendMessage now calls
       // buildRumor first to enqueue a queue row keyed by the rumor's id
       // before publishing. Returning a real Event so .id is computed
@@ -887,6 +897,17 @@ void main() {
             dmProtocol: any(named: 'dmProtocol'),
           ),
         ).called(1);
+
+        // Sending implies the thread is read (#5515): the send marks the
+        // conversation read explicitly so the strict isRead gate can't leave
+        // it unread when the send shares an epoch-second with the last
+        // received message.
+        verify(
+          () => mockConversationsDao.markAsRead(
+            any(),
+            ownerPubkey: any(named: 'ownerPubkey'),
+          ),
+        ).called(1);
       });
 
       test('does not persist on send failure', () async {
@@ -927,6 +948,13 @@ void main() {
             thumbnailUrl: any(named: 'thumbnailUrl'),
             ownerPubkey: any(named: 'ownerPubkey'),
             tagsJson: any(named: 'tagsJson'),
+          ),
+        );
+        // Nothing persisted → nothing marked read.
+        verifyNever(
+          () => mockConversationsDao.markAsRead(
+            any(),
+            ownerPubkey: any(named: 'ownerPubkey'),
           ),
         );
       });
@@ -1373,6 +1401,16 @@ void main() {
             dmProtocol: any(named: 'dmProtocol'),
           ),
         ).called(1);
+
+        // Ingesting a received message must NOT mark the conversation read
+        // (#5515): mark-read-on-send is scoped to live sends only, so
+        // re-ingesting wraps during the reinstall drain can't clobber unread.
+        verifyNever(
+          () => mockConversationsDao.markAsRead(
+            any(),
+            ownerPubkey: any(named: 'ownerPubkey'),
+          ),
+        );
 
         await controller.close();
         await repository.stopListening();
@@ -5303,6 +5341,14 @@ void main() {
             dmProtocol: any(named: 'dmProtocol'),
           ),
         ).called(1);
+
+        // Sending a file marks the conversation read (#5515).
+        verify(
+          () => mockConversationsDao.markAsRead(
+            any(),
+            ownerPubkey: any(named: 'ownerPubkey'),
+          ),
+        ).called(1);
       });
 
       test('does not persist on send failure', () async {
@@ -9219,6 +9265,14 @@ void main() {
               tagsJson: any(named: 'tagsJson'),
             ),
           ).called(1);
+
+          // Sending a group message marks the conversation read (#5515).
+          verify(
+            () => mockConversationsDao.markAsRead(
+              any(),
+              ownerPubkey: any(named: 'ownerPubkey'),
+            ),
+          ).called(1);
         },
       );
 
@@ -11934,6 +11988,15 @@ void main() {
               tagsJson: any(named: 'tagsJson'),
             ),
           ).called(1);
+
+          // Recovering a full queued send re-persists the message and
+          // conversation, so it marks the conversation read (#5515).
+          verify(
+            () => mockConversationsDao.markAsRead(
+              any(),
+              ownerPubkey: any(named: 'ownerPubkey'),
+            ),
+          ).called(1);
         },
       );
 
@@ -12418,7 +12481,7 @@ void main() {
                   id: phantomId1,
                   participantPubkeys: jsonEncode(phantomParticipants1),
                   isGroup: false,
-                  isRead: true,
+                  isRead: false,
                   currentUserHasSent: false,
                   createdAt: 1699999000,
                   lastMessageContent: 'Phantom 1',
@@ -12466,6 +12529,7 @@ void main() {
                 lastMessageContent: any(named: 'lastMessageContent'),
                 lastMessageTimestamp: any(named: 'lastMessageTimestamp'),
                 lastMessageSenderPubkey: any(named: 'lastMessageSenderPubkey'),
+                isRead: any(named: 'isRead'),
                 currentUserHasSent: any(named: 'currentUserHasSent'),
                 ownerPubkey: any(named: 'ownerPubkey'),
                 dmProtocol: any(named: 'dmProtocol'),
@@ -12531,8 +12595,298 @@ void main() {
                 lastMessageContent: 'Phantom 1',
                 lastMessageTimestamp: 1699999000,
                 lastMessageSenderPubkey: _validPubkeyB,
+                isRead: false,
                 ownerPubkey: _validPubkeyA,
                 dmProtocol: 'nip17',
+              ),
+            ).called(1);
+          },
+        );
+
+        test(
+          'creates the canonical row unread when an older duplicate is '
+          'unread, even though the newest duplicate is read',
+          () async {
+            // Conservative read-state merge (#5515 review): the newest
+            // (source) duplicate is READ but an older duplicate is UNREAD,
+            // so the canonical row must be created UNREAD. Read state follows
+            // "unread if any duplicate is unread", not just the newest —
+            // `source.isRead` alone would have dropped the unread signal.
+            final phantomParticipants1 = [
+              _validPubkeyA,
+              _validPubkeyB,
+              _validPubkeyC,
+            ]..sort();
+            final phantomId1 = DmRepository.computeConversationId(
+              phantomParticipants1,
+            );
+            final phantomParticipants2 = [
+              _validPubkeyA,
+              _validPubkeyB,
+              _validPubkeyD,
+            ]..sort();
+            final phantomId2 = DmRepository.computeConversationId(
+              phantomParticipants2,
+            );
+            final canonical = [_validPubkeyA, _validPubkeyB]..sort();
+            final canonicalId = DmRepository.computeConversationId(canonical);
+
+            when(
+              () => mockConversationsDao.getAllConversations(
+                ownerPubkey: any(named: 'ownerPubkey'),
+              ),
+            ).thenAnswer(
+              (_) async => [
+                // Newest duplicate (the source) is READ...
+                ConversationRow(
+                  id: phantomId1,
+                  participantPubkeys: jsonEncode(phantomParticipants1),
+                  isGroup: false,
+                  isRead: true,
+                  currentUserHasSent: false,
+                  createdAt: 1699999000,
+                  lastMessageContent: 'Phantom 1',
+                  lastMessageTimestamp: 1699999000,
+                  lastMessageSenderPubkey: _validPubkeyB,
+                  ownerPubkey: _validPubkeyA,
+                  dmProtocol: 'nip17',
+                ),
+                // ...but an OLDER duplicate is UNREAD.
+                ConversationRow(
+                  id: phantomId2,
+                  participantPubkeys: jsonEncode(phantomParticipants2),
+                  isGroup: false,
+                  isRead: false,
+                  currentUserHasSent: false,
+                  createdAt: 1699998000,
+                  lastMessageContent: 'Phantom 2',
+                  lastMessageTimestamp: 1699998000,
+                  lastMessageSenderPubkey: _validPubkeyB,
+                  ownerPubkey: _validPubkeyA,
+                ),
+              ],
+            );
+            when(
+              () => mockDirectMessagesDao.reassignConversation(
+                fromConversationId: any(named: 'fromConversationId'),
+                toConversationId: any(named: 'toConversationId'),
+                ownerPubkey: any(named: 'ownerPubkey'),
+              ),
+            ).thenAnswer((_) async => 1);
+            when(
+              () => mockConversationsDao.deleteConversation(
+                any(),
+                ownerPubkey: any(named: 'ownerPubkey'),
+              ),
+            ).thenAnswer((_) async => 1);
+            when(
+              () => mockConversationsDao.upsertConversation(
+                id: any(named: 'id'),
+                participantPubkeys: any(named: 'participantPubkeys'),
+                isGroup: any(named: 'isGroup'),
+                createdAt: any(named: 'createdAt'),
+                lastMessageContent: any(named: 'lastMessageContent'),
+                lastMessageTimestamp: any(named: 'lastMessageTimestamp'),
+                lastMessageSenderPubkey: any(named: 'lastMessageSenderPubkey'),
+                isRead: any(named: 'isRead'),
+                currentUserHasSent: any(named: 'currentUserHasSent'),
+                ownerPubkey: any(named: 'ownerPubkey'),
+                dmProtocol: any(named: 'dmProtocol'),
+                forceUpdateLastMessage: any(named: 'forceUpdateLastMessage'),
+              ),
+            ).thenAnswer((_) async {});
+            when(
+              () => mockDirectMessagesDao.getMessagesForConversation(
+                any(),
+                limit: 1,
+                ownerPubkey: any(named: 'ownerPubkey'),
+              ),
+            ).thenAnswer((_) async => []);
+            when(
+              () => mockConversationsDao.getConversation(
+                any(),
+                ownerPubkey: any(named: 'ownerPubkey'),
+              ),
+            ).thenAnswer((_) async => null);
+            when(
+              () => mockNostrClient.unsubscribe(any()),
+            ).thenAnswer((_) async {});
+
+            DmRepository(
+              nostrClient: mockNostrClient,
+              directMessagesDao: mockDirectMessagesDao,
+              conversationsDao: mockConversationsDao,
+            ).setCredentials(
+              userPubkey: _validPubkeyA,
+              signer: LocalNostrSigner(_validPrivateKey),
+              messageService: mockMessageService,
+            );
+
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+
+            // every([read, unread]) == false → canonical created UNREAD,
+            // even though the source (Phantom 1) is read.
+            verify(
+              () => mockConversationsDao.upsertConversation(
+                id: canonicalId,
+                participantPubkeys: jsonEncode(canonical),
+                isGroup: false,
+                createdAt: 1699999000,
+                lastMessageContent: 'Phantom 1',
+                lastMessageTimestamp: 1699999000,
+                lastMessageSenderPubkey: _validPubkeyB,
+                isRead: false,
+                ownerPubkey: _validPubkeyA,
+                dmProtocol: 'nip17',
+              ),
+            ).called(1);
+          },
+        );
+
+        test(
+          'preview refresh after merge preserves an unread canonical '
+          'conversation when the refreshed message is newer',
+          () async {
+            // #5515 review note 1: the canonical row already exists and is
+            // UNREAD with a stale preview timestamp; merging a duplicate
+            // triggers _refreshConversationPreview with a strictly-newer
+            // message. The forced preview update must NOT flip the
+            // conversation read — read state is preserved explicitly.
+            final phantomParticipants = [
+              _validPubkeyA,
+              _validPubkeyB,
+              _validPubkeyC,
+            ]..sort();
+            final phantomId = DmRepository.computeConversationId(
+              phantomParticipants,
+            );
+            final canonical = [_validPubkeyA, _validPubkeyB]..sort();
+            final canonicalId = DmRepository.computeConversationId(canonical);
+
+            final canonicalRow = ConversationRow(
+              id: canonicalId,
+              participantPubkeys: jsonEncode(canonical),
+              isGroup: false,
+              isRead: false,
+              currentUserHasSent: false,
+              createdAt: 1000,
+              lastMessageContent: 'stale preview',
+              lastMessageTimestamp: 1000,
+              lastMessageSenderPubkey: _validPubkeyB,
+              ownerPubkey: _validPubkeyA,
+              dmProtocol: 'nip17',
+            );
+
+            when(
+              () => mockConversationsDao.getAllConversations(
+                ownerPubkey: any(named: 'ownerPubkey'),
+              ),
+            ).thenAnswer(
+              (_) async => [
+                canonicalRow,
+                ConversationRow(
+                  id: phantomId,
+                  participantPubkeys: jsonEncode(phantomParticipants),
+                  isGroup: false,
+                  isRead: true,
+                  currentUserHasSent: false,
+                  createdAt: 900,
+                  lastMessageContent: 'phantom',
+                  lastMessageTimestamp: 900,
+                  lastMessageSenderPubkey: _validPubkeyB,
+                  ownerPubkey: _validPubkeyA,
+                ),
+              ],
+            );
+            when(
+              () => mockDirectMessagesDao.reassignConversation(
+                fromConversationId: any(named: 'fromConversationId'),
+                toConversationId: any(named: 'toConversationId'),
+                ownerPubkey: any(named: 'ownerPubkey'),
+              ),
+            ).thenAnswer((_) async => 1);
+            when(
+              () => mockConversationsDao.deleteConversation(
+                any(),
+                ownerPubkey: any(named: 'ownerPubkey'),
+              ),
+            ).thenAnswer((_) async => 1);
+            when(
+              () => mockConversationsDao.upsertConversation(
+                id: any(named: 'id'),
+                participantPubkeys: any(named: 'participantPubkeys'),
+                isGroup: any(named: 'isGroup'),
+                createdAt: any(named: 'createdAt'),
+                lastMessageContent: any(named: 'lastMessageContent'),
+                lastMessageTimestamp: any(named: 'lastMessageTimestamp'),
+                lastMessageSenderPubkey: any(named: 'lastMessageSenderPubkey'),
+                isRead: any(named: 'isRead'),
+                currentUserHasSent: any(named: 'currentUserHasSent'),
+                ownerPubkey: any(named: 'ownerPubkey'),
+                dmProtocol: any(named: 'dmProtocol'),
+                forceUpdateLastMessage: any(named: 'forceUpdateLastMessage'),
+              ),
+            ).thenAnswer((_) async {});
+            // A strictly-newer message than the canonical row's stale
+            // preview timestamp (1000) — this makes incomingIsNewer fire.
+            when(
+              () => mockDirectMessagesDao.getMessagesForConversation(
+                any(),
+                limit: 1,
+                ownerPubkey: any(named: 'ownerPubkey'),
+              ),
+            ).thenAnswer(
+              (_) async => [
+                DirectMessageRow(
+                  id: _rumorEventId,
+                  conversationId: canonicalId,
+                  senderPubkey: _validPubkeyB,
+                  content: 'newer message',
+                  createdAt: 2000,
+                  giftWrapId: _giftWrapEventId,
+                  messageKind: 14,
+                  isDeleted: false,
+                ),
+              ],
+            );
+            when(
+              () => mockConversationsDao.getConversation(
+                any(),
+                ownerPubkey: any(named: 'ownerPubkey'),
+              ),
+            ).thenAnswer((_) async => canonicalRow);
+            when(
+              () => mockNostrClient.unsubscribe(any()),
+            ).thenAnswer((_) async {});
+
+            DmRepository(
+              nostrClient: mockNostrClient,
+              directMessagesDao: mockDirectMessagesDao,
+              conversationsDao: mockConversationsDao,
+            ).setCredentials(
+              userPubkey: _validPubkeyA,
+              signer: LocalNostrSigner(_validPrivateKey),
+              messageService: mockMessageService,
+            );
+
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+
+            // The forced preview refresh advances the preview to the newer
+            // message but keeps the conversation unread (isRead: false).
+            verify(
+              () => mockConversationsDao.upsertConversation(
+                id: canonicalId,
+                participantPubkeys: any(named: 'participantPubkeys'),
+                isGroup: false,
+                createdAt: any(named: 'createdAt'),
+                lastMessageContent: 'newer message',
+                lastMessageTimestamp: 2000,
+                lastMessageSenderPubkey: _validPubkeyB,
+                isRead: false,
+                currentUserHasSent: any(named: 'currentUserHasSent'),
+                ownerPubkey: any(named: 'ownerPubkey'),
+                dmProtocol: any(named: 'dmProtocol'),
+                forceUpdateLastMessage: true,
               ),
             ).called(1);
           },

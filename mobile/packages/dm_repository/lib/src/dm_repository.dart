@@ -1856,6 +1856,50 @@ class DmRepository {
     }
   }
 
+  /// Upserts a conversation for a LIVE outgoing send and marks it read in
+  /// the same transaction as the caller. Sending a message implies the
+  /// thread is read.
+  ///
+  /// MUST be called from within a [ConversationsDao.runInTransaction] block
+  /// so the upsert and the read flip stay atomic with the message insert.
+  ///
+  /// Scoped to live sends ONLY. The history-drain / ingest paths
+  /// ([_persistDecryptedGiftWrap], NIP-04 ingest) MUST NOT call this — they
+  /// pass `isRead: isSentByMe` to [ConversationsDao.upsertConversation]
+  /// directly, so re-ingesting our own historical sent wraps during a
+  /// reinstall drain does not mark threads read.
+  ///
+  /// Read state is flipped via an explicit [ConversationsDao.markAsRead]
+  /// rather than the upsert's `isRead` argument: the `isRead` conflict gate
+  /// only writes when the incoming event is strictly newer, so a send that
+  /// lands in the same epoch-second as the last received message (NIP-17
+  /// timestamps are seconds) would otherwise leave the thread unread.
+  Future<void> _upsertSentConversationAndMarkRead({
+    required String id,
+    required String participantPubkeys,
+    required bool isGroup,
+    required int createdAt,
+    required int lastMessageTimestamp,
+    required String lastMessageSenderPubkey,
+    String? lastMessageContent,
+    String? ownerPubkey,
+    String? dmProtocol,
+  }) async {
+    await _conversationsDao.upsertConversation(
+      id: id,
+      participantPubkeys: participantPubkeys,
+      isGroup: isGroup,
+      createdAt: createdAt,
+      lastMessageContent: lastMessageContent,
+      lastMessageTimestamp: lastMessageTimestamp,
+      lastMessageSenderPubkey: lastMessageSenderPubkey,
+      currentUserHasSent: true,
+      ownerPubkey: ownerPubkey,
+      dmProtocol: dmProtocol,
+    );
+    await _conversationsDao.markAsRead(id, ownerPubkey: ownerPubkey);
+  }
+
   /// Send a text message to a 1:1 conversation.
   ///
   /// Throws [StateError] if the repository has not been initialized.
@@ -1974,7 +2018,7 @@ class DmRepository {
           // send-first conversation stayed `null` forever and every
           // subsequent send fired the NIP-04 fallback (#3663).
           final nextProtocol = protocol ?? 'nip17';
-          await _conversationsDao.upsertConversation(
+          await _upsertSentConversationAndMarkRead(
             id: conversationId,
             participantPubkeys: jsonEncode(participants),
             isGroup: false,
@@ -1982,7 +2026,6 @@ class DmRepository {
             lastMessageContent: content,
             lastMessageTimestamp: now,
             lastMessageSenderPubkey: _userPubkey,
-            currentUserHasSent: true,
             ownerPubkey: _userPubkey,
             dmProtocol: nextProtocol,
           );
@@ -2479,7 +2522,7 @@ class DmRepository {
           // message ourselves, mark the conversation NIP-17 so the
           // legacy NIP-04 fallback path doesn't fire on future sends.
           final nextProtocol = existing?.dmProtocol ?? 'nip17';
-          await _conversationsDao.upsertConversation(
+          await _upsertSentConversationAndMarkRead(
             id: row.conversationId,
             participantPubkeys: jsonEncode(participants),
             isGroup: false,
@@ -2487,7 +2530,6 @@ class DmRepository {
             lastMessageContent: row.content,
             lastMessageTimestamp: now,
             lastMessageSenderPubkey: _userPubkey,
-            currentUserHasSent: true,
             ownerPubkey: _userPubkey,
             dmProtocol: nextProtocol,
           );
@@ -2879,7 +2921,7 @@ class DmRepository {
           conversationId,
           ownerPubkey: _userPubkey,
         );
-        await _conversationsDao.upsertConversation(
+        await _upsertSentConversationAndMarkRead(
           id: conversationId,
           participantPubkeys: jsonEncode(participants),
           isGroup: true,
@@ -2887,7 +2929,6 @@ class DmRepository {
           lastMessageContent: content,
           lastMessageTimestamp: now,
           lastMessageSenderPubkey: _userPubkey,
-          currentUserHasSent: true,
           ownerPubkey: _userPubkey,
           dmProtocol: existingGroup?.dmProtocol,
         );
@@ -3007,11 +3048,20 @@ class DmRepository {
     );
   }
 
-  /// Refreshes the conversation preview after a message is deleted.
+  /// Refreshes the denormalized preview columns of [conversationId] from its
+  /// actual messages (called after a deletion and after a duplicate merge).
   ///
-  /// If the deleted message was the last message shown in the conversation
-  /// list, the preview falls back to the next most recent non-deleted
-  /// message.
+  /// If the last shown message was deleted, the preview falls back to the
+  /// next most recent non-deleted message.
+  ///
+  /// This is a preview-only operation: it forwards the conversation's current
+  /// `isRead` back through the upsert so read state is never changed here.
+  /// Because `forceUpdateLastMessage` bypasses the timestamp guard, omitting
+  /// `isRead` would let the gate's default (`true`) overwrite an unread
+  /// conversation whenever the refreshed preview is strictly newer than the
+  /// stored timestamp — e.g. a stale-preview canonical row right after a
+  /// duplicate merge. Passing the current value makes preservation explicit
+  /// and immune to timestamp ordering.
   Future<void> _refreshConversationPreview(String conversationId) async {
     final remaining = await _directMessagesDao.getMessagesForConversation(
       conversationId,
@@ -3041,6 +3091,8 @@ class DmRepository {
         lastMessageTimestamp: null,
         // ignore: avoid_redundant_argument_values, clears preview
         lastMessageSenderPubkey: null,
+        // Preview-only refresh — preserve the current read state explicitly.
+        isRead: conversation.isRead,
         currentUserHasSent: conversation.currentUserHasSent,
         ownerPubkey: conversation.ownerPubkey,
         dmProtocol: conversation.dmProtocol,
@@ -3063,6 +3115,8 @@ class DmRepository {
         lastMessageContent: previewContent,
         lastMessageTimestamp: latest.createdAt,
         lastMessageSenderPubkey: latest.senderPubkey,
+        // Preview-only refresh — preserve the current read state explicitly.
+        isRead: conversation.isRead,
         currentUserHasSent: conversation.currentUserHasSent,
         ownerPubkey: conversation.ownerPubkey,
         dmProtocol: conversation.dmProtocol,
@@ -3158,7 +3212,7 @@ class DmRepository {
           conversationId,
           ownerPubkey: _userPubkey,
         );
-        await _conversationsDao.upsertConversation(
+        await _upsertSentConversationAndMarkRead(
           id: conversationId,
           participantPubkeys: jsonEncode(participants),
           isGroup: false,
@@ -3166,7 +3220,6 @@ class DmRepository {
           lastMessageContent: _filePreviewText(fileMetadata.fileType),
           lastMessageTimestamp: now,
           lastMessageSenderPubkey: _userPubkey,
-          currentUserHasSent: true,
           ownerPubkey: _userPubkey,
           dmProtocol: existingFile?.dmProtocol,
         );
@@ -3563,8 +3616,11 @@ class DmRepository {
             );
           }
 
-          // If the canonical 1:1 row didn't exist, create it from the
-          // most recent duplicate's metadata.
+          // If the canonical 1:1 row didn't exist, create it from the most
+          // recent duplicate's metadata. Read state is the conservative
+          // merge — unread if ANY merged duplicate is unread — so
+          // canonicalization never silently drops a real unread signal from
+          // an older duplicate.
           if (!hasCanonicalRow) {
             final source = entry.value.first;
             await _conversationsDao.upsertConversation(
@@ -3575,6 +3631,7 @@ class DmRepository {
               lastMessageContent: source.lastMessageContent,
               lastMessageTimestamp: source.lastMessageTimestamp,
               lastMessageSenderPubkey: source.lastMessageSenderPubkey,
+              isRead: entry.value.every((c) => c.isRead),
               currentUserHasSent: source.currentUserHasSent,
               ownerPubkey: source.ownerPubkey,
               dmProtocol: source.dmProtocol,
