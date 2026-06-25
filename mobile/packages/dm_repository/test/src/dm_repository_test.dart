@@ -18,6 +18,7 @@ import 'package:nostr_sdk/event_kind.dart';
 import 'package:nostr_sdk/filter.dart' as nostr_filter;
 import 'package:nostr_sdk/nip44/nip44_v2.dart';
 import 'package:nostr_sdk/nip59/gift_wrap_util.dart';
+import 'package:nostr_sdk/relay/publish_outcome.dart';
 import 'package:nostr_sdk/signer/isolate_decrypt_signer.dart';
 import 'package:nostr_sdk/signer/local_nostr_signer.dart';
 import 'package:nostr_sdk/signer/nostr_signer.dart';
@@ -286,6 +287,17 @@ class _FakeDmSyncState implements DmSyncState {
     persistedDrainCursors.add(cursor);
   }
 
+  final Set<String> dmRelayListPublishedPubkeys = <String>{};
+
+  @override
+  bool dmRelayListPublished(String pubkey) =>
+      dmRelayListPublishedPubkeys.contains(pubkey);
+
+  @override
+  Future<void> markDmRelayListPublished(String pubkey) async {
+    dmRelayListPublishedPubkeys.add(pubkey);
+  }
+
   @override
   Future<void> recordSeen(String pubkey, {required int createdAt}) async {
     recorded.add((pubkey: pubkey, createdAt: createdAt));
@@ -478,6 +490,10 @@ void main() {
       NostrSigner? signer,
       DmDecryptIsolateSpawner? decryptIsolateSpawner,
       DmVerifyIsolateSpawner? verifyIsolateSpawner,
+      // #4974 RC3: default the feature on + inject a stable relay so the
+      // existing RC3 tests exercise the publish path; gating tests override.
+      bool publishDmRelayListEnabled = true,
+      String? dmInboxRelayUrl = 'wss://relay.divine.video',
     }) {
       return DmRepository(
         nostrClient: mockNostrClient,
@@ -500,6 +516,8 @@ void main() {
             verifyIsolateSpawner ?? () async => _RecordingVerifyWorker(),
         syncState: syncState,
         reactionsRepository: reactionsRepository,
+        publishDmRelayListEnabled: publishDmRelayListEnabled,
+        dmInboxRelayUrl: dmInboxRelayUrl,
         errorReporter: (error, stackTrace, {required site}) {
           reporterCalls.add(_ReporterCall(error, stackTrace, site));
         },
@@ -2615,14 +2633,16 @@ void main() {
         // Wait well beyond any former poll interval.
         await Future<void>.delayed(const Duration(milliseconds: 100));
 
-        // queryEvents must never be called — no background poller.
-        verifyNever(
+        // queryEvents is called EXACTLY once — the one-shot #4974 own
+        // kind-10050 inbox-relay resolve at subscription open — and never
+        // again: no background poller re-fetches events on a timer.
+        verify(
           () => mockNostrClient.queryEvents(
             any(),
             subscriptionId: any(named: 'subscriptionId'),
             useCache: any(named: 'useCache'),
           ),
-        );
+        ).called(1);
 
         await repository.stopListening();
         await controller.close();
@@ -2830,6 +2850,602 @@ void main() {
         final repository = createRepository();
         expect(await repository.resolveDmInboxRelays(_validPubkeyB), isNull);
       });
+
+      test('accepts both `relay` and `r` tags (#4974 cross-client)', () async {
+        // Some clients write `r` tags into a kind-10050; within a 10050 event
+        // both denote DM inbox relays, so both must be read. See divine-web.
+        when(
+          () => mockNostrClient.queryEvents(
+            any(),
+            subscriptionId: any(named: 'subscriptionId'),
+            useCache: any(named: 'useCache'),
+          ),
+        ).thenAnswer(
+          (_) async => [
+            Event(
+              _validPubkeyB,
+              EventKind.dmRelaysList,
+              [
+                ['relay', 'wss://relay-tag.example'],
+                ['r', 'wss://r-tag.example'],
+              ],
+              '',
+              createdAt: 1700000000,
+            ),
+          ],
+        );
+        final repository = createRepository();
+        expect(
+          await repository.resolveDmInboxRelays(_validPubkeyB),
+          ['wss://relay-tag.example', 'wss://r-tag.example'],
+        );
+      });
+    });
+
+    group('own kind-10050 receive targeting (#4974 RC2)', () {
+      Event ownInbox(List<String> relays) => Event(
+        _validPubkeyA,
+        EventKind.dmRelaysList,
+        [
+          for (final r in relays) ['relay', r],
+        ],
+        '',
+        createdAt: 1700000000,
+      );
+
+      test(
+        'live subscription targets the own kind-10050 inbox relays as BOTH '
+        'tempRelays and targetRelays',
+        () async {
+          when(
+            () => mockNostrClient.queryEvents(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              useCache: any(named: 'useCache'),
+            ),
+          ).thenAnswer(
+            (_) async => [
+              ownInbox(['wss://own.example']),
+            ],
+          );
+          final controller = StreamController<Event>();
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              tempRelays: any(named: 'tempRelays'),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).thenAnswer((_) => controller.stream);
+
+          final repository = createRepository();
+          await repository.startListening();
+
+          final captured = verify(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              tempRelays: captureAny(named: 'tempRelays'),
+              targetRelays: captureAny(named: 'targetRelays'),
+            ),
+          ).captured;
+          expect(captured, [
+            ['wss://own.example'],
+            ['wss://own.example'],
+          ]);
+
+          await repository.stopListening();
+          await controller.close();
+        },
+      );
+
+      test(
+        'live subscription falls back to the default pool (null targeting) '
+        'when the user has no kind-10050',
+        () async {
+          // setUp default queryEvents -> [] : no kind-10050.
+          final controller = StreamController<Event>();
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              tempRelays: any(named: 'tempRelays'),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).thenAnswer((_) => controller.stream);
+
+          final repository = createRepository();
+          await repository.startListening();
+
+          final captured = verify(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              tempRelays: captureAny(named: 'tempRelays'),
+              targetRelays: captureAny(named: 'targetRelays'),
+            ),
+          ).captured;
+          expect(captured, [isNull, isNull]);
+
+          await repository.stopListening();
+          await controller.close();
+        },
+      );
+
+      test(
+        'history drain targets the own kind-10050 inbox relays as tempRelays',
+        () async {
+          final capturedDrainTempRelays = <List<String>?>[];
+          when(
+            () => mockNostrClient.queryEvents(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              useCache: any(named: 'useCache'),
+              tempRelays: any(named: 'tempRelays'),
+            ),
+          ).thenAnswer((inv) async {
+            final filter =
+                (inv.positionalArguments.first as List<nostr_filter.Filter>)
+                    .single;
+            if (filter.kinds?.contains(EventKind.dmRelaysList) ?? false) {
+              return [
+                ownInbox(['wss://own.example']),
+              ];
+            }
+            // Only the gift-wrap drain pages carry p:[self]; capture their
+            // tempRelays (the NIP-04 recovery uses authors:[self] with no p
+            // and is intentionally not 10050-targeted).
+            if (filter.p?.isNotEmpty ?? false) {
+              capturedDrainTempRelays.add(
+                inv.namedArguments[#tempRelays] as List<String>?,
+              );
+            }
+            return const <Event>[];
+          });
+
+          final syncState = _FakeDmSyncState()
+            ..oldestOverride = 100
+            ..drainVersionOverride = DmSyncState.currentDrainVersion;
+          final repository = createRepository(syncState: syncState);
+          await repository.backfillHistoryIfNeeded();
+
+          expect(
+            capturedDrainTempRelays,
+            contains(equals(['wss://own.example'])),
+          );
+        },
+      );
+
+      test(
+        'resolves the own kind-10050 once per session, reused across the live '
+        'subscription and the drain',
+        () async {
+          var resolveQueries = 0;
+          final controller = StreamController<Event>();
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              tempRelays: any(named: 'tempRelays'),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).thenAnswer((_) => controller.stream);
+          when(
+            () => mockNostrClient.queryEvents(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              useCache: any(named: 'useCache'),
+              tempRelays: any(named: 'tempRelays'),
+            ),
+          ).thenAnswer((inv) async {
+            final filter =
+                (inv.positionalArguments.first as List<nostr_filter.Filter>)
+                    .single;
+            if (filter.kinds?.contains(EventKind.dmRelaysList) ?? false) {
+              resolveQueries++;
+              return [
+                ownInbox(['wss://own.example']),
+              ];
+            }
+            return const <Event>[];
+          });
+
+          final syncState = _FakeDmSyncState()
+            ..oldestOverride = 100
+            ..drainVersionOverride = DmSyncState.currentDrainVersion;
+          final repository = createRepository(syncState: syncState);
+          await repository.startListening();
+          await repository.backfillHistoryIfNeeded();
+
+          expect(resolveQueries, 1);
+
+          await repository.stopListening();
+          await controller.close();
+        },
+      );
+
+      // NOTE: the analogous "stopListening() during the resolve" case shares
+      // the identical session-token guard (stopListening bumps _resetGeneration
+      // exactly as _resetState does), so the account-switch test below covers
+      // the during-resolve invalidation mechanism for both paths.
+      test(
+        'an account switch during the own-inbox resolve bails the old '
+        "user's subscription and frees the new user to subscribe",
+        () async {
+          final resolveA = Completer<List<Event>>();
+          final resolveB = Completer<List<Event>>();
+          var resolveCalls = 0;
+          when(
+            () => mockNostrClient.queryEvents(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              useCache: any(named: 'useCache'),
+            ),
+          ).thenAnswer((_) {
+            resolveCalls++;
+            return resolveCalls == 1 ? resolveA.future : resolveB.future;
+          });
+          final controller = StreamController<Event>();
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              tempRelays: any(named: 'tempRelays'),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).thenAnswer((_) => controller.stream);
+          when(
+            () => mockNostrClient.unsubscribe(any()),
+          ).thenAnswer((_) async {});
+
+          final repository = createRepository(); // user A
+          final pendingA = repository.startListening(); // suspends at resolve
+
+          // Switch A -> B while A's resolve is still in flight.
+          repository.setCredentials(
+            userPubkey: _validPubkeyB,
+            signer: LocalNostrSigner(_validPrivateKey),
+            messageService: mockMessageService,
+          );
+
+          resolveA.complete(const <Event>[]);
+          await pendingA;
+
+          // A's continuation bailed — no subscription opened under A's id.
+          verifyNever(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: 'dm_inbox_$_validPubkeyA',
+              tempRelays: any(named: 'tempRelays'),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          );
+
+          // _subscribing was released, so B opens its own subscription.
+          final pendingB = repository.startListening();
+          resolveB.complete(const <Event>[]);
+          await pendingB;
+          verify(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: 'dm_inbox_$_validPubkeyB',
+              tempRelays: any(named: 'tempRelays'),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).called(1);
+
+          await repository.stopListening();
+          await controller.close();
+        },
+      );
+    });
+
+    group('ensureDmRelayListPublished (#4974 RC3)', () {
+      Event existingInbox(List<String> relays) => Event(
+        _validPubkeyA,
+        EventKind.dmRelaysList,
+        [
+          for (final r in relays) ['relay', r],
+        ],
+        '',
+        createdAt: 1700000000,
+      );
+
+      PublishOutcome outcome({required bool accepted}) => PublishOutcome(
+        eventId: 'eid',
+        acceptedBy: accepted ? const ['wss://relay.divine.video'] : const [],
+        rejectedBy: accepted
+            ? const <String, String>{}
+            : const {'wss://relay.divine.video': 'blocked: kind not allowed'},
+        noResponseFrom: const [],
+      );
+
+      test(
+        'publishes a kind-10050 advertising the injected stable relay when '
+        'absent and records the flag on a confirmed OK',
+        () async {
+          // setUp default queryEvents -> [] : user has no existing kind-10050.
+          when(
+            () => mockNostrClient.publishEventAwaitOk(
+              any(),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).thenAnswer((_) async => outcome(accepted: true));
+
+          final syncState = _FakeDmSyncState();
+          final repository = createRepository(syncState: syncState);
+          await repository.ensureDmRelayListPublished();
+
+          final captured = verify(
+            () => mockNostrClient.publishEventAwaitOk(
+              captureAny(),
+              targetRelays: captureAny(named: 'targetRelays'),
+            ),
+          ).captured;
+          final event = captured[0] as Event;
+          expect(event.kind, EventKind.dmRelaysList);
+          expect(event.tags, [
+            ['relay', 'wss://relay.divine.video'],
+          ]);
+          expect(captured[1], ['wss://relay.divine.video']);
+          expect(
+            syncState.dmRelayListPublishedPubkeys,
+            contains(_validPubkeyA),
+          );
+        },
+      );
+
+      test(
+        'does NOT record the flag when no relay accepts — retries next login',
+        () async {
+          when(
+            () => mockNostrClient.publishEventAwaitOk(
+              any(),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).thenAnswer((_) async => outcome(accepted: false));
+
+          final syncState = _FakeDmSyncState();
+          final repository = createRepository(syncState: syncState);
+          await repository.ensureDmRelayListPublished();
+
+          verify(
+            () => mockNostrClient.publishEventAwaitOk(
+              any(),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).called(1);
+          expect(syncState.dmRelayListPublishedPubkeys, isEmpty);
+        },
+      );
+
+      test(
+        'skips publishing and records the flag when the user already '
+        'advertises a kind-10050',
+        () async {
+          when(
+            () => mockNostrClient.queryEvents(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              useCache: any(named: 'useCache'),
+            ),
+          ).thenAnswer(
+            (_) async => [
+              existingInbox(['wss://own.example']),
+            ],
+          );
+
+          final syncState = _FakeDmSyncState();
+          final repository = createRepository(syncState: syncState);
+          await repository.ensureDmRelayListPublished();
+
+          verifyNever(
+            () => mockNostrClient.publishEventAwaitOk(
+              any(),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          );
+          expect(
+            syncState.dmRelayListPublishedPubkeys,
+            contains(_validPubkeyA),
+          );
+        },
+      );
+
+      test('is a no-op when already published this device/pubkey', () async {
+        final syncState = _FakeDmSyncState()
+          ..dmRelayListPublishedPubkeys.add(_validPubkeyA);
+        final repository = createRepository(syncState: syncState);
+        await repository.ensureDmRelayListPublished();
+
+        verifyNever(
+          () => mockNostrClient.publishEventAwaitOk(
+            any(),
+            targetRelays: any(named: 'targetRelays'),
+          ),
+        );
+      });
+
+      test('does not publish when the signer returns null', () async {
+        final mockSigner = _MockNostrSigner();
+        when(() => mockSigner.signEvent(any())).thenAnswer((_) async => null);
+        final syncState = _FakeDmSyncState();
+        final repository = createRepository(
+          signer: mockSigner,
+          syncState: syncState,
+        );
+        await repository.ensureDmRelayListPublished();
+
+        verifyNever(
+          () => mockNostrClient.publishEventAwaitOk(
+            any(),
+            targetRelays: any(named: 'targetRelays'),
+          ),
+        );
+        expect(syncState.dmRelayListPublishedPubkeys, isEmpty);
+      });
+
+      test('is a no-op when uninitialized', () async {
+        final syncState = _FakeDmSyncState();
+        final repository = createRepository(
+          userPubkey: '',
+          syncState: syncState,
+        );
+        await repository.ensureDmRelayListPublished();
+
+        verifyNever(
+          () => mockNostrClient.publishEventAwaitOk(
+            any(),
+            targetRelays: any(named: 'targetRelays'),
+          ),
+        );
+      });
+
+      test('is a no-op when the feature flag is off', () async {
+        final syncState = _FakeDmSyncState();
+        final repository = createRepository(
+          syncState: syncState,
+          publishDmRelayListEnabled: false,
+        );
+        await repository.ensureDmRelayListPublished();
+
+        // Gated before any work — no relay query, no signer round-trip.
+        verifyNever(
+          () => mockNostrClient.queryEvents(
+            any(),
+            subscriptionId: any(named: 'subscriptionId'),
+            useCache: any(named: 'useCache'),
+          ),
+        );
+        verifyNever(
+          () => mockNostrClient.publishEventAwaitOk(
+            any(),
+            targetRelays: any(named: 'targetRelays'),
+          ),
+        );
+        expect(syncState.dmRelayListPublishedPubkeys, isEmpty);
+      });
+
+      test(
+        'does NOT publish or set the flag when the own-inbox lookup fails '
+        '(transient) — never overwrites a real list',
+        () async {
+          when(
+            () => mockNostrClient.queryEvents(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              useCache: any(named: 'useCache'),
+            ),
+          ).thenThrow(Exception('relay down'));
+
+          final syncState = _FakeDmSyncState();
+          final repository = createRepository(syncState: syncState);
+          await repository.ensureDmRelayListPublished();
+
+          verifyNever(
+            () => mockNostrClient.publishEventAwaitOk(
+              any(),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          );
+          expect(syncState.dmRelayListPublishedPubkeys, isEmpty);
+        },
+      );
+
+      test(
+        'a transient lookup failure is not cached — a later call re-queries '
+        'and can publish',
+        () async {
+          var queries = 0;
+          when(
+            () => mockNostrClient.queryEvents(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              useCache: any(named: 'useCache'),
+            ),
+          ).thenAnswer((_) async {
+            queries++;
+            if (queries == 1) throw Exception('relay down');
+            return const <Event>[]; // absent on the retry
+          });
+          when(
+            () => mockNostrClient.publishEventAwaitOk(
+              any(),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).thenAnswer((_) async => outcome(accepted: true));
+
+          final syncState = _FakeDmSyncState();
+          final repository = createRepository(syncState: syncState);
+
+          // First login: lookup fails -> no publish, flag unset.
+          await repository.ensureDmRelayListPublished();
+          expect(syncState.dmRelayListPublishedPubkeys, isEmpty);
+
+          // Next login: the failure was not memoized, so it re-queries,
+          // resolves absent, and publishes.
+          await repository.ensureDmRelayListPublished();
+          expect(queries, 2);
+          verify(
+            () => mockNostrClient.publishEventAwaitOk(
+              any(),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).called(1);
+          expect(
+            syncState.dmRelayListPublishedPubkeys,
+            contains(_validPubkeyA),
+          );
+        },
+      );
+
+      test(
+        'reuses the live subscription own-inbox resolve — one kind-10050 '
+        'query shared at login',
+        () async {
+          var resolveQueries = 0;
+          final controller = StreamController<Event>();
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              tempRelays: any(named: 'tempRelays'),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).thenAnswer((_) => controller.stream);
+          when(
+            () => mockNostrClient.queryEvents(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+              useCache: any(named: 'useCache'),
+            ),
+          ).thenAnswer((inv) async {
+            final filter =
+                (inv.positionalArguments.first as List<nostr_filter.Filter>)
+                    .single;
+            if (filter.kinds?.contains(EventKind.dmRelaysList) ?? false) {
+              resolveQueries++;
+            }
+            return const <Event>[];
+          });
+          when(
+            () => mockNostrClient.publishEventAwaitOk(
+              any(),
+              targetRelays: any(named: 'targetRelays'),
+            ),
+          ).thenAnswer((_) async => outcome(accepted: true));
+
+          final syncState = _FakeDmSyncState();
+          final repository = createRepository(syncState: syncState);
+          await repository.startListening();
+          await repository.ensureDmRelayListPublished();
+
+          expect(resolveQueries, 1);
+
+          await repository.stopListening();
+          await controller.close();
+        },
+      );
     });
 
     group('backfillHistoryIfNeeded', () {
@@ -3020,6 +3636,12 @@ void main() {
             final filter =
                 (inv.positionalArguments.first as List<nostr_filter.Filter>)
                     .single;
+            // The #4974 own kind-10050 inbox-relay resolve (authors:[self],
+            // kinds:[10050]) also matches authors-with-no-p; skip it so it is
+            // not mistaken for a NIP-04 recovery page.
+            if (filter.kinds?.contains(EventKind.dmRelaysList) ?? false) {
+              return const <Event>[];
+            }
             final isNip04Recovery =
                 filter.authors != null && (filter.p?.isEmpty ?? true);
             if (!isNip04Recovery) return const <Event>[];
@@ -3317,9 +3939,15 @@ void main() {
               useCache: any(named: 'useCache'),
             ),
           ).thenAnswer((inv) async {
-            calls++;
             final filters =
                 inv.positionalArguments.first as List<nostr_filter.Filter>;
+            // Skip the #4974 own kind-10050 inbox-relay resolve so it is not
+            // counted as a drain page.
+            if (filters.single.kinds?.contains(EventKind.dmRelaysList) ??
+                false) {
+              return const <Event>[];
+            }
+            calls++;
             final until = filters.single.until!;
             // Infinite descending supply: only the maxPages cap can stop it.
             return [deletion(until - 1)];
@@ -3383,9 +4011,15 @@ void main() {
               useCache: any(named: 'useCache'),
             ),
           ).thenAnswer((inv) async {
-            calls++;
             final filters =
                 inv.positionalArguments.first as List<nostr_filter.Filter>;
+            // Skip the #4974 own kind-10050 inbox-relay resolve so it is not
+            // counted as a drain page.
+            if (filters.single.kinds?.contains(EventKind.dmRelaysList) ??
+                false) {
+              return const <Event>[];
+            }
+            calls++;
             final until = filters.single.until!;
             // Page 0 advances + persists the cursor; page 1 fails.
             if (calls == 1) return [deletion(until - 1)];

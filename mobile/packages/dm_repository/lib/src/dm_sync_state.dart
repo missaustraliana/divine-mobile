@@ -25,6 +25,7 @@ class DmSyncState {
   static const _drainCompletePrefix = 'dm.historyDrainComplete.';
   static const _drainCursorPrefix = 'dm.historyDrainCursor.';
   static const _drainVersionPrefix = 'dm.historyDrainVersion.';
+  static const _dmRelayListPublishedPrefix = 'dm.dmRelayListPublished.';
 
   /// Current history-drain logic version. Installs whose persisted
   /// [drainVersion] is below this re-run the drain once, even if
@@ -136,6 +137,23 @@ class DmSyncState {
     await _prefs.setInt('$_drainCursorPrefix$pubkey', cursor);
   }
 
+  /// Whether a NIP-17 kind-10050 DM inbox relay list has been published for
+  /// [pubkey] from this device.
+  ///
+  /// Gates #4974's publish-on-login so it runs at most once per
+  /// (device, pubkey). Set only on a confirmed relay `OK` (see
+  /// [markDmRelayListPublished]); a reinstall wipes SharedPreferences and a
+  /// fresh install should re-advertise, so this correctly reads `false`
+  /// again then.
+  bool dmRelayListPublished(String pubkey) =>
+      _prefs.getBool('$_dmRelayListPublishedPrefix$pubkey') ?? false;
+
+  /// Records that a kind-10050 DM inbox relay list has been published for
+  /// [pubkey] (or that one already exists). See [dmRelayListPublished].
+  Future<void> markDmRelayListPublished(String pubkey) async {
+    await _prefs.setBool('$_dmRelayListPublishedPrefix$pubkey', true);
+  }
+
   /// Removes all sync state for [pubkey]. Called on account switch.
   Future<void> clear(String pubkey) async {
     await _prefs.remove('$_newestPrefix$pubkey');
@@ -143,6 +161,7 @@ class DmSyncState {
     await _prefs.remove('$_drainCompletePrefix$pubkey');
     await _prefs.remove('$_drainCursorPrefix$pubkey');
     await _prefs.remove('$_drainVersionPrefix$pubkey');
+    await _prefs.remove('$_dmRelayListPublishedPrefix$pubkey');
   }
 
   /// Removes all DM sync state entries for every pubkey.
@@ -158,7 +177,8 @@ class DmSyncState {
               key.startsWith(_oldestPrefix) ||
               key.startsWith(_drainCompletePrefix) ||
               key.startsWith(_drainCursorPrefix) ||
-              key.startsWith(_drainVersionPrefix),
+              key.startsWith(_drainVersionPrefix) ||
+              key.startsWith(_dmRelayListPublishedPrefix),
         )
         .toList();
     for (final key in keysToRemove) {

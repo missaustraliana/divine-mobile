@@ -283,5 +283,41 @@ void main() {
         expect(state.drainVersion(pkB), equals(0));
       });
     });
+
+    group('dmRelayListPublished (#4974)', () {
+      test('defaults to false and flips to true after marking', () async {
+        expect(state.dmRelayListPublished(pkA), isFalse);
+        await state.markDmRelayListPublished(pkA);
+        expect(state.dmRelayListPublished(pkA), isTrue);
+      });
+
+      test('is per-pubkey — marking one does not affect another', () async {
+        await state.markDmRelayListPublished(pkA);
+        expect(state.dmRelayListPublished(pkA), isTrue);
+        expect(state.dmRelayListPublished(pkB), isFalse);
+      });
+
+      test('clear removes only the selected pubkey marker', () async {
+        await state.markDmRelayListPublished(pkA);
+        await state.markDmRelayListPublished(pkB);
+
+        await state.clear(pkA);
+
+        expect(state.dmRelayListPublished(pkA), isFalse);
+        expect(state.dmRelayListPublished(pkB), isTrue);
+      });
+
+      test('clearAll removes all markers and leaves unrelated keys', () async {
+        await state.markDmRelayListPublished(pkA);
+        await state.markDmRelayListPublished(pkB);
+        await prefs.setString('unrelated_key', 'keep_me');
+
+        await state.clearAll();
+
+        expect(state.dmRelayListPublished(pkA), isFalse);
+        expect(state.dmRelayListPublished(pkB), isFalse);
+        expect(prefs.getString('unrelated_key'), equals('keep_me'));
+      });
+    });
   });
 }
