@@ -735,6 +735,39 @@ class VideosRepository {
     return visible.take(limit).toList();
   }
 
+  /// Fetches popular classic Vine archive videos for the home feed's
+  /// Classics mode.
+  ///
+  /// Delegates to [getPopularVideosPage] with [PopularVideosVariant.classic],
+  /// so the source is identical to Explore → Popular's "Classic" toggle
+  /// (v2 popular feed, `sort=popular&period=month&platform=vine`,
+  /// cursor-paged, server-ordered) — not the standalone Explore → Classics
+  /// tab, which is offset-based and client-side shuffled. Mapped into a
+  /// [HomeFeedResult] so the home feed paginates it via
+  /// [HomeFeedResult.paginationCursor] like the For You feed. Funnelcake-only:
+  /// returns an empty result when no
+  /// Funnelcake relay is connected (relays do not expose the server-side
+  /// `platform` filter).
+  Future<HomeFeedResult> getClassicVideos({
+    int limit = _defaultLimit,
+    int? until,
+    String? cursor,
+    bool skipCache = false,
+  }) async {
+    final page = await getPopularVideosPage(
+      variant: PopularVideosVariant.classic,
+      limit: limit,
+      until: until,
+      cursor: cursor,
+      skipCache: skipCache,
+    );
+    return HomeFeedResult(
+      videos: page.videos,
+      paginationCursor: page.nextCursor,
+      hasMore: page.hasMore,
+    );
+  }
+
   /// Fetches new divine videos from the popular leaderboard.
   ///
   /// This powers Explore → Popular. It uses Funnelcake's leaderboard endpoint

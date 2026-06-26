@@ -862,6 +862,68 @@ void main() {
       );
 
       blocTest<VideoFeedBloc, VideoFeedBlocState>(
+        'restores persisted classic to Classics',
+        setUp: () async {
+          final videos = createTestVideos(2);
+          SharedPreferences.setMockInitialValues({
+            'selected_feed_mode': 'classic',
+          });
+          final sharedPreferences = await SharedPreferences.getInstance();
+
+          when(
+            () => mockVideosRepository.getClassicVideos(
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              cursor: any(named: 'cursor'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          ).thenAnswer((_) async => HomeFeedResult(videos: videos));
+
+          savedModeBloc = VideoFeedBloc(
+            videosRepository: mockVideosRepository,
+            followRepository: mockFollowRepository,
+            curatedListRepository: mockCuratedListRepository,
+            sharedPreferences: sharedPreferences,
+          );
+        },
+        build: () => savedModeBloc,
+        act: (bloc) => bloc.add(const VideoFeedStarted()),
+        expect: () => [
+          isA<VideoFeedBlocState>()
+              .having(
+                (s) => s.source.type,
+                'source',
+                VideoFeedSourceType.classic,
+              )
+              .having((s) => s.mode, 'mode', FeedMode.classic),
+          isA<VideoFeedBlocState>()
+              .having((s) => s.status, 'status', VideoFeedStatus.success)
+              .having(
+                (s) => s.source.type,
+                'source',
+                VideoFeedSourceType.classic,
+              )
+              .having((s) => s.mode, 'mode', FeedMode.classic),
+        ],
+        verify: (_) async {
+          verify(
+            () => mockVideosRepository.getClassicVideos(
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              cursor: any(named: 'cursor'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          ).called(1);
+
+          final sharedPreferences = await SharedPreferences.getInstance();
+          expect(
+            sharedPreferences.getString('selected_feed_mode'),
+            const VideoFeedSource.classic().persistenceValue,
+          );
+        },
+      );
+
+      blocTest<VideoFeedBloc, VideoFeedBlocState>(
         'restores saved subscribed list source when list exists',
         setUp: () async {
           final list = createTestList();
@@ -1413,6 +1475,125 @@ void main() {
               until: any(named: 'until'),
               skipCache: any(named: 'skipCache'),
             ),
+          );
+        },
+      );
+
+      blocTest<VideoFeedBloc, VideoFeedBlocState>(
+        'classic source fetches popular classic videos via cursor',
+        setUp: () {
+          final videos = createTestVideos(2);
+          when(
+            () => mockVideosRepository.getClassicVideos(
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              cursor: any(named: 'cursor'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          ).thenAnswer(
+            (_) async => HomeFeedResult(
+              videos: videos,
+              paginationCursor: 'next-page',
+              hasMore: true,
+            ),
+          );
+        },
+        build: createBloc,
+        act: (bloc) =>
+            bloc.add(const VideoFeedSourceChanged(VideoFeedSource.classic())),
+        expect: () => [
+          isA<VideoFeedBlocState>()
+              .having(
+                (s) => s.source.type,
+                'source',
+                VideoFeedSourceType.classic,
+              )
+              .having((s) => s.hasMore, 'loading hasMore', true),
+          isA<VideoFeedBlocState>()
+              .having((s) => s.status, 'status', VideoFeedStatus.success)
+              .having((s) => s.mode, 'mode', FeedMode.classic)
+              .having((s) => s.videos.length, 'videos count', 2)
+              .having((s) => s.hasMore, 'hasMore', true)
+              .having((s) => s.paginationCursor, 'cursor', 'next-page'),
+        ],
+        verify: (_) {
+          verify(
+            () => mockVideosRepository.getClassicVideos(
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              cursor: any(named: 'cursor'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          ).called(1);
+          verifyNever(
+            () => mockVideosRepository.getNewVideos(
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          );
+        },
+      );
+
+      blocTest<VideoFeedBloc, VideoFeedBlocState>(
+        'classic load-more paginates with the stored cursor (no until)',
+        setUp: () {
+          when(
+            () => mockVideosRepository.getClassicVideos(
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              cursor: any(named: 'cursor'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          ).thenAnswer((invocation) async {
+            final cursor =
+                invocation.namedArguments[const Symbol('cursor')] as String?;
+            if (cursor == 'cursor-2') {
+              // Page 2 is stamped *newer* than page 1 so a (wrong) timestamp
+              // re-sort would surface it first — pinning the server-ranked
+              // append order the cursor path must preserve.
+              return HomeFeedResult(
+                videos: createTestVideos(
+                  2,
+                  idPrefix: 'page2',
+                  startTimestamp: 2000,
+                ),
+                hasMore: false,
+              );
+            }
+            return HomeFeedResult(
+              videos: createTestVideos(
+                2,
+                idPrefix: 'page1',
+                startTimestamp: 1000,
+              ),
+              paginationCursor: 'cursor-2',
+              hasMore: true,
+            );
+          });
+        },
+        build: createBloc,
+        act: (bloc) async {
+          bloc.add(const VideoFeedSourceChanged(VideoFeedSource.classic()));
+          await pumpEventQueue();
+          bloc.add(const VideoFeedLoadMoreRequested());
+          await pumpEventQueue();
+        },
+        verify: (bloc) {
+          verify(
+            () => mockVideosRepository.getClassicVideos(
+              limit: any(named: 'limit'),
+              cursor: 'cursor-2',
+              skipCache: any(named: 'skipCache'),
+            ),
+          ).called(1);
+          expect(bloc.state.videos.length, 4);
+          expect(bloc.state.hasMore, isFalse);
+          // Server-ranked order is appended as-is, never re-sorted: page 1
+          // (older) stays ahead of the newer page 2.
+          expect(
+            bloc.state.videos.map((v) => v.id).toList(),
+            ['page1-0', 'page1-1', 'page2-0', 'page2-1'],
           );
         },
       );
@@ -2513,6 +2694,28 @@ void main() {
         ),
         act: (bloc) => bloc.add(const VideoFeedAutoRefreshRequested()),
         expect: () => <VideoFeedBlocState>[],
+      );
+
+      blocTest<VideoFeedBloc, VideoFeedBlocState>(
+        'does nothing when mode is classic',
+        build: createBloc,
+        seed: () => VideoFeedBlocState(
+          status: VideoFeedStatus.success,
+          mode: FeedMode.classic,
+          videos: createTestVideos(5),
+        ),
+        act: (bloc) => bloc.add(const VideoFeedAutoRefreshRequested()),
+        expect: () => <VideoFeedBlocState>[],
+        verify: (_) {
+          verifyNever(
+            () => mockVideosRepository.getClassicVideos(
+              limit: any(named: 'limit'),
+              until: any(named: 'until'),
+              cursor: any(named: 'cursor'),
+              skipCache: any(named: 'skipCache'),
+            ),
+          );
+        },
       );
 
       blocTest<VideoFeedBloc, VideoFeedBlocState>(
