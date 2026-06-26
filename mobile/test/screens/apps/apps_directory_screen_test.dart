@@ -8,8 +8,10 @@ import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/screens/apps/apps_directory_screen.dart';
 import 'package:openvine/screens/apps/nostr_app_sandbox_screen.dart';
+import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 
 import '../../helpers/go_router.dart';
+import '../../helpers/url_launcher_test_double.dart';
 
 class _MockNostrAppDirectoryService extends Mock
     implements NostrAppDirectoryService {}
@@ -120,6 +122,100 @@ void main() {
       ).called(1);
     });
 
+    testWidgets(
+      'tapping the verifier opens the system browser, not the sandbox',
+      (tester) async {
+        final originalPlatform = UrlLauncherPlatform.instance;
+        final launcher = UrlLauncherTestDouble();
+        UrlLauncherPlatform.instance = launcher;
+        addTearDown(() => UrlLauncherPlatform.instance = originalPlatform);
+
+        final mockGoRouter = MockGoRouter();
+        when(
+          () => mockGoRouter.push(any(), extra: any(named: 'extra')),
+        ).thenAnswer((_) async => null);
+        when(
+          () => mockDirectoryService.fetchApprovedApps(),
+        ).thenAnswer((_) async => [_verifierFixture()]);
+
+        await tester.pumpWidget(buildSubject(goRouter: mockGoRouter));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Divine Verifier'));
+        await tester.pumpAndSettle();
+
+        expect(launcher.launched, hasLength(1));
+        expect(
+          launcher.launched.single.url,
+          'https://verifier.divine.video/',
+        );
+        expect(launcher.launched.single.useExternalApplication, isTrue);
+        verifyNever(() => mockGoRouter.push(any(), extra: any(named: 'extra')));
+      },
+    );
+
+    testWidgets(
+      'shows an error snackbar when the verifier browser launch throws',
+      (tester) async {
+        final originalPlatform = UrlLauncherPlatform.instance;
+        final launcher = UrlLauncherTestDouble(launchError: Exception('boom'));
+        UrlLauncherPlatform.instance = launcher;
+        addTearDown(() => UrlLauncherPlatform.instance = originalPlatform);
+
+        when(
+          () => mockDirectoryService.fetchApprovedApps(),
+        ).thenAnswer((_) async => [_verifierFixture()]);
+
+        await tester.pumpWidget(buildSubject());
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Divine Verifier'));
+        await tester.pumpAndSettle();
+
+        expect(launcher.launched, hasLength(1));
+        expect(
+          find.text(
+            lookupAppLocalizations(
+              const Locale('en'),
+            ).relaySettingsCouldNotOpenBrowser,
+          ),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'does not launch a system-browser app with an off-host launch_url',
+      (tester) async {
+        final originalPlatform = UrlLauncherPlatform.instance;
+        final launcher = UrlLauncherTestDouble();
+        UrlLauncherPlatform.instance = launcher;
+        addTearDown(() => UrlLauncherPlatform.instance = originalPlatform);
+
+        when(
+          () => mockDirectoryService.fetchApprovedApps(),
+        ).thenAnswer(
+          (_) async => [_verifierFixtureWithUrl('https://evil.test/')],
+        );
+
+        await tester.pumpWidget(buildSubject());
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Divine Verifier'));
+        await tester.pumpAndSettle();
+
+        expect(launcher.launched, isEmpty);
+        expect(
+          find.text(
+            lookupAppLocalizations(
+              const Locale('en'),
+            ).relaySettingsCouldNotOpenBrowser,
+          ),
+          findsOneWidget,
+        );
+      },
+    );
+
     testWidgets('shows an empty state when there are no approved apps', (
       tester,
     ) async {
@@ -135,6 +231,46 @@ void main() {
       expect(find.text(l10n.appsDirectoryEmptySubtitle), findsOneWidget);
     });
   });
+}
+
+NostrAppDirectoryEntry _verifierFixture() {
+  return const NostrAppDirectoryEntry(
+    id: 'bundled-verifier',
+    slug: 'verifier',
+    name: 'Divine Verifier',
+    tagline: 'Link your social accounts.',
+    description: 'Verify ownership of external accounts.',
+    iconUrl: 'https://verifier.divine.video/favicon.ico',
+    launchUrl: 'https://verifier.divine.video/',
+    allowedOrigins: ['https://verifier.divine.video'],
+    allowedMethods: ['getPublicKey', 'signEvent'],
+    allowedSignEventKinds: [0],
+    promptRequiredFor: [],
+    status: 'approved',
+    sortOrder: 16,
+    createdAt: null,
+    updatedAt: null,
+  );
+}
+
+NostrAppDirectoryEntry _verifierFixtureWithUrl(String launchUrl) {
+  return NostrAppDirectoryEntry(
+    id: 'bundled-verifier',
+    slug: 'verifier',
+    name: 'Divine Verifier',
+    tagline: 'Link your social accounts.',
+    description: 'Verify ownership of external accounts.',
+    iconUrl: 'https://verifier.divine.video/favicon.ico',
+    launchUrl: launchUrl,
+    allowedOrigins: const ['https://verifier.divine.video'],
+    allowedMethods: const ['getPublicKey', 'signEvent'],
+    allowedSignEventKinds: const [0],
+    promptRequiredFor: const [],
+    status: 'approved',
+    sortOrder: 16,
+    createdAt: null,
+    updatedAt: null,
+  );
 }
 
 NostrAppDirectoryEntry _fixture() {

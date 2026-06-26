@@ -8,8 +8,10 @@ import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/screens/apps/app_detail_screen.dart';
 import 'package:openvine/screens/apps/nostr_app_sandbox_screen.dart';
+import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 
 import '../../helpers/go_router.dart';
+import '../../helpers/url_launcher_test_double.dart';
 
 class _MockNostrAppDirectoryService extends Mock
     implements NostrAppDirectoryService {}
@@ -88,7 +90,80 @@ void main() {
         expect(pushedApp.slug, 'primal');
       },
     );
+
+    testWidgets(
+      'opens the verifier in the system browser instead of the sandbox',
+      (tester) async {
+        final originalPlatform = UrlLauncherPlatform.instance;
+        final launcher = UrlLauncherTestDouble();
+        UrlLauncherPlatform.instance = launcher;
+        addTearDown(() => UrlLauncherPlatform.instance = originalPlatform);
+
+        final mockGoRouter = MockGoRouter();
+        when(
+          () => mockGoRouter.push(any(), extra: any(named: 'extra')),
+        ).thenAnswer((_) async => null);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              nostrAppDirectoryServiceProvider.overrideWithValue(
+                mockDirectoryService,
+              ),
+            ],
+            child: MockGoRouterProvider(
+              goRouter: mockGoRouter,
+              child: MaterialApp(
+                localizationsDelegates: AppLocalizations.localizationsDelegates,
+                supportedLocales: AppLocalizations.supportedLocales,
+                home: AppDetailScreen(
+                  slug: 'verifier',
+                  initialEntry: _verifierFixtureApp(),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final l10n = lookupAppLocalizations(const Locale('en'));
+        await tester.scrollUntilVisible(
+          find.text(l10n.appsDetailOpenButton),
+          300,
+        );
+        await tester.tap(find.byType(DivineButton));
+        await tester.pumpAndSettle();
+
+        expect(launcher.launched, hasLength(1));
+        expect(
+          launcher.launched.single.url,
+          'https://verifier.divine.video/',
+        );
+        expect(launcher.launched.single.useExternalApplication, isTrue);
+        verifyNever(() => mockGoRouter.push(any(), extra: any(named: 'extra')));
+      },
+    );
   });
+}
+
+NostrAppDirectoryEntry _verifierFixtureApp() {
+  return const NostrAppDirectoryEntry(
+    id: 'bundled-verifier',
+    slug: 'verifier',
+    name: 'Divine Verifier',
+    tagline: 'Link your social accounts.',
+    description: 'Verify ownership of external accounts.',
+    iconUrl: 'https://verifier.divine.video/favicon.ico',
+    launchUrl: 'https://verifier.divine.video/',
+    allowedOrigins: ['https://verifier.divine.video'],
+    allowedMethods: ['getPublicKey', 'signEvent'],
+    allowedSignEventKinds: [0],
+    promptRequiredFor: [],
+    status: 'approved',
+    sortOrder: 16,
+    createdAt: null,
+    updatedAt: null,
+  );
 }
 
 NostrAppDirectoryEntry _fixtureApp() {
