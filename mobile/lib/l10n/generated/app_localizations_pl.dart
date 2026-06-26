@@ -6811,6 +6811,93 @@ class AppLocalizationsPl extends AppLocalizations {
   String get proofmodePublishedByLabel => 'Published by:';
 
   @override
+  String get publishErrorNotSignedIn => 'Zaloguj się, aby publikować filmy.';
+
+  @override
+  String get publishErrorNoRetry => 'Brak przesyłania do ponowienia.';
+
+  @override
+  String get publishErrorNoInternet =>
+      'Brak połączenia z internetem. Sprawdź Wi-Fi lub dane komórkowe i spróbuj ponownie.';
+
+  @override
+  String get publishErrorServerUnreachable =>
+      'Nie udało się połączyć z serwerem. Spróbuj ponownie za chwilę.';
+
+  @override
+  String get publishErrorTimeout =>
+      'Przesyłanie przekroczyło limit czasu. Spróbuj użyć lepszego połączenia lub mniejszego filmu.';
+
+  @override
+  String get publishErrorTls =>
+      'Bezpieczne połączenie nie powiodło się. Sprawdź swoją sieć — publiczne Wi-Fi może blokować przesyłanie.';
+
+  @override
+  String publishErrorServerNotFound(String serverName) {
+    return 'Serwer multimediów ($serverName) jest niedostępny. Możesz wybrać inny w ustawieniach.';
+  }
+
+  @override
+  String get publishErrorFileTooLarge =>
+      'Plik wideo jest za duży dla serwera. Spróbuj go przyciąć lub obniżyć jakość.';
+
+  @override
+  String publishErrorServerInternalError(String serverName) {
+    return 'Serwer multimediów ($serverName) napotkał błąd wewnętrzny. Możesz wybrać inny w ustawieniach.';
+  }
+
+  @override
+  String publishErrorServerDown(String serverName) {
+    return 'Serwer multimediów ($serverName) jest chwilowo niedostępny. Spróbuj ponownie za moment lub wybierz inny w ustawieniach.';
+  }
+
+  @override
+  String get publishErrorForbidden =>
+      'Nie masz uprawnień, aby przesyłać na ten serwer.';
+
+  @override
+  String get publishErrorFileNotFound =>
+      'Nie znaleziono pliku wideo. Mógł zostać usunięty. Nagraj ponownie i spróbuj jeszcze raz.';
+
+  @override
+  String get publishErrorLowStorage =>
+      'Za mało miejsca w pamięci urządzenia. Zwolnij trochę miejsca i spróbuj ponownie.';
+
+  @override
+  String get publishErrorThumbnailFailed =>
+      'Film został przesłany, ale nie udało się przygotować miniatury. Spróbuj ponownie.';
+
+  @override
+  String get publishErrorNostrPublishFailed =>
+      'Film został przesłany, ale nie udało się opublikować posta. Sprawdź ustawienia przekaźników i spróbuj ponownie.';
+
+  @override
+  String get publishErrorInterrupted =>
+      'Przesyłanie zostało przerwane. Chcesz spróbować ponownie?';
+
+  @override
+  String get publishErrorGeneric => 'Coś poszło nie tak. Spróbuj ponownie.';
+
+  @override
+  String get publishErrorRateLimited =>
+      'Zbyt wiele przesyłań w tej chwili. Poczekaj chwilę i spróbuj ponownie.';
+
+  @override
+  String get publishErrorUploadSessionExpired =>
+      'Sesja przesyłania wygasła. Spróbuj ponownie.';
+
+  @override
+  String get publishErrorPermissionDenied =>
+      'Divine nie ma uprawnień do przesyłania. Sprawdź uprawnienia aplikacji w ustawieniach i spróbuj ponownie.';
+
+  @override
+  String get publishErrorOutOfMemory =>
+      'Za mało pamięci operacyjnej urządzenia. Zamknij kilka aplikacji i spróbuj ponownie.';
+
+  @override
+  String get publishErrorUnknownServer => 'Nieznany serwer';
+
+  @override
   String searchFilterPillSemanticLabel(String filter) {
     return 'Filter: $filter';
   }

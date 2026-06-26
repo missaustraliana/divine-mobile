@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:blossom_upload_service/blossom_upload_service.dart';
 import 'package:equatable/equatable.dart';
+import 'package:meta/meta.dart';
 import 'package:openvine/constants/nip71_migration.dart';
 import 'package:openvine/models/divine_video_draft.dart';
 import 'package:openvine/models/pending_upload.dart';
@@ -17,6 +18,7 @@ import 'package:openvine/services/language_preference_service.dart';
 import 'package:openvine/services/mention_resolution_service.dart';
 import 'package:openvine/services/upload_manager.dart';
 import 'package:openvine/services/video_event_publisher.dart';
+import 'package:openvine/services/video_publish/publish_error_kind.dart';
 import 'package:openvine/utils/nostr_key_utils.dart';
 import 'package:openvine/utils/public_identifier_normalizer.dart';
 import 'package:unified_logger/unified_logger.dart';
@@ -40,12 +42,65 @@ class PublishSuccess extends PublishResult {
   List<Object?> get props => [inviteWarnings];
 }
 
+/// A failed publish, classified by [kind] so the UI can localize it.
+///
+/// [serverName] is the media-server host for the server-related kinds
+/// ([PublishErrorKind.serverNotFound] / [PublishErrorKind.serverInternalError]
+/// / [PublishErrorKind.serverDown]); null otherwise.
+///
+/// [rawFallback] carries an already-user-friendly upstream message (or a
+/// legacy persisted string) that the UI should render verbatim instead of
+/// mapping [kind] — used for the upload-manager passthrough and for drafts
+/// persisted before this type existed.
 class PublishError extends PublishResult {
-  const PublishError(this.userMessage);
-  final String userMessage;
+  const PublishError(this.kind, {this.serverName, this.rawFallback});
+
+  /// Decodes a value previously produced by [toPersistedString].
+  ///
+  /// Returns null only when [raw] is null/empty. A value written by an older
+  /// build (a plain English sentence) decodes to a generic error carrying that
+  /// sentence as [rawFallback], so historical drafts still render verbatim.
+  static PublishError? fromPersistedString(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    const prefix = 'pek1:';
+    if (raw.startsWith(prefix)) {
+      final parts = raw.substring(prefix.length).split(':');
+      final kind = _kindByName(parts.first);
+      if (kind == null) {
+        return PublishError(PublishErrorKind.generic, rawFallback: raw);
+      }
+      final serverName = parts.length > 1 ? parts.sublist(1).join(':') : null;
+      return PublishError(kind, serverName: serverName);
+    }
+    // Legacy (pre-#4892) sentence string — show as-is.
+    return PublishError(PublishErrorKind.generic, rawFallback: raw);
+  }
+
+  final PublishErrorKind kind;
+  final String? serverName;
+  final String? rawFallback;
+
+  /// Encodes this error for persistence in the draft's `publishError` column.
+  ///
+  /// A [rawFallback] is persisted verbatim (it is already user-friendly text).
+  /// Otherwise the stable [kind] (+ [serverName]) is encoded under a `pek1:`
+  /// sentinel so it survives a locale change and re-localizes on resume.
+  String? toPersistedString() {
+    final fallback = rawFallback;
+    if (fallback != null && fallback.isNotEmpty) return fallback;
+    final base = 'pek1:${kind.name}';
+    return serverName == null ? base : '$base:$serverName';
+  }
+
+  static PublishErrorKind? _kindByName(String name) {
+    for (final kind in PublishErrorKind.values) {
+      if (kind.name == name) return kind;
+    }
+    return null;
+  }
 
   @override
-  List<Object?> get props => [userMessage];
+  List<Object?> get props => [kind, serverName, rawFallback];
 }
 
 class CollaboratorInviteWarning extends Equatable {
@@ -151,8 +206,7 @@ class VideoPublishService {
           category: .video,
         );
         _backgroundUploadId = null;
-        // TODO(l10n): Replace with context.l10n when localization is added.
-        return const PublishError('Please sign in to publish videos.');
+        return const PublishError(PublishErrorKind.notSignedIn);
       }
       final pubkey = authService.currentPublicKeyHex!;
 
@@ -480,10 +534,7 @@ class VideoPublishService {
     // If failed, return error
     if (upload.status == .failed) {
       _backgroundUploadId = null; // Clear failed upload ID
-      final msg = await _getUserFriendlyErrorMessage(
-        upload.errorMessage ?? 'Upload failed',
-      );
-      return PublishError(msg);
+      return _publishErrorFor(upload.errorMessage ?? 'Upload failed');
     }
 
     // Wait for upload to complete
@@ -492,10 +543,7 @@ class VideoPublishService {
       if (!result) {
         final failedUpload = uploadManager.getUpload(_backgroundUploadId!);
         _backgroundUploadId = null; // Clear failed upload ID
-        final msg = await _getUserFriendlyErrorMessage(
-          failedUpload?.errorMessage ?? 'Upload failed',
-        );
-        return PublishError(msg);
+        return _publishErrorFor(failedUpload?.errorMessage ?? 'Upload failed');
       }
     }
 
@@ -578,8 +626,7 @@ class VideoPublishService {
       Log.warning('⚠️ No background upload to retry', category: .video);
 
       _backgroundUploadId = null; // Clear any stale upload ID
-      /// TODO(l10n): Replace with context.l10n when localization is added.
-      return const PublishError('No upload to retry.');
+      return const PublishError(PublishErrorKind.noRetry);
     }
 
     Log.info('🔄 Retrying upload: $_backgroundUploadId', category: .video);
@@ -615,11 +662,15 @@ class VideoPublishService {
     _backgroundUploadId = null;
     Log.error('📝 Publish failed: $e\n$stackTrace', category: .video);
 
-    // Save failed state to draft
+    final publishError = await _publishErrorFor(e);
+
+    // Save failed state to draft. Persist the classified kind (not the raw
+    // exception string) so an interrupted-draft resume re-localizes correctly
+    // and never surfaces a raw exception dump to the user.
     try {
       final failedDraft = draft.copyWith(
         publishStatus: .failed,
-        publishError: e.toString(),
+        publishError: publishError.toPersistedString(),
         publishAttempts: draft.publishAttempts + 1,
       );
       await draftService.saveDraft(failedDraft);
@@ -627,22 +678,42 @@ class VideoPublishService {
       Log.error('📝 Failed to save error state: $saveError', category: .video);
     }
 
-    final userMessage = await _getUserFriendlyErrorMessage(e);
-    return PublishError(userMessage);
+    return publishError;
   }
 
-  /// Converts technical error messages into user-friendly descriptions.
-  ///
-  /// If the error is already a user-friendly string (e.g. from the upload
-  /// manager), it is returned as-is instead of falling through to the
-  /// generic fallback.
-  Future<String> _getUserFriendlyErrorMessage(Object? e) async {
-    final raw = e.toString();
-    final errorString = raw.toLowerCase();
+  /// Classifies [e] and builds the corresponding [PublishError].
+  Future<PublishError> _publishErrorFor(Object? e) async {
+    final classified = await _classifyError(e);
+    return PublishError(
+      classified.kind,
+      serverName: classified.serverName,
+      rawFallback: classified.rawFallback,
+    );
+  }
 
-    // Errors from the upload manager may already be user-friendly strings.
-    // Detect them by stripping any "Exception: " prefix and checking
-    // whether the remainder looks like a sentence, not a class/stack dump.
+  /// Classifies a technical error into a stable [PublishErrorKind] (plus a
+  /// `serverName` for the server-related kinds) so the UI can localize it.
+  ///
+  /// Known categories — including the upload manager's already-rendered
+  /// English sentences — are mapped to a kind first, so a persisted failure
+  /// re-localizes in the reader's locale on resume. `rawFallback` is reserved
+  /// for genuinely unknown/legacy upstream text (a user-friendly sentence we
+  /// don't recognize), which the UI renders verbatim.
+  Future<({PublishErrorKind kind, String? serverName, String? rawFallback})>
+  _classifyError(Object? e) async {
+    final raw = e.toString();
+
+    final matched = classifyPublishErrorMessage(raw);
+    if (matched != null) {
+      final serverName = _serverNameKinds.contains(matched)
+          ? await _resolveServerName()
+          : null;
+      return (kind: matched, serverName: serverName, rawFallback: null);
+    }
+
+    // No known category matched. Reserve `rawFallback` for genuinely
+    // user-friendly upstream text (a sentence, not a class/stack dump) so an
+    // unrecognized message still renders verbatim instead of a generic line.
     final stripped = raw.replaceFirst(RegExp(r'^Exception:\s*'), '');
     if (stripped != raw || e is String) {
       final clean = (e is String ? raw : stripped).trim();
@@ -650,35 +721,75 @@ class VideoPublishService {
           clean.contains('.') &&
           !clean.contains('Exception') &&
           !clean.contains('#0 ')) {
-        return clean;
+        return (
+          kind: PublishErrorKind.generic,
+          serverName: null,
+          rawFallback: clean,
+        );
       }
     }
-    var serverName = 'Unknown server';
 
+    return (
+      kind: PublishErrorKind.generic,
+      serverName: null,
+      rawFallback: null,
+    );
+  }
+
+  /// Kinds that interpolate the media-server host into their localized copy.
+  static const Set<PublishErrorKind> _serverNameKinds = {
+    PublishErrorKind.serverNotFound,
+    PublishErrorKind.serverInternalError,
+    PublishErrorKind.serverDown,
+  };
+
+  /// Resolves the current media-server host for the server-related kinds.
+  Future<String?> _resolveServerName() async {
     try {
       final serverUrl = await blossomService.getBlossomServer();
       if (serverUrl != null && serverUrl.isNotEmpty) {
-        serverName = Uri.tryParse(serverUrl)?.host ?? serverUrl;
+        return Uri.tryParse(serverUrl)?.host ?? serverUrl;
       }
     } catch (_) {}
+    return null;
+  }
 
-    /// TODO(l10n): Replace with context.l10n when localization is added.
+  /// Maps a technical error string to a stable [PublishErrorKind], or null
+  /// when no known category matches.
+  ///
+  /// Handles both raw exception text and the upload manager's already-rendered
+  /// user-friendly sentences (e.g. "No internet connection. …"), so a failure
+  /// surfaced through [UploadManager] re-localizes instead of being passed
+  /// through as English `rawFallback`.
+  ///
+  /// The upload-manager sentence substrings must stay in sync with
+  /// [UploadManager.getUserFriendlyErrorMessage]; the drift guard in
+  /// `video_publish_service_test.dart` fails loudly if that copy changes.
+  @visibleForTesting
+  static PublishErrorKind? classifyPublishErrorMessage(String error) {
+    final errorString = error.toLowerCase();
+
     // Network / connectivity
     if (errorString.contains('socketexception') ||
         errorString.contains('network is unreachable') ||
         errorString.contains('no address associated') ||
-        errorString.contains('failed host lookup')) {
-      return 'No internet connection. '
-          'Check your Wi-Fi or mobile data and try again.';
+        errorString.contains('failed host lookup') ||
+        errorString.contains('no internet connection')) {
+      return PublishErrorKind.noInternet;
     }
     if (errorString.contains('connection refused') ||
         errorString.contains('connection reset') ||
-        errorString.contains('connection closed')) {
-      return 'Could not reach the server. Please try again in a moment.';
+        errorString.contains('connection closed') ||
+        errorString.contains('network error') ||
+        errorString.contains('could not reach')) {
+      return PublishErrorKind.serverUnreachable;
+    }
+    if (errorString.contains('session expired') ||
+        errorString.contains('session is no longer available')) {
+      return PublishErrorKind.uploadSessionExpired;
     }
     if (errorString.contains('timeout') || errorString.contains('timed out')) {
-      return 'The upload timed out. '
-          'Try a stronger connection or a smaller video.';
+      return PublishErrorKind.timeout;
     }
 
     // TLS / certificate
@@ -686,70 +797,86 @@ class VideoPublishService {
         errorString.contains('handshake') ||
         errorString.contains('ssl') ||
         errorString.contains('tls')) {
-      return 'Secure connection failed. '
-          'Check your network — public Wi-Fi can block uploads.';
+      return PublishErrorKind.tls;
     }
 
     // Server errors
     if (errorString.contains('404') || errorString.contains('not_found')) {
-      return 'The media server ($serverName) is not available. '
-          'You can choose another in your settings.';
+      return PublishErrorKind.serverNotFound;
     }
     if (errorString.contains('413') ||
         errorString.contains('payload too large') ||
         errorString.contains('too large')) {
-      return 'The video file is too large for the server. '
-          'Try trimming it or lowering the quality.';
+      return PublishErrorKind.fileTooLarge;
+    }
+    if (errorString.contains('429') ||
+        errorString.contains('too many uploads') ||
+        errorString.contains('rate limit')) {
+      return PublishErrorKind.rateLimited;
     }
     if (errorString.contains('500') ||
-        errorString.contains('internal server error')) {
-      return 'The media server ($serverName) had an internal error. '
-          'You can choose another in your settings.';
+        errorString.contains('internal server error') ||
+        errorString.contains('server encountered an error')) {
+      return PublishErrorKind.serverInternalError;
     }
     if (errorString.contains('502') ||
         errorString.contains('503') ||
         errorString.contains('bad gateway') ||
-        errorString.contains('service unavailable')) {
-      return 'The media server ($serverName) is temporarily down. '
-          'Try again shortly or choose another in your settings.';
+        errorString.contains('service unavailable') ||
+        errorString.contains('temporarily unavailable')) {
+      return PublishErrorKind.serverDown;
     }
 
-    // Auth
+    // Auth / permissions
     if (errorString.contains('not authenticated') ||
         errorString.contains('unauthorized') ||
+        errorString.contains('authentication failed') ||
         errorString.contains('401')) {
-      return 'Please sign in to publish videos.';
+      return PublishErrorKind.notSignedIn;
     }
     if (errorString.contains('403') || errorString.contains('forbidden')) {
-      return 'You don\u2019t have permission to upload to this server.';
+      return PublishErrorKind.forbidden;
+    }
+    if (errorString.contains('permission denied') ||
+        errorString.contains('permission_denied')) {
+      return PublishErrorKind.permissionDenied;
     }
 
-    // Local file issues
+    // Local file / device resources
     if (errorString.contains('no such file') ||
         errorString.contains('file not found') ||
         errorString.contains('pathnotfoundexception')) {
-      return 'The video file could not be found. '
-          'It may have been deleted. Re-record and try again.';
+      return PublishErrorKind.fileNotFound;
     }
     if (errorString.contains('storage') ||
         errorString.contains('no space') ||
         errorString.contains('disk full')) {
-      return 'Not enough storage on your device. '
-          'Free up some space and try again.';
+      return PublishErrorKind.lowStorage;
+    }
+    if (errorString.contains('not enough memory') ||
+        errorString.contains('out of memory') ||
+        errorString.contains('outofmemory')) {
+      return PublishErrorKind.outOfMemory;
     }
 
     if (errorString.contains('thumbnail upload failed')) {
-      return 'The video uploaded, but the thumbnail could not be prepared. Please try again.';
+      return PublishErrorKind.thumbnailFailed;
     }
 
     // Nostr event publish
     if (errorString.contains('failed to publish nostr event') ||
         errorString.contains('relay')) {
-      return 'The video uploaded but the post could not be published. '
-          'Check your relay settings and try again.';
+      return PublishErrorKind.nostrPublishFailed;
     }
 
-    return 'Something went wrong. Please try again.';
+    // Upload-manager generic fallbacks (CLIENT_ERROR / default UNKNOWN) —
+    // localize as generic rather than passing the English sentence through.
+    if (errorString.contains('upload request failed') ||
+        errorString.contains('upload failed. please check')) {
+      return PublishErrorKind.generic;
+    }
+
+    return null;
   }
 }
 

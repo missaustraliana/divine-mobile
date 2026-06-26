@@ -6740,6 +6740,95 @@ class AppLocalizationsFil extends AppLocalizations {
   String get proofmodePublishedByLabel => 'Published by:';
 
   @override
+  String get publishErrorNotSignedIn =>
+      'Mag-sign in muna para makapag-publish ng video.';
+
+  @override
+  String get publishErrorNoRetry => 'Walang upload na puwedeng subukan ulit.';
+
+  @override
+  String get publishErrorNoInternet =>
+      'Walang internet connection. Tingnan ang iyong Wi-Fi o mobile data at subukan ulit.';
+
+  @override
+  String get publishErrorServerUnreachable =>
+      'Hindi maabot ang server. Pakisubukan ulit mamaya.';
+
+  @override
+  String get publishErrorTimeout =>
+      'Nag-timeout ang upload. Subukan ang mas malakas na koneksyon o mas maliit na video.';
+
+  @override
+  String get publishErrorTls =>
+      'Nabigo ang secure connection. Tingnan ang iyong network — puwedeng harangan ng public Wi-Fi ang mga upload.';
+
+  @override
+  String publishErrorServerNotFound(String serverName) {
+    return 'Hindi available ang media server ($serverName). Puwede kang pumili ng iba sa iyong settings.';
+  }
+
+  @override
+  String get publishErrorFileTooLarge =>
+      'Masyadong malaki ang video file para sa server. Subukang i-trim ito o babaan ang quality.';
+
+  @override
+  String publishErrorServerInternalError(String serverName) {
+    return 'Nagka-internal error ang media server ($serverName). Puwede kang pumili ng iba sa iyong settings.';
+  }
+
+  @override
+  String publishErrorServerDown(String serverName) {
+    return 'Pansamantalang down ang media server ($serverName). Subukan ulit saglit o pumili ng iba sa iyong settings.';
+  }
+
+  @override
+  String get publishErrorForbidden =>
+      'Wala kang permission para mag-upload sa server na ito.';
+
+  @override
+  String get publishErrorFileNotFound =>
+      'Hindi makita ang video file. Baka na-delete na ito. Mag-record ulit at subukan muli.';
+
+  @override
+  String get publishErrorLowStorage =>
+      'Kulang ang storage sa device mo. Magbakante ng espasyo at subukan ulit.';
+
+  @override
+  String get publishErrorThumbnailFailed =>
+      'Na-upload ang video, pero hindi naihanda ang thumbnail. Pakisubukan ulit.';
+
+  @override
+  String get publishErrorNostrPublishFailed =>
+      'Na-upload ang video pero hindi na-publish ang post. Tingnan ang iyong relay settings at subukan ulit.';
+
+  @override
+  String get publishErrorInterrupted =>
+      'Naputol ang upload na ito. Gusto mo bang subukan ulit?';
+
+  @override
+  String get publishErrorGeneric =>
+      'May nangyaring problema. Pakisubukan ulit.';
+
+  @override
+  String get publishErrorRateLimited =>
+      'Masyadong maraming upload ngayon. Maghintay sandali at subukan ulit.';
+
+  @override
+  String get publishErrorUploadSessionExpired =>
+      'Nag-expire ang iyong upload session. Pakisubukan ulit.';
+
+  @override
+  String get publishErrorPermissionDenied =>
+      'Walang permission ang Divine para mag-upload. Tingnan ang app permissions sa iyong settings at subukan ulit.';
+
+  @override
+  String get publishErrorOutOfMemory =>
+      'Kulang ang memory sa device mo. Magsara ng ilang app at subukan ulit.';
+
+  @override
+  String get publishErrorUnknownServer => 'Hindi kilalang server';
+
+  @override
   String searchFilterPillSemanticLabel(String filter) {
     return 'Filter: $filter';
   }
