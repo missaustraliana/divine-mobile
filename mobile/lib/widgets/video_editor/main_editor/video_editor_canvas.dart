@@ -30,6 +30,7 @@ import 'package:openvine/providers/video_editor_provider.dart';
 import 'package:openvine/screens/video_metadata/video_metadata_screen.dart';
 import 'package:openvine/services/haptic_service.dart';
 import 'package:openvine/services/video_editor/transition_seam_render_service.dart';
+import 'package:openvine/utils/await_push_transition.dart';
 import 'package:openvine/utils/path_resolver.dart';
 import 'package:openvine/widgets/branded_loading_indicator.dart';
 import 'package:openvine/widgets/video_editor/main_editor/video_editor_feed_preview_overlay.dart';
@@ -180,6 +181,14 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
   DivineVideoPlayerController? _videoPlayer;
   StreamSubscription<DivineVideoPlayerState>? _videoPlayerSubscription;
 
+  /// Completed by [_handleDone] once the preview decoder has been released, so
+  /// [_handleEditorComplete] can hold the export encoder back until then — the
+  /// two must never contend for the device's scarce hardware codecs (see
+  /// #5522). pro_image_editor invokes `onDone` before `onCompleteWithParameters`,
+  /// so this is always created (in [_handleDone]) before it is awaited.
+  Completer<void>? _decoderReleaseGate;
+  bool _isMetadataRouteActive = false;
+
   bool _isInitialized = false;
   bool _isImportingHistory = false;
 
@@ -326,6 +335,9 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
     _playheadTicker?.dispose();
     _videoPlayerSubscription?.cancel();
     _videoPlayer?.dispose();
+    // Null it so a release/init still awaiting bails instead of double-disposing
+    // or writing to the disposed notifier below.
+    _videoPlayer = null;
     _isPlayerReadyNotifier.dispose();
     _seamService.clear();
     _pendingSeamRenders.dispose();
@@ -822,7 +834,7 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
     // Dispose old player if it exists.
     await _videoPlayerSubscription?.cancel();
     await _videoPlayer?.dispose();
-    _isPlayerReadyNotifier.value = false;
+    if (mounted) _isPlayerReadyNotifier.value = false;
 
     final clips = ref.read(clipManagerProvider).clips;
 
@@ -832,11 +844,16 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
       category: LogCategory.video,
     );
 
-    _videoPlayer = DivineVideoPlayerController(useTexture: true);
+    // Hold the controller locally and re-check identity after every await: a
+    // fast Done-tap (release) or a newer init can replace/null `_videoPlayer`
+    // mid-flight. Whoever supersedes us owns disposing this controller, so we
+    // just abandon it rather than resurrecting a released player.
+    final player = DivineVideoPlayerController(useTexture: true);
+    _videoPlayer = player;
 
-    await _videoPlayer!.initialize();
-    if (!mounted) return;
-    await _videoPlayer!.setClips(
+    await player.initialize();
+    if (!mounted || !identical(_videoPlayer, player)) return;
+    await player.setClips(
       [
         ...buildSeamAwarePlayerClips(clips, _seamService),
       ],
@@ -844,24 +861,20 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
           ? _timelineToPlayer(startPosition)
           : null,
     );
-    if (!mounted) return;
+    if (!mounted || !identical(_videoPlayer, player)) return;
 
     if (clips.isEmpty) return;
     _ensureSeamsRendered(clips);
-    await _videoPlayer!.setLooping(looping: true);
-    if (!mounted) return;
+    await player.setLooping(looping: true);
+    if (!mounted || !identical(_videoPlayer, player)) return;
 
     _isPlayerReadyNotifier.value = true;
 
     // Notify BLoC that player is ready
-    if (mounted) {
-      context.read<VideoEditorMainBloc>().add(const VideoEditorPlayerReady());
-    }
+    context.read<VideoEditorMainBloc>().add(const VideoEditorPlayerReady());
 
     // Setup state stream listener
-    _videoPlayerSubscription = _videoPlayer!.stateStream.listen(
-      _onPlayerStateChanged,
-    );
+    _videoPlayerSubscription = player.stateStream.listen(_onPlayerStateChanged);
 
     // Initialize audio if selected
     await _syncAudioTracks();
@@ -870,6 +883,32 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
       name: 'VideoEditorCanvas',
       category: LogCategory.video,
     );
+  }
+
+  /// Tears down the native preview player so a codec-heavy export can claim the
+  /// device's scarce hardware codecs.
+  ///
+  /// The exporter encodes via `ProVideoEditor` (MediaCodec / AVFoundation); on
+  /// codec-limited devices a still-alive — even paused — preview decoder
+  /// contends with it (the encoder `RENDER_ERROR` class #5522 released the
+  /// background feed for, one layer up). `_videoPlayer` is nulled before the
+  /// dispose so the canvas drops to its thumbnail placeholder, and the player
+  /// is rebuilt via [_initializePlayer] when the editor regains focus.
+  Future<void> _releasePlayer() async {
+    final player = _videoPlayer;
+    if (player == null) return;
+    // Claim ownership immediately so a concurrent init / dispose sees null and
+    // bails instead of racing us on the same controller.
+    _videoPlayer = null;
+    await _videoPlayerSubscription?.cancel();
+    _videoPlayerSubscription = null;
+    // The wait before this can outlive the widget (dispose() disposes the
+    // notifier/ticker); only touch them while still mounted.
+    if (mounted) {
+      _setPlayheadTickerActive(false);
+      _isPlayerReadyNotifier.value = false;
+    }
+    await player.dispose();
   }
 
   /// Syncs native audio overlay tracks from the [TimelineOverlayBloc]
@@ -1116,14 +1155,27 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
       }
     }
     notifier.updateEditorEditingParameters(parameters);
+    // Hold the export encoder back until [_handleDone] has released the preview
+    // decoder (after the metadata screen covers the editor), so the two never
+    // contend for the device's scarce hardware codecs (see #5522). The gate is
+    // created by [_handleDone], which always runs first.
+    await (_decoderReleaseGate?.future ?? Future<void>.value());
+    if (!_isMetadataRouteActive) {
+      notifier.setProcessing(false);
+      return;
+    }
     notifier.startRenderVideo();
   }
 
   /// Handles the done action from the main editor.
   ///
-  /// Pauses video, marks processing state, navigates to metadata screen,
-  /// and resumes video when returning only if it was playing before.
-  /// Audio sync handled by listener.
+  /// Navigates to the metadata screen and, once it has finished covering the
+  /// editor ([awaitPushTransition]), releases the preview decoder off-screen and
+  /// opens [_decoderReleaseGate] so [_handleEditorComplete] only then starts the
+  /// export encoder — the two must never contend (see #5522). Rebuilds the
+  /// player at the same position on return, resuming playback only if it was
+  /// playing before. Mirrors `openVideoEditorFromRecorder`; audio sync handled
+  /// by listener.
   Future<void> _handleDone() async {
     Log.info(
       '🎬 Done pressed - navigating to metadata screen',
@@ -1131,13 +1183,43 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
       category: LogCategory.video,
     );
     final wasPlaying = _videoPlayer?.state.isPlaying ?? false;
-    _videoPlayer?.pause();
-    // IMPORTANT: Don't start video rendering here. We must await
-    // `_handleEditorComplete` which generate the layer image before we start
-    // rendering! However, we can navigate to the metadata screen immediately
-    // since it shows a progress spinner anyway (~200ms task).
+    final resumePosition = context
+        .read<VideoEditorMainBloc>()
+        .state
+        .currentPosition;
     ref.read(videoEditorProvider.notifier).setProcessing(true);
-    await context.push(VideoMetadataScreen.path);
+
+    // Delegate the cover-transition wait to the screen: its context sits above
+    // this canvas's nested `Navigator`, so the editor route's secondaryAnimation
+    // is actually driven by the push (the canvas context resolves to the inner
+    // route, which the outer push never animates). Falls back to the canvas
+    // context — timeout-bounded — when the scope didn't provide it.
+    final awaitCover = VideoEditorScope.of(context).awaitPushCoverTransition;
+    final gate = _decoderReleaseGate = Completer<void>();
+    _isMetadataRouteActive = true;
+    final navigation = context.push(VideoMetadataScreen.path);
+    try {
+      await (awaitCover?.call() ??
+          awaitPushTransition(
+            context,
+            timeout: VideoEditorConstants.coverTransitionTimeout,
+          ));
+      await _releasePlayer();
+    } finally {
+      // Always open the gate so the render can never wedge, even if the release
+      // throws.
+      if (!gate.isCompleted) gate.complete();
+    }
+
+    try {
+      await navigation;
+    } finally {
+      _isMetadataRouteActive = false;
+    }
+    if (!mounted || _clipPaths.isEmpty) return;
+    await ref.read(videoEditorProvider.notifier).waitForRenderIdle();
+    if (!mounted || _clipPaths.isEmpty) return;
+    await _initializePlayer(_clipPaths, startPosition: resumePosition);
     if (mounted && wasPlaying) {
       _videoPlayer?.play();
     }
