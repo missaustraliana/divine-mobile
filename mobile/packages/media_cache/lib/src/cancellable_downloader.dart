@@ -149,6 +149,11 @@ class _HttpDownload implements CancellableDownload {
         return;
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        Log.warning(
+          'CancellableDownload: $_url returned HTTP ${response.statusCode}',
+          name: 'MediaCache',
+          category: LogCategory.video,
+        );
         unawaited(response.stream.drain<void>());
         _safeComplete(null);
         return;
@@ -168,7 +173,16 @@ class _HttpDownload implements CancellableDownload {
             // Sink errors surface in onError.
           }
         },
-        onError: (Object _) async {
+        onError: (Object error) async {
+          // A stream error that races with our own cancel() is expected
+          // teardown, not a download failure — only warn for real errors.
+          if (!_isCancelled) {
+            Log.warning(
+              'CancellableDownload: stream error for $_url: $error',
+              name: 'MediaCache',
+              category: LogCategory.video,
+            );
+          }
           await _cleanupPartial();
           _safeComplete(null);
         },
@@ -194,7 +208,17 @@ class _HttpDownload implements CancellableDownload {
         },
         cancelOnError: true,
       );
-    } on Object {
+    } on Object catch (error) {
+      // cancel() fires the abort trigger, so a pending request surfaces here
+      // as RequestAbortedException — that is intentional teardown, not a
+      // failure, and must not pollute bug-report logs with false warnings.
+      if (!_isCancelled) {
+        Log.warning(
+          'CancellableDownload: request failed for $_url: $error',
+          name: 'MediaCache',
+          category: LogCategory.video,
+        );
+      }
       await _cleanupPartial();
       _safeComplete(null);
     }
