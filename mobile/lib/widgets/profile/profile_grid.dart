@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:models/models.dart';
+import 'package:openvine/blocs/my_profile/my_profile_bloc.dart';
 import 'package:openvine/blocs/others_followers/others_followers_bloc.dart';
 import 'package:openvine/blocs/profile_collab_videos/profile_collab_videos_bloc.dart';
 import 'package:openvine/blocs/profile_comments/profile_comments_bloc.dart';
@@ -286,24 +287,107 @@ class _ProfileGridViewState extends ConsumerState<ProfileGridView>
   }
 
   void _onRefreshRequested() {
+    unawaited(_refreshSyncedTabs());
+  }
+
+  Future<void> _refreshSyncedTabs() async {
     // Re-dispatch sync only for tabs that have been viewed (lazy load still
     // applies).
+    final refreshes = <Future<void>>[];
     for (final kind in _syncedKinds) {
       switch (kind) {
         case ProfileTabKind.videos:
           break;
         case ProfileTabKind.collabs:
-          _collabVideosBloc?.add(const ProfileCollabVideosFetchRequested());
+          final bloc = _collabVideosBloc;
+          if (bloc == null) break;
+          bloc.add(const ProfileCollabVideosFetchRequested());
+          refreshes.add(
+            bloc.stream.firstWhere(
+              (state) =>
+                  !state.isRefreshing &&
+                  state.status != ProfileCollabVideosStatus.loading,
+              orElse: () => bloc.state,
+            ),
+          );
         case ProfileTabKind.liked:
-          _likedVideosBloc?.add(const ProfileLikedVideosSyncRequested());
+          final bloc = _likedVideosBloc;
+          if (bloc == null) break;
+          bloc.add(const ProfileLikedVideosSyncRequested());
+          refreshes.add(
+            bloc.stream.firstWhere(
+              (state) =>
+                  !state.isRefreshing &&
+                  state.status != ProfileLikedVideosStatus.syncing &&
+                  state.status != ProfileLikedVideosStatus.loading,
+              orElse: () => bloc.state,
+            ),
+          );
         case ProfileTabKind.reposts:
-          _repostedVideosBloc?.add(const ProfileRepostedVideosSyncRequested());
+          final bloc = _repostedVideosBloc;
+          if (bloc == null) break;
+          bloc.add(const ProfileRepostedVideosSyncRequested());
+          refreshes.add(
+            bloc.stream.firstWhere(
+              (state) =>
+                  !state.isRefreshing &&
+                  state.status != ProfileRepostedVideosStatus.syncing &&
+                  state.status != ProfileRepostedVideosStatus.loading,
+              orElse: () => bloc.state,
+            ),
+          );
         case ProfileTabKind.saved:
-          _savedVideosBloc?.add(const ProfileSavedVideosSyncRequested());
+          final bloc = _savedVideosBloc;
+          if (bloc == null) break;
+          bloc.add(const ProfileSavedVideosSyncRequested());
+          refreshes.add(
+            bloc.stream.firstWhere(
+              (state) =>
+                  !state.isRefreshing &&
+                  state.status != ProfileSavedVideosStatus.syncing &&
+                  state.status != ProfileSavedVideosStatus.loading,
+              orElse: () => bloc.state,
+            ),
+          );
         case ProfileTabKind.comments:
-          _commentsBloc?.add(const ProfileCommentsSyncRequested());
+          final bloc = _commentsBloc;
+          if (bloc == null) break;
+          bloc.add(const ProfileCommentsSyncRequested());
+          refreshes.add(
+            bloc.stream.firstWhere(
+              (state) => state.status != ProfileCommentsStatus.loading,
+              orElse: () => bloc.state,
+            ),
+          );
       }
     }
+    await Future.wait(refreshes);
+  }
+
+  Future<void> _refreshProfileContent() async {
+    final profileRefresh = Completer<void>();
+
+    if (widget.isOwnProfile) {
+      try {
+        context.read<MyProfileBloc>().add(
+          MyProfileRefreshRequested(completer: profileRefresh),
+        );
+      } on ProviderNotFoundException {
+        profileRefresh.complete();
+      }
+    } else {
+      profileRefresh.complete();
+    }
+
+    final profileFeedCubit = context.read<ProfileFeedCubit>();
+    profileFeedCubit.add(const ProfileFeedRefreshRequested());
+    final feedRefresh = profileFeedCubit.stream.firstWhere(
+      (state) => !state.isRefreshing && !state.isFetchingTotalCount,
+      orElse: () => profileFeedCubit.state,
+    );
+    final tabRefresh = _refreshSyncedTabs();
+
+    await Future.wait([profileRefresh.future, feedRefresh, tabRefresh]);
   }
 
   @override
@@ -545,58 +629,68 @@ class _ProfileGridViewState extends ConsumerState<ProfileGridView>
       ),
     );
 
-    final content = ClipRRect(
-      borderRadius: const .vertical(bottom: .circular(30)),
-      child: ColoredBox(
-        color: VineTheme.surfaceBackground,
-        child: DefaultTabController(
-          length: _tabKinds.length,
-          child: NestedScrollView(
-            controller: widget.scrollController,
-            physics: const ClampingScrollPhysics(),
-            headerSliverBuilder: (context, innerBoxIsScrolled) => [
-              // Profile Header (GlobalKey for measuring height)
-              SliverToBoxAdapter(
-                child: Stack(
-                  children: [
-                    ProfileBannerLayer(
-                      userIdHex: widget.userIdHex,
-                      isOwnProfile: widget.isOwnProfile,
-                      profile: widget.profile,
-                    ),
-                    ProfileHeaderWidget(
-                      key: _headerKey,
-                      userIdHex: widget.userIdHex,
-                      isOwnProfile: widget.isOwnProfile,
-                      videoCount: widget.videos.length,
-                      profile: widget.profile,
-                      profileStats: widget.profileStats,
-                      onEditProfile: widget.onEditProfile,
-                      onBack: widget.onBack,
-                      onMore: widget.onMore,
-                      displayNameHint: widget.displayNameHint,
-                      avatarUrlHint: widget.avatarUrlHint,
-                      displayName: widget.displayName,
-                      onOpenClips: widget.onOpenClips,
-                      onMessageUser: widget.onMessageUser,
-                      onShareProfile: widget.onShareProfile,
-                      onBlockedTap: widget.onBlockedTap,
-                    ),
-                  ],
+    final content = RefreshIndicator(
+      color: VineTheme.primary,
+      backgroundColor: VineTheme.surfaceContainer,
+      notificationPredicate: (_) => true,
+      onRefresh: _refreshProfileContent,
+      child: ClipRRect(
+        borderRadius: const .vertical(bottom: .circular(30)),
+        child: ColoredBox(
+          color: VineTheme.surfaceBackground,
+          child: DefaultTabController(
+            length: _tabKinds.length,
+            child: NestedScrollView(
+              controller: widget.scrollController,
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: ClampingScrollPhysics(),
+              ),
+              headerSliverBuilder: (context, innerBoxIsScrolled) => [
+                // Profile Header (GlobalKey for measuring height)
+                SliverToBoxAdapter(
+                  child: Stack(
+                    children: [
+                      ProfileBannerLayer(
+                        userIdHex: widget.userIdHex,
+                        isOwnProfile: widget.isOwnProfile,
+                        profile: widget.profile,
+                      ),
+                      ProfileHeaderWidget(
+                        key: _headerKey,
+                        userIdHex: widget.userIdHex,
+                        isOwnProfile: widget.isOwnProfile,
+                        videoCount: widget.videos.length,
+                        profile: widget.profile,
+                        profileStats: widget.profileStats,
+                        onEditProfile: widget.onEditProfile,
+                        onBack: widget.onBack,
+                        onMore: widget.onMore,
+                        displayNameHint: widget.displayNameHint,
+                        avatarUrlHint: widget.avatarUrlHint,
+                        displayName: widget.displayName,
+                        onOpenClips: widget.onOpenClips,
+                        onMessageUser: widget.onMessageUser,
+                        onShareProfile: widget.onShareProfile,
+                        onBlockedTap: widget.onBlockedTap,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
 
-              // Sticky Tab Bar
-              ProfileTabBar(
-                controller: _tabController,
-                scrollController: widget.scrollController,
-                tabs: [for (final kind in _tabKinds) _tabPresentationFor(kind)],
-                headerKey: _headerKey,
-                // Sticky cache-revalidation bar for the active cached tab.
-                isRefreshing: _activeTabRefreshing(videosRefreshing),
-              ),
-            ],
-            body: tabContent,
+                // Sticky Tab Bar
+                ProfileTabBar(
+                  controller: _tabController,
+                  scrollController: widget.scrollController,
+                  tabs: [
+                    for (final kind in _tabKinds) _tabPresentationFor(kind),
+                  ],
+                  headerKey: _headerKey,
+                  // Sticky cache-revalidation bar for the active cached tab.
+                  isRefreshing: _activeTabRefreshing(videosRefreshing),
+                ),
+              ],
+              body: tabContent,
+            ),
           ),
         ),
       ),

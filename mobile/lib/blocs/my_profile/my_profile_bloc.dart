@@ -27,6 +27,10 @@ class MyProfileBloc extends Bloc<MyProfileEvent, MyProfileState> {
       transformer: restartable(),
     );
     on<MyProfileFetchRequested>(_onFetchRequested);
+    on<MyProfileRefreshRequested>(
+      _onRefreshRequested,
+      transformer: sequential(),
+    );
     on<VerifiedClaimsRequested>(_onVerifiedClaimsRequested);
   }
 
@@ -50,6 +54,7 @@ class MyProfileBloc extends Bloc<MyProfileEvent, MyProfileState> {
         profile: cachedProfile,
         extractedUsername: cachedProfile?.divineUsername,
         externalNip05: cachedProfile?.externalNip05,
+        verifiedClaims: _claimsFromState(state),
       ),
     );
 
@@ -133,7 +138,14 @@ class MyProfileBloc extends Bloc<MyProfileEvent, MyProfileState> {
             externalNip05: profile.externalNip05,
           );
         }
-        return const MyProfileLoading();
+        final currentProfile = _profileFromState(state);
+        if (currentProfile == null) return const MyProfileLoading();
+        return MyProfileLoading(
+          profile: currentProfile,
+          extractedUsername: currentProfile.divineUsername,
+          externalNip05: currentProfile.externalNip05,
+          verifiedClaims: _claimsFromState(state),
+        );
       },
       onError: (error, stackTrace) {
         addError(error, stackTrace);
@@ -150,6 +162,67 @@ class MyProfileBloc extends Bloc<MyProfileEvent, MyProfileState> {
       await _profileRepository.fetchFreshProfile(pubkey: pubkey);
     } on Exception catch (e, stackTrace) {
       addError(e, stackTrace);
+    }
+  }
+
+  Future<void> _onRefreshRequested(
+    MyProfileRefreshRequested event,
+    Emitter<MyProfileState> emit,
+  ) async {
+    final currentProfile = _profileFromState(state);
+    emit(
+      _loadingStateFor(currentProfile, verifiedClaims: _claimsFromState(state)),
+    );
+
+    try {
+      final freshProfile = await _profileRepository.fetchFreshProfile(
+        pubkey: pubkey,
+      );
+      if (isClosed) return;
+
+      final latestClaims = _claimsFromState(state);
+      if (freshProfile != null) {
+        emit(
+          _loadedStateFor(
+            freshProfile,
+            isFresh: true,
+            verifiedClaims: latestClaims,
+          ),
+        );
+        add(const VerifiedClaimsRequested());
+      } else if (_profileFromState(state) case final latestProfile?) {
+        emit(
+          _loadedStateFor(
+            latestProfile,
+            isFresh: false,
+            verifiedClaims: latestClaims,
+          ),
+        );
+        add(const VerifiedClaimsRequested());
+      } else {
+        emit(const MyProfileError(errorType: MyProfileErrorType.notFound));
+      }
+    } on Exception catch (e, stackTrace) {
+      addError(e, stackTrace);
+      if (isClosed) return;
+      final latestClaims = _claimsFromState(state);
+      if (_profileFromState(state) case final latestProfile?) {
+        emit(
+          _loadedStateFor(
+            latestProfile,
+            isFresh: false,
+            verifiedClaims: latestClaims,
+          ),
+        );
+        add(const VerifiedClaimsRequested());
+      } else {
+        emit(const MyProfileError(errorType: MyProfileErrorType.networkError));
+      }
+    } finally {
+      final completer = event.completer;
+      if (completer != null && !completer.isCompleted) {
+        completer.complete();
+      }
     }
   }
 
@@ -201,4 +274,49 @@ class MyProfileBloc extends Bloc<MyProfileEvent, MyProfileState> {
       }
     }
   }
+
+  UserProfile? _profileFromState(MyProfileState state) {
+    final profile = switch (state) {
+      MyProfileLoaded(:final profile) => profile,
+      MyProfileUpdated(:final profile) => profile,
+      MyProfileLoading(:final profile) => profile,
+      _ => null,
+    };
+    return profile?.pubkey == pubkey ? profile : null;
+  }
+
+  List<IdentityClaim> _claimsFromState(MyProfileState state) {
+    final claims = switch (state) {
+      MyProfileLoaded(:final profile, :final verifiedClaims) =>
+        profile.pubkey == pubkey ? verifiedClaims : const <IdentityClaim>[],
+      MyProfileUpdated(:final profile, :final verifiedClaims) =>
+        profile.pubkey == pubkey ? verifiedClaims : const <IdentityClaim>[],
+      MyProfileLoading(:final profile, :final verifiedClaims) =>
+        profile?.pubkey == pubkey ? verifiedClaims : const <IdentityClaim>[],
+      _ => const <IdentityClaim>[],
+    };
+    return claims;
+  }
+
+  MyProfileLoading _loadingStateFor(
+    UserProfile? profile, {
+    List<IdentityClaim> verifiedClaims = const [],
+  }) => MyProfileLoading(
+    profile: profile,
+    extractedUsername: profile?.divineUsername,
+    externalNip05: profile?.externalNip05,
+    verifiedClaims: verifiedClaims,
+  );
+
+  MyProfileLoaded _loadedStateFor(
+    UserProfile profile, {
+    required bool isFresh,
+    List<IdentityClaim> verifiedClaims = const [],
+  }) => MyProfileLoaded(
+    profile: profile,
+    isFresh: isFresh,
+    extractedUsername: profile.divineUsername,
+    externalNip05: profile.externalNip05,
+    verifiedClaims: verifiedClaims,
+  );
 }
