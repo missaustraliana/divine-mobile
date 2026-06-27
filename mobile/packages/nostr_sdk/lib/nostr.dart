@@ -319,25 +319,34 @@ class Nostr {
   }) async {
     var eventBox = EventMemBox(sortAfterAdd: false);
     var completer = Completer<void>();
+    final subscriptionId = id ?? StringUtil.rndNameStr(16);
+    final deadline = DateTime.now().add(timeout);
 
-    final subscriptionId = await query(
-      filters,
-      id: id,
-      tempRelays: tempRelays,
-      relayTypes: relayTypes,
-      sendAfterAuth: sendAfterAuth,
-      (event) {
-        eventBox.add(event);
-      },
-      onComplete: () {
-        if (!completer.isCompleted) {
-          completer.complete();
-        }
-      },
-    );
+    Duration remainingTimeout() {
+      final remaining = deadline.difference(DateTime.now());
+      if (remaining.isNegative || remaining == Duration.zero) {
+        return Duration.zero;
+      }
+      return remaining;
+    }
 
     try {
-      await completer.future.timeout(timeout);
+      await query(
+        filters,
+        id: subscriptionId,
+        tempRelays: tempRelays,
+        relayTypes: relayTypes,
+        sendAfterAuth: sendAfterAuth,
+        (event) {
+          eventBox.add(event);
+        },
+        onComplete: () {
+          if (!completer.isCompleted) {
+            completer.complete();
+          }
+        },
+      ).timeout(remainingTimeout());
+      await completer.future.timeout(remainingTimeout());
     } on TimeoutException {
       unsubscribe(subscriptionId);
     }
