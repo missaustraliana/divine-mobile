@@ -4,7 +4,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:openvine/models/pending_upload.dart';
 import 'package:openvine/services/upload_initialization_helper.dart';
@@ -26,8 +26,24 @@ class PendingUploadStore {
   final String? currentNostrPubkey;
 
   Box<PendingUpload>? _box;
-  final List<PendingUpload> _pendingSaveQueue = [];
+
+  /// Deferred-save retry queue, keyed by [PendingUpload.id] so re-enqueuing the
+  /// same upload is idempotent (the queue can never hold the same upload twice).
+  final Map<String, PendingUpload> _pendingSaveQueue = {};
   Timer? _saveQueueTimer;
+
+  /// True while [_processSaveQueue] is draining; guards against a re-entrant
+  /// drain started by a retry timer firing mid-drain.
+  bool _isDraining = false;
+
+  /// Latched true by [disposeStore]; gates every queue mutation, timer-arm, and
+  /// box revival so a drain suspended on `await save()` at disposal cannot
+  /// repopulate the queue, schedule a retry that outlives the store, or reopen
+  /// the box via [ensureOpen]. Cleared only by [open] — the deliberate
+  /// re-initialization entrypoint, which is never reached from the drain's own
+  /// `save() -> ensureOpen()` path, so a storage recovery mid-drain can't
+  /// silently revive a disposed store.
+  bool _disposed = false;
 
   // ---------------------------------------------------------------------------
   // Status accessors
@@ -52,6 +68,10 @@ class PendingUploadStore {
   /// mirroring the original `initialize()` catch that nulled the box – before
   /// the error propagates to the manager's initialization error handler.
   Future<void> open() async {
+    // A fresh lifecycle: clear the disposed latch so a reused store can queue
+    // and retry again. open() is unreachable from the drain (which only calls
+    // ensureOpen), so clearing here can't revive a store mid-drain.
+    _disposed = false;
     try {
       _box = await UploadInitializationHelper.initializeUploadsBox(
         forceReinit: true,
@@ -64,6 +84,11 @@ class PendingUploadStore {
 
   /// Force-reopen the box (called from re-init-when-closed paths).
   Future<void> ensureOpen() async {
+    // Stay inert once disposed. A drain suspended on `await save()` resumes into
+    // this via save()'s slow path; reviving _box here would leave a disposed
+    // store with a live, open box (isReady → true while _disposed). open() — the
+    // deliberate re-init entrypoint — clears the latch and is the only revival.
+    if (_disposed) return;
     _box = await UploadInitializationHelper.initializeUploadsBox(
       forceReinit: true,
     );
@@ -74,9 +99,14 @@ class PendingUploadStore {
   /// Does NOT close the box – closing is Hive's responsibility and closing
   /// here causes "File closed" errors in tests that share the box instance.
   void disposeStore() {
+    // Latch disposed first: a drain may be suspended on `await save()` right
+    // now, and must see this the instant it resumes so it can't re-enqueue or
+    // re-arm a timer past disposal.
+    _disposed = true;
     _saveQueueTimer?.cancel();
     _saveQueueTimer = null;
     _pendingSaveQueue.clear();
+    _isDraining = false;
     // Null the reference so isReady → false without actually closing.
     _box = null;
   }
@@ -162,13 +192,18 @@ class PendingUploadStore {
   // ---------------------------------------------------------------------------
 
   void _queueUploadForLater(PendingUpload upload) {
+    // A disposed store must not requeue or re-arm a timer — this runs from the
+    // failure slow path of save(), which a zombie drain re-enters after
+    // disposeStore() nulls the box.
+    if (_disposed) return;
+
     Log.warning(
       'Queueing upload ${upload.id} for later save attempt',
       name: 'UploadManager',
       category: LogCategory.video,
     );
 
-    _pendingSaveQueue.add(upload);
+    _pendingSaveQueue[upload.id] = upload;
 
     // Schedule retry in 5 seconds.
     _saveQueueTimer?.cancel();
@@ -176,41 +211,78 @@ class PendingUploadStore {
   }
 
   Future<void> _processSaveQueue() async {
+    // A disposed store never drains — defends the @visibleForTesting drain hook
+    // and any retry that races disposal.
+    if (_disposed) return;
+    // A retry timer can fire while a drain is still awaiting save() (which can
+    // take seconds during a storage outage). Don't start a second drain.
+    if (_isDraining) return;
     if (_pendingSaveQueue.isEmpty) return;
 
-    Log.info(
-      'Processing ${_pendingSaveQueue.length} queued uploads',
-      name: 'UploadManager',
-      category: LogCategory.video,
-    );
+    _isDraining = true;
+    try {
+      Log.info(
+        'Processing ${_pendingSaveQueue.length} queued uploads',
+        name: 'UploadManager',
+        category: LogCategory.video,
+      );
 
-    final queue = List<PendingUpload>.from(_pendingSaveQueue);
-    _pendingSaveQueue.clear();
+      final queue = _pendingSaveQueue.values.toList();
+      _pendingSaveQueue.clear();
 
-    for (final upload in queue) {
-      try {
-        await save(upload);
-        Log.info(
-          'Successfully saved queued upload: ${upload.id}',
-          name: 'UploadManager',
-          category: LogCategory.video,
-        );
-      } catch (e) {
-        Log.error(
-          'Failed to save queued upload ${upload.id}: $e',
-          name: 'UploadManager',
-          category: LogCategory.video,
-        );
-        // Re-queue for another attempt.
-        _pendingSaveQueue.add(upload);
+      for (final upload in queue) {
+        try {
+          await save(upload);
+          Log.info(
+            'Successfully saved queued upload: ${upload.id}',
+            name: 'UploadManager',
+            category: LogCategory.video,
+          );
+        } catch (e) {
+          Log.error(
+            'Failed to save queued upload ${upload.id}: $e',
+            name: 'UploadManager',
+            category: LogCategory.video,
+          );
+          // Re-queue for another attempt. Keyed by id, so this is idempotent
+          // with save()'s own _queueUploadForLater enqueue of the same upload.
+          // Skip once disposed so a drain that resumes after disposeStore()
+          // leaves the queue empty.
+          if (!_disposed) _pendingSaveQueue[upload.id] = upload;
+        }
       }
+    } finally {
+      _isDraining = false;
     }
 
-    // If items remain, schedule a further retry in 30 seconds.
-    if (_pendingSaveQueue.isNotEmpty) {
+    // If items remain, schedule a further retry in 30 seconds. Cancel first so
+    // the 5 s timer set during this drain (via _queueUploadForLater) can't leak.
+    // Never re-arm once disposed: a drain that resumed after disposeStore()
+    // must not schedule a retry that outlives the store.
+    if (!_disposed && _pendingSaveQueue.isNotEmpty) {
+      _saveQueueTimer?.cancel();
       _saveQueueTimer = Timer(const Duration(seconds: 30), _processSaveQueue);
     }
   }
+
+  /// Triggers the deferred-save drain. The drain is otherwise invoked only by
+  /// the internal retry timer; tests use this to exercise it deterministically.
+  @visibleForTesting
+  Future<void> drainPendingSaves() => _processSaveQueue();
+
+  /// True while a drain is in flight — test hook for the re-entrancy guard.
+  @visibleForTesting
+  bool get isDraining => _isDraining;
+
+  /// True once [disposeStore] has latched the store closed and before any
+  /// [open] revives it — test hook for the disposal latch.
+  @visibleForTesting
+  bool get isDisposed => _disposed;
+
+  /// True when a deferred-save retry timer is currently scheduled — test hook to
+  /// assert exactly one timer is live (no orphaned retry).
+  @visibleForTesting
+  bool get hasScheduledRetry => _saveQueueTimer?.isActive ?? false;
 
   // ---------------------------------------------------------------------------
   // Query helpers
