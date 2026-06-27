@@ -34,13 +34,15 @@ class _MockVideoRecorderBloc
 class _FakeVideoEditorNotifier extends VideoEditorNotifier {
   bool saveAsDraftCalled = false;
   bool startRenderVideoCalled = false;
-  bool saveResult = true;
+  DraftSaveOutcome saveResult = DraftSaveOutcome.saved;
 
   @override
   VideoEditorProviderState build() => VideoEditorProviderState();
 
   @override
-  Future<bool> saveAsDraft({bool enforceCreateNewDraft = false}) async {
+  Future<DraftSaveOutcome> saveAsDraft({
+    bool enforceCreateNewDraft = false,
+  }) async {
     saveAsDraftCalled = true;
     return saveResult;
   }
@@ -220,6 +222,28 @@ void main() {
         expect(find.text('library'), findsNothing);
 
         await tester.pumpAndSettle(const Duration(seconds: 5));
+      });
+
+      testWidgets('openVideoEditorFromRecorder with a save already in flight '
+          'shows no snackbar and stays on the recorder', (tester) async {
+        fakeEditor.saveResult = DraftSaveOutcome.alreadyInProgress;
+
+        await tester.pumpWidget(buildHarness());
+        await tester.pumpAndSettle();
+        final l10n = lookupAppLocalizations(const Locale('en'));
+
+        await tester.tap(find.byKey(const Key('open-editor')));
+        await tester.pumpAndSettle();
+
+        expect(fakeEditor.saveAsDraftCalled, isTrue);
+        expect(
+          find.text(l10n.uploadFailureSheetSavedToDraftsSnackbar),
+          findsNothing,
+        );
+        expect(find.text(l10n.videoMetadataFailedToSaveSnackbar), findsNothing);
+        expect(find.text('welcome'), findsNothing);
+        expect(find.text('editor'), findsNothing);
+        expect(find.byKey(const Key('open-editor')), findsOneWidget);
       });
     });
   });

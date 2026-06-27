@@ -28,6 +28,7 @@ import 'package:pro_image_editor/pro_image_editor.dart'
     show CompleteParameters, WidgetLayer, WidgetLayerExportConfigs;
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqlite3/sqlite3.dart';
 
 class _MockDraftStorageService extends Mock implements DraftStorageService {}
 
@@ -1609,7 +1610,7 @@ void main() {
       container.dispose();
     });
 
-    test('returns true and clears isSavingDraft on success', () async {
+    test('returns saved and clears isSavingDraft on success', () async {
       when(() => mockDraftStorage.saveDraft(any())).thenAnswer((_) async {});
       when(() => mockDraftStorage.deleteDraft(any())).thenAnswer((_) async {});
 
@@ -1617,7 +1618,7 @@ void main() {
           .read(videoEditorProvider.notifier)
           .saveAsDraft(enforceCreateNewDraft: true);
 
-      expect(result, isTrue);
+      expect(result, equals(DraftSaveOutcome.saved));
       expect(
         container.read(videoEditorProvider).isSavingDraft,
         isFalse,
@@ -1625,7 +1626,7 @@ void main() {
       );
     });
 
-    test('clears isSavingDraft and returns false when the write hangs', () {
+    test('clears isSavingDraft and returns timedOut when the write hangs', () {
       // Reproduces the dead "Save for later" button: a draft write that never
       // resolves must not leave isSavingDraft stuck true for the session.
       when(
@@ -1634,7 +1635,7 @@ void main() {
 
       fakeAsync((async) {
         final notifier = container.read(videoEditorProvider.notifier);
-        bool? result;
+        DraftSaveOutcome? result;
         notifier
             .saveAsDraft(enforceCreateNewDraft: true)
             .then((value) => result = value);
@@ -1649,7 +1650,11 @@ void main() {
           VideoEditorConstants.draftSaveTimeout + const Duration(seconds: 1),
         );
 
-        expect(result, isFalse, reason: 'a timed-out save reports failure');
+        expect(
+          result,
+          equals(DraftSaveOutcome.timedOut),
+          reason: 'a timed-out save reports failure',
+        );
         expect(
           container.read(videoEditorProvider).isSavingDraft,
           isFalse,
@@ -1658,29 +1663,59 @@ void main() {
       });
     });
 
-    test('returns false while a previous save is still in flight', () {
-      when(
-        () => mockDraftStorage.saveDraft(any()),
-      ).thenAnswer((_) => Completer<void>().future);
+    test('returns failed and clears isSavingDraft when the write throws', () {
+      // The cause of an unexpected write failure must surface (logged +
+      // reported) instead of hiding behind a generic snackbar. Use a
+      // SqliteException — the shape a real DB-lock / disk-full write actually
+      // throws up from the Drift DAO — so the test exercises the production
+      // failure mode rather than a StateError the cause will rarely be.
+      when(() => mockDraftStorage.saveDraft(any())).thenThrow(
+        SqliteException(extendedResultCode: 5, message: 'database is locked'),
+      );
 
       fakeAsync((async) {
         final notifier = container.read(videoEditorProvider.notifier);
-        unawaited(notifier.saveAsDraft(enforceCreateNewDraft: true));
-        async.flushMicrotasks();
-
-        bool? secondResult;
+        DraftSaveOutcome? result;
         notifier
             .saveAsDraft(enforceCreateNewDraft: true)
-            .then((value) => secondResult = value);
+            .then((value) => result = value);
         async.flushMicrotasks();
 
+        expect(result, equals(DraftSaveOutcome.failed));
         expect(
-          secondResult,
+          container.read(videoEditorProvider).isSavingDraft,
           isFalse,
-          reason: 'concurrent saves are rejected by the in-flight guard',
+          reason: 'a failed save must re-enable the save button',
         );
       });
     });
+
+    test(
+      'returns alreadyInProgress while a previous save is still in flight',
+      () {
+        when(
+          () => mockDraftStorage.saveDraft(any()),
+        ).thenAnswer((_) => Completer<void>().future);
+
+        fakeAsync((async) {
+          final notifier = container.read(videoEditorProvider.notifier);
+          unawaited(notifier.saveAsDraft(enforceCreateNewDraft: true));
+          async.flushMicrotasks();
+
+          DraftSaveOutcome? secondResult;
+          notifier
+              .saveAsDraft(enforceCreateNewDraft: true)
+              .then((value) => secondResult = value);
+          async.flushMicrotasks();
+
+          expect(
+            secondResult,
+            equals(DraftSaveOutcome.alreadyInProgress),
+            reason: 'concurrent saves are rejected by the in-flight guard',
+          );
+        });
+      },
+    );
 
     test('does not abandon autosave cleanup after a successful draft save', () {
       // The autosave delete must run to completion: an abandoned delete could
@@ -1697,7 +1732,7 @@ void main() {
         ).thenAnswer((_) => cleanup.future);
 
         final notifier = container.read(videoEditorProvider.notifier);
-        bool? result;
+        DraftSaveOutcome? result;
         notifier
             .saveAsDraft(enforceCreateNewDraft: true)
             .then((value) => result = value);
@@ -1723,7 +1758,7 @@ void main() {
         cleanup.complete();
         async.flushMicrotasks();
 
-        expect(result, isTrue);
+        expect(result, equals(DraftSaveOutcome.saved));
         expect(
           container.read(videoEditorProvider).isSavingDraft,
           isFalse,

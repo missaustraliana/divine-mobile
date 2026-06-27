@@ -31,14 +31,12 @@ class _FakeVideoEditorNotifier extends VideoEditorNotifier {
   _FakeVideoEditorNotifier({
     required this.initialState,
     required this.activeDraft,
-    this.saveAsDraftSucceeds = true,
-    this.saveAsDraftThrows = false,
+    this.saveAsDraftResult = DraftSaveOutcome.saved,
   });
 
   final VideoEditorProviderState initialState;
   final DivineVideoDraft activeDraft;
-  final bool saveAsDraftSucceeds;
-  final bool saveAsDraftThrows;
+  final DraftSaveOutcome saveAsDraftResult;
 
   int saveAsDraftCalls = 0;
 
@@ -50,12 +48,11 @@ class _FakeVideoEditorNotifier extends VideoEditorNotifier {
       activeDraft;
 
   @override
-  Future<bool> saveAsDraft({bool enforceCreateNewDraft = false}) async {
+  Future<DraftSaveOutcome> saveAsDraft({
+    bool enforceCreateNewDraft = false,
+  }) async {
     saveAsDraftCalls++;
-    if (saveAsDraftThrows) {
-      throw StateError('save failed');
-    }
-    return saveAsDraftSucceeds;
+    return saveAsDraftResult;
   }
 }
 
@@ -95,8 +92,7 @@ void main() {
       VideoEditorMainState? state,
       bool isAutosavedDraft = false,
       bool hasBeenEdited = false,
-      bool saveAsDraftSucceeds = true,
-      bool saveAsDraftThrows = false,
+      DraftSaveOutcome saveAsDraftResult = DraftSaveOutcome.saved,
     }) {
       if (state != null) {
         when(() => mockBloc.state).thenReturn(state);
@@ -110,8 +106,7 @@ void main() {
           isAutosavedDraft: isAutosavedDraft,
         ),
         activeDraft: mockDraft,
-        saveAsDraftSucceeds: saveAsDraftSucceeds,
-        saveAsDraftThrows: saveAsDraftThrows,
+        saveAsDraftResult: saveAsDraftResult,
       );
       fakeVideoPublishNotifier = _FakeVideoPublishNotifier();
 
@@ -324,7 +319,7 @@ void main() {
             buildWidget(
               isAutosavedDraft: true,
               hasBeenEdited: true,
-              saveAsDraftThrows: true,
+              saveAsDraftResult: DraftSaveOutcome.failed,
             ),
           );
 
@@ -338,6 +333,33 @@ void main() {
           verify(() => mockGoRouter.pop<Object?>(any())).called(1);
           expect(find.text('Failed to save'), findsOneWidget);
           expect(find.bySemanticsLabel('Close'), findsOneWidget);
+        },
+      );
+
+      testWidgets(
+        'save draft already in flight leaves the prompt open with no '
+        'snackbar or navigation',
+        (tester) async {
+          await tester.pumpWidget(
+            buildWidget(
+              isAutosavedDraft: true,
+              hasBeenEdited: true,
+              saveAsDraftResult: DraftSaveOutcome.alreadyInProgress,
+            ),
+          );
+
+          await tester.tap(find.bySemanticsLabel('Close'));
+          await tester.pumpAndSettle();
+
+          await tester.tap(find.text('Save draft'));
+          await tester.pumpAndSettle();
+
+          expect(fakeVideoEditorNotifier.saveAsDraftCalls, equals(1));
+          verifyNever(() => mockGoRouter.pop<Object?>(any()));
+          expect(find.text('Saved to library'), findsNothing);
+          expect(find.text('Failed to save'), findsNothing);
+          // The prompt stays open so the in-flight save can land.
+          expect(find.text('Save your draft?'), findsOneWidget);
         },
       );
     });

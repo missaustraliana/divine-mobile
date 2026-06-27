@@ -446,7 +446,7 @@ void main() {
 
         final mockNotifier = _MockVideoEditorNotifier(
           validState0(),
-          saveAsDraftResult: false,
+          saveAsDraftResult: DraftSaveOutcome.failed,
         );
 
         await tester.pumpWidget(
@@ -510,7 +510,7 @@ void main() {
 
         final mockNotifier = _MockVideoEditorNotifier(
           validState0(),
-          saveAsDraftResult: false,
+          saveAsDraftResult: DraftSaveOutcome.failed,
         );
 
         await tester.pumpWidget(
@@ -539,7 +539,7 @@ void main() {
         // State without finalRenderedClip so gallery save returns null.
         final mockNotifier = _MockVideoEditorNotifier(
           VideoEditorProviderState(title: 'Test'),
-          saveAsDraftResult: false,
+          saveAsDraftResult: DraftSaveOutcome.failed,
         );
 
         await tester.pumpWidget(
@@ -631,7 +631,7 @@ void main() {
 
         final mockNotifier = _MockVideoEditorNotifier(
           validState0(),
-          saveAsDraftResult: false,
+          saveAsDraftResult: DraftSaveOutcome.failed,
         );
 
         await tester.pumpWidget(
@@ -650,6 +650,37 @@ void main() {
         await tester.pumpAndSettle();
 
         // Stays on the bottom bar page, does not navigate away.
+        expect(find.byType(VideoMetadataCaptureBottomBar), findsOneWidget);
+      });
+
+      testWidgets('save for later with a save already in flight shows no '
+          'snackbar and does not navigate', (tester) async {
+        when(
+          () => mockGallerySaveService.saveVideoToGallery(any()),
+        ).thenAnswer((_) async => const GallerySaveSuccess());
+
+        final mockNotifier = _MockVideoEditorNotifier(
+          validState0(),
+          saveAsDraftResult: DraftSaveOutcome.alreadyInProgress,
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              videoEditorProvider.overrideWith(() => mockNotifier),
+              gallerySaveServiceProvider.overrideWith(
+                (ref) => mockGallerySaveService,
+              ),
+            ],
+            child: _createTestApp(const VideoMetadataCaptureBottomBar()),
+          ),
+        );
+
+        await tester.tap(find.text('Save for Later'));
+        await tester.pumpAndSettle();
+
+        // A concurrent save is a silent no-op: no snackbar, stays on the page.
+        expect(find.byType(DivineSnackbarContainer), findsNothing);
         expect(find.byType(VideoMetadataCaptureBottomBar), findsOneWidget);
       });
 
@@ -726,13 +757,13 @@ class _MockVideoEditorNotifier extends VideoEditorNotifier {
     this._state, {
     this.onPostVideo,
     this.onSaveAsDraft,
-    this.saveAsDraftResult = true,
+    this.saveAsDraftResult = DraftSaveOutcome.saved,
   });
 
   final VideoEditorProviderState _state;
   final VoidCallback? onPostVideo;
   final VoidCallback? onSaveAsDraft;
-  final bool saveAsDraftResult;
+  final DraftSaveOutcome saveAsDraftResult;
 
   @override
   VideoEditorProviderState build() => _state;
@@ -743,7 +774,9 @@ class _MockVideoEditorNotifier extends VideoEditorNotifier {
   }
 
   @override
-  Future<bool> saveAsDraft({bool enforceCreateNewDraft = false}) async {
+  Future<DraftSaveOutcome> saveAsDraft({
+    bool enforceCreateNewDraft = false,
+  }) async {
     onSaveAsDraft?.call();
     return saveAsDraftResult;
   }
