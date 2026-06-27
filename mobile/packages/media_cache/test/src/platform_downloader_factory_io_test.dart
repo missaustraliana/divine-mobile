@@ -111,5 +111,44 @@ void main() {
       expect(secondDownloader, isA<HttpCancellableDownloader>());
       expect(nativeAttempts, 1);
     });
+
+    test(
+      'builds the cronet engine eagerly, falls back to dart:io when the '
+      'build throws, and latches the failure for the process',
+      () {
+        var buildAttempts = 0;
+
+        CancellableDownloader build() => createPlatformDownloaderImpl(
+          connectionTimeout: const Duration(seconds: 2),
+          idleTimeout: const Duration(seconds: 2),
+          maxConnectionsPerHost: 2,
+          allowBadCertificatesInDebug: false,
+          isDebugMode: false,
+          isWeb: false,
+          isIOSOverride: false,
+          isMacOSOverride: false,
+          isAndroidOverride: true,
+          cronetEngineFactory: () {
+            buildAttempts++;
+            throw StateError('All available Cronet providers are disabled');
+          },
+        );
+
+        final firstDownloader = build();
+        final secondDownloader = build();
+
+        // The engine is built during creation (not deferred to the first
+        // request), so the throw lands in the factory's try/catch and the
+        // dart:io fallback engages. Guards against reverting to the lazy
+        // `CronetClient.defaultCronetEngine()`, where the build — and its
+        // throw — would never run at creation time. The first failure trips
+        // the per-process `cronetUnavailable` latch via the engine-factory
+        // path, so the second creation skips Cronet entirely — a single
+        // build attempt across both.
+        expect(buildAttempts, 1);
+        expect(firstDownloader, isA<HttpCancellableDownloader>());
+        expect(secondDownloader, isA<HttpCancellableDownloader>());
+      },
+    );
   });
 }
