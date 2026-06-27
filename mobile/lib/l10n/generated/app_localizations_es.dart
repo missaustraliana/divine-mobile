@@ -8011,6 +8011,63 @@ class AppLocalizationsEs extends AppLocalizations {
   String get videoEditorRecordedAudioLabel => 'Audio grabado';
 
   @override
+  String get videoEditorVoiceOverLabel => 'Voz en off';
+
+  @override
+  String videoEditorVoiceOverTakeName(int number) {
+    return 'Grabación $number';
+  }
+
+  @override
+  String get videoEditorOpenVoiceOverSemanticLabel => 'Grabar una voz en off';
+
+  @override
+  String get videoEditorVoiceOverRecordSemanticLabel => 'Iniciar grabación';
+
+  @override
+  String get videoEditorVoiceOverStopSemanticLabel => 'Detener grabación';
+
+  @override
+  String get videoEditorVoiceOverHint =>
+      'Toca para grabar. Añade todas las tomas que quieras.';
+
+  @override
+  String videoEditorVoiceOverRecordingsCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count grabaciones',
+      one: '1 grabación',
+      zero: 'Aún no hay grabaciones',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get videoEditorVoiceOverDeleteLast => 'Eliminar última grabación';
+
+  @override
+  String get videoEditorVoiceOverPermissionTitle =>
+      'Se necesita acceso al micrófono';
+
+  @override
+  String get videoEditorVoiceOverPermissionBody =>
+      'Permite el acceso al micrófono para grabar una voz en off.';
+
+  @override
+  String get videoEditorVoiceOverOpenSettings => 'Abrir ajustes';
+
+  @override
+  String get videoEditorVoiceOverRecordingStarted => 'Grabación iniciada';
+
+  @override
+  String get videoEditorVoiceOverRecordingSaved => 'Grabación guardada';
+
+  @override
+  String get videoEditorVoiceOverTooLong =>
+      'La grabación es más larga que tu video';
+
+  @override
   String get videoEditorPlaySemanticLabel => 'Reproducir';
 
   @override

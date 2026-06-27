@@ -17,6 +17,7 @@ import 'package:openvine/blocs/video_editor/main_editor/video_editor_main_bloc.d
 import 'package:openvine/blocs/video_editor/sticker/video_editor_sticker_bloc.dart';
 import 'package:openvine/blocs/video_editor/text_editor/video_editor_text_bloc.dart';
 import 'package:openvine/blocs/video_editor/timeline_overlay/timeline_overlay_bloc.dart';
+import 'package:openvine/blocs/video_editor/voice_over/voice_over_cubit.dart';
 import 'package:openvine/constants/video_editor_constants.dart';
 import 'package:openvine/extensions/video_editor_extensions.dart';
 import 'package:openvine/extensions/video_editor_history_extensions.dart';
@@ -27,6 +28,9 @@ import 'package:openvine/providers/clip_manager_provider.dart';
 import 'package:openvine/providers/video_editor_provider.dart';
 import 'package:openvine/screens/library_screen.dart';
 import 'package:openvine/screens/video_editor/video_text_editor_screen.dart';
+import 'package:openvine/screens/video_editor/voice_over_recorder_screen.dart';
+import 'package:openvine/screens/video_editor/voice_over_take_commit.dart';
+import 'package:openvine/screens/video_editor/voice_over_take_placement.dart';
 import 'package:openvine/screens/video_recorder_screen.dart';
 import 'package:openvine/utils/await_push_transition.dart';
 import 'package:openvine/widgets/video_editor/audio_editor/audio_selection_bottom_sheet.dart';
@@ -470,13 +474,101 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen>
       duration: durationSecs > 0 ? durationSecs : null,
     );
     editor.addHistory(
-      meta: {
-        ...editor.stateManager.activeMeta,
-        VideoEditorConstants.audioStateHistoryKey: [
-          ...editor.stateManager.audioTracks.map((e) => e.toJson()),
-          result.toJson(),
-        ],
-      },
+      meta: buildAppendedAudioMeta(
+        activeMeta: editor.stateManager.activeMeta,
+        existingTracks: editor.stateManager.audioTracks,
+        newTracks: [result],
+      ),
+    );
+  }
+
+  /// Opens the full-screen voice-over recorder and appends the recorded takes
+  /// to the editor timeline.
+  ///
+  /// Takes are laid back-to-back: the first starts at the beginning and each
+  /// subsequent take starts where the previous one ended, clamped to
+  /// [VideoEditorConstants.maxDuration]. All takes are committed in a single
+  /// history entry so one undo removes them together.
+  Future<void> _openVoiceOver({required VideoEditorMainBloc mainBloc}) async {
+    final availableDuration = resolveVoiceOverAvailableDuration(
+      clipDuration: _clipEditorBloc.state.totalDuration,
+      maxDuration: VideoEditorConstants.maxDuration,
+    );
+
+    // Count voice-over already on the timeline so the take numbering continues
+    // (e.g. "Recording 5") instead of restarting at 1.
+    final priorTakeCount = countPriorVoiceOverTakes(
+      audioTracks: _timelineOverlayBloc.state.audioTracks,
+      voiceOverIdPrefix: VoiceOverCubit.voiceOverIdPrefix,
+    );
+
+    // Pause editor playback so the preview's audio isn't captured into the
+    // voice-over while the recorder is open.
+    mainBloc.add(const VideoEditorExternalPauseRequested(isPaused: true));
+    final takes = await Navigator.of(context).push<List<AudioEvent>>(
+      PageRouteBuilder<List<AudioEvent>>(
+        pageBuilder: (_, _, _) => VoiceOverRecorderScreen(
+          availableDuration: availableDuration,
+          priorTakeCount: priorTakeCount,
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          // Classic Material "fade upwards": slides up slightly while fading in.
+          return const FadeUpwardsPageTransitionsBuilder().buildTransitions(
+            null,
+            context,
+            animation,
+            secondaryAnimation,
+            child,
+          );
+        },
+      ),
+    );
+    // Committed (Done) takes whose files never reach the timeline belong to no
+    // draft, so the deferred draft-scoped cleanup can't reclaim them. Delete
+    // them on every early return below to avoid permanent orphans. (A close/
+    // discard returns null here and the cubit already deleted those files.)
+    if (!mounted) {
+      await deleteVoiceOverTakeFiles(takes);
+      return;
+    }
+    mainBloc.add(const VideoEditorExternalPauseRequested(isPaused: false));
+    if (takes == null || takes.isEmpty) return;
+
+    // The recorder's per-take duration is derived from amplitude-sample counts
+    // and can drift from the encoded file. Probe each file's real duration up
+    // front so the committed timeline window matches the audio (mirrors the
+    // music-library path).
+    final takeSecs = <double>[];
+    for (final take in takes) {
+      takeSecs.add(await resolveRecordedTakeDurationSecs(take));
+    }
+    if (!mounted) {
+      await deleteVoiceOverTakeFiles(takes);
+      return;
+    }
+
+    final editor = _editorKey.currentState;
+    if (editor == null) {
+      await deleteVoiceOverTakeFiles(takes);
+      return;
+    }
+    final placed = placeVoiceOverTakes(
+      takes: takes,
+      takeDurationsSecs: takeSecs,
+      availableDuration: availableDuration,
+      nowMs: DateTime.now().millisecondsSinceEpoch,
+    );
+    if (placed.isEmpty) {
+      await deleteVoiceOverTakeFiles(takes);
+      return;
+    }
+
+    editor.addHistory(
+      meta: buildAppendedAudioMeta(
+        activeMeta: editor.stateManager.activeMeta,
+        existingTracks: editor.stateManager.audioTracks,
+        newTracks: placed,
+      ),
     );
   }
 
@@ -690,6 +782,10 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen>
                 );
               },
               onOpenMusicLibrary: _openMusicLibrary,
+              onOpenVoiceOver: () {
+                final mainBloc = context.read<VideoEditorMainBloc>();
+                _openVoiceOver(mainBloc: mainBloc);
+              },
               awaitPushCoverTransition: _awaitMetadataCoverTransition,
               child: ValueListenableBuilder<bool>(
                 valueListenable: _isLoadingDraft,
