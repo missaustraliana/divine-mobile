@@ -122,16 +122,19 @@ class ClipLibraryService {
     );
   }
 
-  /// Get all clips from the library, sorted by creation date (newest first)
+  /// Get all clips from the library, sorted by creation date (newest first).
+  ///
+  /// A single corrupt row (e.g. a clip persisted without a file path) is
+  /// skipped and logged rather than discarding the entire library — one bad
+  /// row must never hide every other clip.
   Future<List<DivineVideoClip>> getAllClips() async {
     try {
       final rows = await _clipsDao.getLibraryClips(ownerPubkey: ownerPubkey);
       final documentsPath = await getDocumentsPath();
-
-      return rows.map((row) {
-        final clipJson = json.decode(row.data) as Map<String, dynamic>;
-        return DivineVideoClip.fromJson(clipJson, documentsPath);
-      }).toList();
+      return rows
+          .map((row) => _tryParseClipRow(row, documentsPath, label: 'clip'))
+          .whereType<DivineVideoClip>()
+          .toList();
     } catch (e) {
       Log.error(
         '❌ Failed to load clips: $e',
@@ -142,14 +145,37 @@ class ClipLibraryService {
     }
   }
 
-  /// Get a single clip by ID
+  /// Deserialize a single clip [row], returning `null` (and logging) when the
+  /// row is corrupt so one bad clip can't abort the whole list load.
+  DivineVideoClip? _tryParseClipRow(
+    ClipRow row,
+    String documentsPath, {
+    required String label,
+  }) {
+    try {
+      final clipJson = json.decode(row.data) as Map<String, dynamic>;
+      return DivineVideoClip.fromJson(clipJson, documentsPath);
+    } catch (e) {
+      Log.error(
+        '❌ Skipping corrupt $label ${row.id}: $e',
+        name: 'ClipLibraryService',
+        category: LogCategory.video,
+      );
+      return null;
+    }
+  }
+
+  /// Get a single clip by ID.
+  ///
+  /// Returns `null` when the row is missing or corrupt, matching the
+  /// list loaders' skip-and-log behaviour so a single bad row can't throw
+  /// out of a lookup. Callers already treat `null` as "no clip".
   Future<DivineVideoClip?> getClipById(String id) async {
     final row = await _clipsDao.getClipById(id);
     if (row == null) return null;
 
     final documentsPath = await getDocumentsPath();
-    final clipJson = json.decode(row.data) as Map<String, dynamic>;
-    return DivineVideoClip.fromJson(clipJson, documentsPath);
+    return _tryParseClipRow(row, documentsPath, label: 'clip');
   }
 
   /// Move a clip to the trash. The clip is hidden from active queries
@@ -230,13 +256,18 @@ class ClipLibraryService {
         ownerPubkey: ownerPubkey,
       );
       final documentsPath = await getDocumentsPath();
-      return rows.map((row) {
-        final clipJson = json.decode(row.data) as Map<String, dynamic>;
-        return DivineVideoClip.fromJson(
-          clipJson,
+      final clips = <DivineVideoClip>[];
+      for (final row in rows) {
+        final clip = _tryParseClipRow(
+          row,
           documentsPath,
-        ).copyWith(deletedAt: row.deletedAt);
-      }).toList();
+          label: 'trashed clip',
+        );
+        if (clip != null) {
+          clips.add(clip.copyWith(deletedAt: row.deletedAt));
+        }
+      }
+      return clips;
     } catch (e) {
       Log.error(
         '❌ Failed to load trashed clips: $e',

@@ -258,6 +258,60 @@ void main() {
         expect(rowAfter, isNull);
       });
 
+      test(
+        'skips a draft with a corrupt clip and keeps valid drafts',
+        () async {
+          final now = DateTime.now();
+          DivineVideoDraft draftWith(String draftId, String clipId) =>
+              DivineVideoDraft(
+                id: draftId,
+                clips: [
+                  DivineVideoClip(
+                    id: clipId,
+                    video: EditorVideo.file('/path/to/$clipId.mp4'),
+                    duration: const Duration(seconds: 6),
+                    recordedAt: now,
+                    targetAspectRatio: AspectRatio.square,
+                    originalAspectRatio: 9 / 16,
+                  ),
+                ],
+                title: draftId,
+                description: '',
+                hashtags: {},
+                selectedApproach: 'hybrid',
+                createdAt: now,
+                lastModified: now,
+                publishStatus: PublishStatus.draft,
+                publishAttempts: 0,
+              );
+
+          await service.saveDraft(draftWith('draft_valid', 'clip_valid'));
+          await service.saveDraft(draftWith('draft_corrupt', 'clip_corrupt'));
+
+          // Corrupt the clip row of draft_corrupt: drop its filePath so
+          // DivineVideoClip.fromJson throws when the draft is reconstructed.
+          // That draft must be skipped while draft_valid still loads
+          // (regression for #fix/drafts-clips-fail-to-load).
+          final corruptData = draftWith(
+            'draft_corrupt',
+            'clip_corrupt',
+          ).clips.first.toJson()..['filePath'] = null;
+          await database.clipsDao.upsertClip(
+            id: 'clip_corrupt',
+            draftId: 'draft_corrupt',
+            orderIndex: 0,
+            durationMs: 6000,
+            recordedAt: now,
+            data: jsonEncode(corruptData),
+            filePath: null,
+            thumbnailPath: null,
+          );
+
+          final drafts = await service.getAllDrafts();
+          expect(drafts.map((d) => d.id), ['draft_valid']);
+        },
+      );
+
       test('clears missing final rendered clip references', () async {
         final draft = DivineVideoDraft.create(
           clips: [
@@ -290,6 +344,51 @@ void main() {
         expect(drafts, hasLength(1));
         expect(drafts.single.finalRenderedClip, isNull);
         expect(drafts.single.canPost, isFalse);
+      });
+    });
+
+    group('getDraftById', () {
+      test('returns null for a draft with a corrupt clip', () async {
+        final now = DateTime.now();
+        final draft = DivineVideoDraft(
+          id: 'draft_corrupt',
+          clips: [
+            DivineVideoClip(
+              id: 'clip_corrupt',
+              video: EditorVideo.file('/path/to/clip_corrupt.mp4'),
+              duration: const Duration(seconds: 6),
+              recordedAt: now,
+              targetAspectRatio: AspectRatio.square,
+              originalAspectRatio: 9 / 16,
+            ),
+          ],
+          title: 'draft_corrupt',
+          description: '',
+          hashtags: {},
+          selectedApproach: 'hybrid',
+          createdAt: now,
+          lastModified: now,
+          publishStatus: PublishStatus.draft,
+          publishAttempts: 0,
+        );
+        await service.saveDraft(draft);
+
+        // Drop the clip's filePath so DivineVideoClip.fromJson throws when
+        // the single draft is reconstructed. getDraftById must skip-and-log
+        // and return null rather than throwing out of the lookup.
+        final corruptData = draft.clips.first.toJson()..['filePath'] = null;
+        await database.clipsDao.upsertClip(
+          id: 'clip_corrupt',
+          draftId: 'draft_corrupt',
+          orderIndex: 0,
+          durationMs: 6000,
+          recordedAt: now,
+          data: jsonEncode(corruptData),
+          filePath: null,
+          thumbnailPath: null,
+        );
+
+        expect(await service.getDraftById('draft_corrupt'), isNull);
       });
     });
 
@@ -653,6 +752,41 @@ void main() {
         final row = await database.draftsDao.getDraftById('corrupted');
         expect(row, isNull);
       });
+
+      test(
+        'skips a draft with a corrupt clip and keeps valid matching drafts',
+        () async {
+          final validDraft = createDraftWithStatus(
+            'valid_failed',
+            PublishStatus.failed,
+          );
+          final corruptDraft = createDraftWithStatus(
+            'corrupt_failed',
+            PublishStatus.failed,
+          );
+          await service.saveDraft(validDraft);
+          await service.saveDraft(corruptDraft);
+
+          final corruptClipData = corruptDraft.clips.first.toJson()
+            ..['filePath'] = null;
+          await database.clipsDao.upsertClip(
+            id: 'clip_corrupt_failed',
+            draftId: 'corrupt_failed',
+            orderIndex: 0,
+            durationMs: 6000,
+            recordedAt: DateTime.now(),
+            data: jsonEncode(corruptClipData),
+            filePath: null,
+            thumbnailPath: null,
+          );
+
+          final results = await service.getDraftsByPublishStatuses({
+            PublishStatus.failed,
+          });
+
+          expect(results.map((draft) => draft.id), ['valid_failed']);
+        },
+      );
 
       test('should return drafts for a single status', () async {
         await service.saveDraft(

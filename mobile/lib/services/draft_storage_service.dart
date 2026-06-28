@@ -281,13 +281,14 @@ class DraftStorageService {
           continue;
         }
 
-        drafts.add(
-          DivineVideoDraft.fromDriftRow(
-            row: row,
-            clipRows: clipRows,
-            documentsPath: documentsPath,
-          ),
+        final draft = _tryParseDraftRow(
+          row: row,
+          clipRows: clipRows,
+          documentsPath: documentsPath,
         );
+        if (draft != null) {
+          drafts.add(draft);
+        }
       }
     }
 
@@ -332,11 +333,35 @@ class DraftStorageService {
 
     final clipRows = await _clipsDao.getClipsByDraftId(id);
     final documentsPath = await getDocumentsPath();
-    return DivineVideoDraft.fromDriftRow(
+    return _tryParseDraftRow(
       row: row,
       clipRows: clipRows,
       documentsPath: documentsPath,
     );
+  }
+
+  /// Deserialize a single draft [row] with its [clipRows], returning `null`
+  /// (and logging) when the row is corrupt so one bad draft can't abort a
+  /// list load or throw out of a single-draft lookup.
+  DivineVideoDraft? _tryParseDraftRow({
+    required DraftRow row,
+    required List<ClipRow> clipRows,
+    required String documentsPath,
+  }) {
+    try {
+      return DivineVideoDraft.fromDriftRow(
+        row: row,
+        clipRows: clipRows,
+        documentsPath: documentsPath,
+      );
+    } catch (e) {
+      Log.error(
+        '🧹 Skipping corrupt draft ${row.id}: $e',
+        name: 'DraftStorageService',
+        category: LogCategory.video,
+      );
+      return null;
+    }
   }
 
   /// Get draft by ID with validation - filters out clips with missing video files.
@@ -419,12 +444,14 @@ class DraftStorageService {
           continue;
         }
 
-        final draft = DivineVideoDraft.fromDriftRow(
+        final draft = _tryParseDraftRow(
           row: row,
           clipRows: clipRows,
           documentsPath: documentsPath,
         );
-        drafts.add(_clearMissingFinalRenderedClip(draft));
+        if (draft != null) {
+          drafts.add(_clearMissingFinalRenderedClip(draft));
+        }
       }
 
       // Clean up corrupted drafts (0 clips) in the background
