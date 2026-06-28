@@ -7,6 +7,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:bloc_concurrency/bloc_concurrency.dart';
+import 'package:collection/collection.dart';
 import 'package:divine_camera/divine_camera.dart'
     show
         CameraLensMetadata,
@@ -20,6 +21,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:models/models.dart' as model show AspectRatio;
 import 'package:openvine/constants/video_editor_constants.dart';
+import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/models/video_editor/video_editor_provider_state.dart';
 import 'package:openvine/models/video_recorder/video_recorder_flash_mode.dart';
 import 'package:openvine/models/video_recorder/video_recorder_mode.dart';
@@ -207,6 +209,9 @@ class VideoRecorderBloc
     on<VideoRecorderZoomedByLongPress>(_onZoomedByLongPress);
     on<VideoRecorderScaleStarted>(_onScaleStarted);
     on<VideoRecorderScaleUpdated>(_onScaleUpdated);
+    on<VideoRecorderRecordingLockedForNavigation>(
+      _onRecordingLockedForNavigation,
+    );
     on<VideoRecorderCameraPausedForNavigation>(_onCameraPausedForNavigation);
     on<VideoRecorderRecorderModeSet>(_onRecorderModeSet);
     on<VideoRecorderTimerCycled>(_onTimerCycled);
@@ -261,6 +266,16 @@ class VideoRecorderBloc
     VideoRecorderInitializeRequested event,
     Emitter<VideoRecorderBlocState> emit,
   ) async {
+    // Re-initialization marks the end of any navigation teardown, so release
+    // the navigation recording lock up front — this covers the camera-init
+    // error returns below too, which previously left the recorder locked until
+    // a later successful init. The camera isn't usable yet (`canRecord` stays
+    // false until initialize() completes), so clearing the lock here cannot let
+    // a racing trigger start a recording on a torn-down camera.
+    if (state.recordingLockedForNavigation) {
+      emit(state.copyWith(recordingLockedForNavigation: false));
+    }
+
     final prefs = _readSharedPreferences();
 
     final savedMode = VideoRecorderMode.fromName(
@@ -590,6 +605,15 @@ class VideoRecorderBloc
       return;
     }
 
+    if (state.recordingLockedForNavigation) {
+      Log.debug(
+        '🎮 toggleRecording ignored - recording locked for navigation',
+        name: 'VideoRecorderBloc',
+        category: LogCategory.video,
+      );
+      return;
+    }
+
     switch (state.recordingState) {
       case VideoRecorderState.idle:
         add(const VideoRecorderRecordingStartRequested());
@@ -606,7 +630,8 @@ class VideoRecorderBloc
     final clipManager = _readClipManager();
     final remainingDuration = clipManager.remainingDuration;
 
-    if (!_cameraService.canRecord ||
+    if (state.recordingLockedForNavigation ||
+        !_cameraService.canRecord ||
         state.isRecording ||
         state.isStartingRecording ||
         state.isStoppingRecording ||
@@ -688,6 +713,20 @@ class VideoRecorderBloc
       return;
     }
 
+    if (state.recordingLockedForNavigation) {
+      // Navigation released (or is releasing) the camera before the native
+      // start ran — abort to idle instead of recording on a camera that is
+      // about to be torn down.
+      emit(
+        state.copyWith(
+          isStartingRecording: false,
+          pendingStopAfterStart: false,
+          recordingState: VideoRecorderState.idle,
+        ),
+      );
+      return;
+    }
+
     await _prepareSoundForPlayback();
 
     emit(state.copyWith(recordingState: VideoRecorderState.recording));
@@ -705,6 +744,13 @@ class VideoRecorderBloc
           : null,
     );
 
+    if (state.recordingLockedForNavigation) {
+      // The camera was released for navigation while the native start was in
+      // flight. Don't latch a recording the user can never stop.
+      await _abortInFlightStartForLock(emit, sessionStarted: success);
+      return;
+    }
+
     if (success) {
       Log.info(
         '✅ Recording truly started',
@@ -712,6 +758,14 @@ class VideoRecorderBloc
         category: LogCategory.video,
       );
       await WakelockPlus.enable();
+      if (state.recordingLockedForNavigation) {
+        // Navigation locked during the wakelock-enable await, after the native
+        // session started. Abort with the same teardown as the in-flight guard
+        // above rather than arm a clip manager (60fps timer + stopwatch) that
+        // nothing can stop.
+        await _abortInFlightStartForLock(emit, sessionStarted: true);
+        return;
+      }
       clipManager.startRecording();
       if (state.pendingStopAfterStart) {
         // A stop was requested while the native start was still in-flight
@@ -878,104 +932,200 @@ class VideoRecorderBloc
       category: LogCategory.video,
     );
 
+    // Clip post-processing — real duration, thumbnail, ghost frame and the
+    // metadata-enriched library save — is deliberately detached (not awaited).
+    // This handler runs in the `sequential()` stop bucket, so awaiting the
+    // post-processing would serialize it ahead of the *next* stop request: a
+    // slow library save or metadata pass (observed in the field taking ~100s)
+    // would leave the user unable to stop their next recording until it
+    // finished. The work mutates the clip in place on the clip manager (which
+    // the UI observes) and re-saves it, so it is safe to run detached. The
+    // bare clip was already persisted by the unawaited save above.
+    unawaited(
+      _enrichAndSaveClip(
+        videoResult: videoResult,
+        clip: clip,
+        clipManager: clipManager,
+        remainingDuration: remainingDuration,
+      ).catchError((Object error, StackTrace stackTrace) {
+        // Detached work must not escape as an unhandled async error. The bare
+        // clip is already saved, so a failure here only loses the enriched
+        // metadata, not the recording.
+        Log.error(
+          '⚠️ Clip post-processing failed for ${clip.id}',
+          name: 'VideoRecorderBloc',
+          category: LogCategory.video,
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }),
+    );
+  }
+
+  /// Enriches a freshly recorded [clip] with its real duration, thumbnail and
+  /// ghost frame, then re-saves the enriched clip to the library.
+  ///
+  /// Runs detached (fire-and-forget) from [_onRecordingStopRequested] so the
+  /// `sequential()` stop handler returns immediately and never blocks a
+  /// following stop request behind this potentially slow work.
+  Future<void> _enrichAndSaveClip({
+    required EditorVideo videoResult,
+    required DivineVideoClip clip,
+    required ClipManagerNotifier clipManager,
+    required Duration remainingDuration,
+  }) async {
     final videoPath = await videoResult.safeFilePath();
     final workCopyPath = '$videoPath.work.mp4';
     await File(videoPath).copy(workCopyPath);
 
-    final metadata = await ProVideoEditor.instance.getMetadata(
-      EditorVideo.file(File(workCopyPath)),
-    );
-    clipManager.updateClipDuration(clip.id, metadata.duration);
-    Log.debug(
-      '📊 Video duration: ${metadata.duration.inMilliseconds}ms',
-      name: 'VideoRecorderBloc',
-      category: LogCategory.video,
-    );
+    try {
+      final metadata = await ProVideoEditor.instance.getMetadata(
+        EditorVideo.file(File(workCopyPath)),
+      );
+      clipManager.updateClipDuration(clip.id, metadata.duration);
+      Log.debug(
+        '📊 Video duration: ${metadata.duration.inMilliseconds}ms',
+        name: 'VideoRecorderBloc',
+        category: LogCategory.video,
+      );
 
-    if (clipManager.clips.length == 1) {
-      if (clip.processingCompleter != null) {
-        unawaited(
-          clip.processingCompleter!.future.then((_) {
-            DivineVideoPlayerController.preload([VideoClip.file(videoPath)]);
-          }),
+      if (clipManager.clips.length == 1) {
+        if (clip.processingCompleter != null) {
+          unawaited(
+            clip.processingCompleter!.future.then((_) {
+              DivineVideoPlayerController.preload([VideoClip.file(videoPath)]);
+            }),
+          );
+        } else {
+          unawaited(
+            DivineVideoPlayerController.preload([VideoClip.file(videoPath)]),
+          );
+        }
+      }
+
+      final effectiveDuration = remainingDuration < metadata.duration
+          ? remainingDuration
+          : metadata.duration;
+      final halfDuration = effectiveDuration ~/ 2;
+      final targetTimestamp =
+          halfDuration < VideoEditorConstants.defaultThumbnailExtractTime
+          ? halfDuration
+          : VideoEditorConstants.defaultThumbnailExtractTime;
+
+      final thumbnailResult = await VideoThumbnailService.extractThumbnail(
+        videoPath: workCopyPath,
+        targetTimestamp: targetTimestamp,
+      );
+
+      if (thumbnailResult != null) {
+        clipManager.updateThumbnail(
+          clipId: clip.id,
+          thumbnailPath: thumbnailResult.path,
+          thumbnailTimestamp: thumbnailResult.timestamp,
+        );
+        Log.debug(
+          '🖼️  Thumbnail generated: ${thumbnailResult.path}',
+          name: 'VideoRecorderBloc',
+          category: LogCategory.video,
         );
       } else {
-        unawaited(
-          DivineVideoPlayerController.preload([VideoClip.file(videoPath)]),
+        Log.warning(
+          '⚠️ Thumbnail generation failed',
+          name: 'VideoRecorderBloc',
+          category: LogCategory.video,
         );
       }
+
+      final ghostFramePath = await VideoThumbnailService.extractLastFrame(
+        videoPath: workCopyPath,
+        videoDuration: metadata.duration,
+      );
+
+      if (ghostFramePath != null) {
+        clipManager.updateGhostFrame(
+          clipId: clip.id,
+          ghostFramePath: ghostFramePath,
+        );
+        Log.debug(
+          '👻 Ghost frame generated: $ghostFramePath',
+          name: 'VideoRecorderBloc',
+          category: LogCategory.video,
+        );
+      } else {
+        Log.warning(
+          '⚠️ Ghost frame generation failed',
+          name: 'VideoRecorderBloc',
+          category: LogCategory.video,
+        );
+      }
+
+      // firstWhereOrNull, not firstWhere: the clip can be removed mid-
+      // enrichment (delete-last-clip undo, capture↔classic switch) while this
+      // detached work runs. A swallowed StateError would skip the work-copy
+      // cleanup below; here the cleanup always runs in the finally.
+      final updatedClip = clipManager.clips.firstWhereOrNull(
+        (c) => c.id == clip.id,
+      );
+      if (updatedClip == null) {
+        Log.warning(
+          '⚠️ Clip ${clip.id} removed before metadata save — skipping '
+          'enriched library save',
+          name: 'VideoRecorderBloc',
+          category: LogCategory.video,
+        );
+        return;
+      }
+      final saved = await clipManager.saveClipToLibrary(updatedClip);
+      if (!saved) {
+        Log.warning(
+          '⚠️ Metadata-enriched clip save to library failed for ${clip.id}',
+          name: 'VideoRecorderBloc',
+          category: LogCategory.video,
+        );
+      }
+    } finally {
+      try {
+        await File(workCopyPath).delete();
+      } catch (_) {}
     }
+  }
 
-    final effectiveDuration = remainingDuration < metadata.duration
-        ? remainingDuration
-        : metadata.duration;
-    final halfDuration = effectiveDuration ~/ 2;
-    final targetTimestamp =
-        halfDuration < VideoEditorConstants.defaultThumbnailExtractTime
-        ? halfDuration
-        : VideoEditorConstants.defaultThumbnailExtractTime;
-
-    final thumbnailResult = await VideoThumbnailService.extractThumbnail(
-      videoPath: workCopyPath,
-      targetTimestamp: targetTimestamp,
+  /// Aborts a native recording session the navigation lock landed on while a
+  /// start was still in flight: best-effort stops + discards the just-started
+  /// session (when [sessionStarted]) and returns to idle. Shared by the two
+  /// lock guards in [_onRecordingStartRequested] — before the native start and
+  /// after the wakelock-enable await — so neither latches a recording the user
+  /// can never stop.
+  Future<void> _abortInFlightStartForLock(
+    Emitter<VideoRecorderBlocState> emit, {
+    required bool sessionStarted,
+  }) async {
+    if (sessionStarted) {
+      await _discardAbortedRecording(await _cameraService.stopRecording());
+    }
+    emit(
+      state.copyWith(
+        isStartingRecording: false,
+        pendingStopAfterStart: false,
+        recordingState: VideoRecorderState.idle,
+      ),
     );
+  }
 
-    if (thumbnailResult != null) {
-      clipManager.updateThumbnail(
-        clipId: clip.id,
-        thumbnailPath: thumbnailResult.path,
-        thumbnailTimestamp: thumbnailResult.timestamp,
-      );
-      Log.debug(
-        '🖼️  Thumbnail generated: ${thumbnailResult.path}',
-        name: 'VideoRecorderBloc',
-        category: LogCategory.video,
-      );
-    } else {
-      Log.warning(
-        '⚠️ Thumbnail generation failed',
-        name: 'VideoRecorderBloc',
-        category: LogCategory.video,
-      );
-    }
-
-    final ghostFramePath = await VideoThumbnailService.extractLastFrame(
-      videoPath: workCopyPath,
-      videoDuration: metadata.duration,
-    );
-
-    if (ghostFramePath != null) {
-      clipManager.updateGhostFrame(
-        clipId: clip.id,
-        ghostFramePath: ghostFramePath,
-      );
-      Log.debug(
-        '👻 Ghost frame generated: $ghostFramePath',
-        name: 'VideoRecorderBloc',
-        category: LogCategory.video,
-      );
-    } else {
-      Log.warning(
-        '⚠️ Ghost frame generation failed',
-        name: 'VideoRecorderBloc',
-        category: LogCategory.video,
-      );
-    }
-
-    final updatedClip = clipManager.clips.firstWhere(
-      (c) => c.id == clip.id,
-    );
-    final saved = await clipManager.saveClipToLibrary(updatedClip);
-    if (!saved) {
-      Log.warning(
-        '⚠️ Metadata-enriched clip save to library failed for ${clip.id}',
-        name: 'VideoRecorderBloc',
-        category: LogCategory.video,
-      );
-    }
+  /// Best-effort deletes the orphaned file from a recording aborted by the
+  /// navigation lock. Such a recording is never added to the library or shown
+  /// to the user, so without this its file would leak on disk.
+  Future<void> _discardAbortedRecording(EditorVideo? video) async {
+    if (video == null) return;
     try {
-      await File(workCopyPath).delete();
-    } catch (_) {}
+      await File(await video.safeFilePath()).delete();
+    } catch (error) {
+      Log.debug(
+        '⚠️ Failed to delete aborted recording file: $error',
+        name: 'VideoRecorderBloc',
+        category: LogCategory.video,
+      );
+    }
   }
 
   void _onLongPressZoomStarted(
@@ -1131,6 +1281,13 @@ class VideoRecorderBloc
     emit(state.copyWith(showZoomIndicator: false));
   }
 
+  void _onRecordingLockedForNavigation(
+    VideoRecorderRecordingLockedForNavigation event,
+    Emitter<VideoRecorderBlocState> emit,
+  ) {
+    _lockRecordingForNavigation(emit);
+  }
+
   Future<void> _onCameraPausedForNavigation(
     VideoRecorderCameraPausedForNavigation event,
     Emitter<VideoRecorderBlocState> emit,
@@ -1140,7 +1297,37 @@ class VideoRecorderBloc
       name: 'VideoRecorderBloc',
       category: LogCategory.video,
     );
+    // Idempotent with VideoRecorderRecordingLockedForNavigation (which the View
+    // dispatches first, before the push transition). Re-asserting here keeps
+    // the recorder safe even if only the pause event is dispatched.
+    _lockRecordingForNavigation(emit);
     await _cameraService.dispose();
+  }
+
+  /// Locks recording for a navigation push: sets the lock, detaches the remote
+  /// (volume / Bluetooth) trigger, and resets any in-flight / active recording
+  /// to idle so a trigger that raced the navigation can't leave a recording the
+  /// user can never stop. Runs synchronously while the camera is still live —
+  /// the dispose (if any) happens after — so it never races the native start.
+  /// The lock is cleared on the next [VideoRecorderInitializeRequested].
+  void _lockRecordingForNavigation(Emitter<VideoRecorderBlocState> emit) {
+    _cameraService.onRemoteRecordTrigger = null;
+    if (state.isRecording || state.isStartingRecording) {
+      _readClipManager()
+        ..stopRecording()
+        ..resetRecording();
+      emit(
+        state.copyWith(
+          recordingLockedForNavigation: true,
+          recordingState: VideoRecorderState.idle,
+          isStartingRecording: false,
+          isStoppingRecording: false,
+          pendingStopAfterStart: false,
+        ),
+      );
+    } else {
+      emit(state.copyWith(recordingLockedForNavigation: true));
+    }
   }
 
   void _onRecorderModeSet(
