@@ -1086,8 +1086,8 @@ class VideoEvent {
   ///
   /// The `proofmode` Nostr tag carries the full `NativeProofData` JSON, so
   /// it is the source of truth for proof signals (`pgpSignature`,
-  /// `publicKey`, `deviceAttestation`, `c2paManifestId`) that the publisher
-  /// may not have additionally surfaced as standalone tags.
+  /// `sensorDataCsv`, `deviceAttestation`, `c2paManifestId`) that the
+  /// publisher may not have additionally surfaced as standalone tags.
   Map<String, dynamic>? get proofModeManifestJson {
     final manifest = proofModeManifest;
     if (manifest == null || manifest.isEmpty) return null;
@@ -1114,11 +1114,45 @@ class VideoEvent {
     return rawTags['identity_portable'] == 'cawg';
   }
 
+  /// Field names inside a `proofmode` manifest JSON that represent an actual
+  /// proof signal. A manifest that carries none of these (e.g. only a
+  /// `videoHash`) is an empty `unverified` shell, not proof.
+  static const _proofManifestSignalFields = <String>[
+    'pgpSignature',
+    'deviceAttestation',
+    'c2paManifestId',
+    'sensorDataCsv',
+  ];
+
   /// Whether this video has any ProofMode manifest signal, either as a raw tag
   /// or as a compact backend summary.
+  ///
+  /// The publisher writes a `proofmode` tag unconditionally — even for an
+  /// `unverified` upload whose manifest holds only a `videoHash` — so the raw
+  /// branch inspects the manifest *content* rather than mere tag presence. A
+  /// manifest that parses to JSON without any proof field is not a signal; an
+  /// opaque (non-JSON) value is kept as a signal so older or third-party
+  /// manifests are not silently dropped.
   bool get hasProofModeManifest {
-    return proofModeManifest != null ||
+    return _rawProofModeManifestCarriesProof ||
         proofSummary?.hasUsableProofmode == true;
+  }
+
+  bool get _rawProofModeManifestCarriesProof {
+    final rawManifest = proofModeManifest;
+    if (rawManifest == null) return false;
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(rawManifest);
+    } on FormatException {
+      return true;
+    }
+    if (decoded is! Map<String, dynamic>) return false;
+    final manifest = decoded;
+    return _proofManifestSignalFields.any((field) {
+      final value = manifest[field];
+      return value is String && value.isNotEmpty;
+    });
   }
 
   /// Whether this video has any device-attestation signal, either as a raw tag
@@ -1159,7 +1193,8 @@ class VideoEvent {
 
   /// ProofMode: Check if video has any proof
   bool get hasProofMode {
-    return proofModeVerificationLevel != null ||
+    return (proofModeVerificationLevel != null &&
+            proofModeVerificationLevel != 'unverified') ||
         hasProofModeManifest ||
         hasProofModePgpFingerprint ||
         hasProofModeDeviceAttestation ||
