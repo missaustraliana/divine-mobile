@@ -132,6 +132,7 @@ void main() {
     when(
       () => moderationLabelService.isDivineLabelerSubscribed,
     ).thenReturn(true);
+    when(() => moderationLabelService.ensureLoaded()).thenAnswer((_) async {});
     when(
       () => moderationLabelService.isFollowingModerationEnabled,
     ).thenReturn(false);

@@ -76,14 +76,17 @@ class ModerationLabelService {
     required NostrClient nostrClient,
     required AuthService authService,
     required SharedPreferences sharedPreferences,
+    bool Function()? canQueryRelays,
   }) : _nostrClient = nostrClient,
        _authService = authService,
-       _prefs = sharedPreferences;
+       _prefs = sharedPreferences,
+       _canQueryRelays = canQueryRelays ?? (() => true);
 
   final NostrClient _nostrClient;
   // ignore: unused_field
   final AuthService _authService;
   final SharedPreferences _prefs;
+  final bool Function() _canQueryRelays;
 
   /// SharedPreferences key for subscribed labeler pubkeys.
   static const String _subscribedLabelersKey = 'subscribed_labeler_pubkeys';
@@ -147,11 +150,15 @@ class ModerationLabelService {
   /// Labelers whose historical labels have already been loaded.
   final Set<String> _loadedLabelers = {};
 
+  /// Labelers currently being loaded from relays.
+  final Map<String, Future<void>> _loadingLabelers = {};
+
   /// Active subscriptions.
   final Map<String, StreamSubscription<dynamic>> _subscriptions = {};
 
-  /// Whether the service has been initialized.
-  bool _initialized = false;
+  /// Whether persisted settings have been loaded.
+  bool _loadedPersistedState = false;
+  Future<void>? _loadPersistedStateFuture;
 
   /// Whether followed accounts should act as trusted labelers.
   bool _isFollowingModerationEnabled = false;
@@ -164,12 +171,26 @@ class ModerationLabelService {
 
   /// Initialize by loading persisted labeler subscriptions and subscribing.
   Future<void> initialize() async {
-    if (_initialized) return;
-    _initialized = true;
+    await ensureLoaded();
+    if (_canQueryRelays()) {
+      await _refreshModerationPubkey();
+    }
+    await _syncSubscribedLabelersWithRelays();
+  }
 
+  /// Load persisted moderation settings without touching relays or NIP-05.
+  Future<void> ensureLoaded() => _ensurePersistedStateLoaded();
+
+  Future<void> _ensurePersistedStateLoaded() {
+    if (_loadedPersistedState) return Future<void>.value();
+    return _loadPersistedStateFuture ??= _loadPersistedState();
+  }
+
+  Future<void> _loadPersistedState() async {
     try {
-      // Resolve Divine moderation pubkey (cache → NIP-05 → fallback)
-      _divineModerationPubkey = await _resolveModerationPubkey(_prefs);
+      // Use cache or fallback only. Remote NIP-05 refresh happens from
+      // initialize(), which is called only from relay-ready paths.
+      _divineModerationPubkey = _cachedModerationPubkey(_prefs);
 
       final saved = _prefs.getStringList(_subscribedLabelersKey);
       if (saved != null) {
@@ -186,13 +207,10 @@ class ModerationLabelService {
         _subscribedLabelers.add(_divineModerationPubkey);
       }
 
-      // Subscribe to all labelers
-      for (final pubkey in _subscribedLabelers) {
-        await subscribeToLabeler(pubkey);
-      }
+      _loadedPersistedState = true;
 
       Log.info(
-        'ModerationLabelService initialized with '
+        'ModerationLabelService loaded '
         '${_subscribedLabelers.length} labelers '
         '(moderation pubkey: $_divineModerationPubkey)',
         name: 'ModerationLabelService',
@@ -204,12 +222,44 @@ class ModerationLabelService {
         name: 'ModerationLabelService',
         category: LogCategory.system,
       );
+    } finally {
+      _loadPersistedStateFuture = null;
+    }
+  }
+
+  Future<void> _syncSubscribedLabelersWithRelays() async {
+    for (final pubkey in _subscribedLabelers) {
+      await subscribeToLabeler(pubkey);
     }
   }
 
   /// Subscribe to Kind 1985 events from a labeler pubkey.
   Future<void> subscribeToLabeler(String pubkey) async {
     if (_loadedLabelers.contains(pubkey)) return;
+    final inFlight = _loadingLabelers[pubkey];
+    if (inFlight != null) {
+      await inFlight;
+      return;
+    }
+
+    final future = _subscribeToLabelerInternal(pubkey);
+    _loadingLabelers[pubkey] = future;
+    try {
+      await future;
+    } finally {
+      _loadingLabelers.remove(pubkey);
+    }
+  }
+
+  Future<void> _subscribeToLabelerInternal(String pubkey) async {
+    if (!_canQueryRelays()) {
+      Log.debug(
+        'Deferring labeler subscription until Nostr session is ready: $pubkey',
+        name: 'ModerationLabelService',
+        category: LogCategory.system,
+      );
+      return;
+    }
 
     try {
       final filter = Filter(
@@ -242,6 +292,7 @@ class ModerationLabelService {
 
   /// Add a new labeler and persist.
   Future<void> addLabeler(String pubkey) async {
+    await _ensurePersistedStateLoaded();
     _subscribedLabelers.add(pubkey);
     await _saveSubscribedLabelers();
     await subscribeToLabeler(pubkey);
@@ -249,6 +300,7 @@ class ModerationLabelService {
 
   /// Remove a labeler and clean up.
   Future<void> removeLabeler(String pubkey) async {
+    await _ensurePersistedStateLoaded();
     // Don't allow removing the built-in Divine labeler
     if (pubkey == _divineModerationPubkey) return;
 
@@ -264,6 +316,7 @@ class ModerationLabelService {
     bool enabled, {
     Iterable<String> followedPubkeys = const [],
   }) async {
+    await _ensurePersistedStateLoaded();
     _isFollowingModerationEnabled = enabled;
     await _saveFollowingModerationEnabled();
     await _syncFollowedLabelersInternal(
@@ -273,6 +326,7 @@ class ModerationLabelService {
 
   /// Sync the currently followed pubkeys that should act as trusted labelers.
   Future<void> syncFollowedLabelers(Iterable<String> followedPubkeys) async {
+    await _ensurePersistedStateLoaded();
     if (!_isFollowingModerationEnabled) return;
     await _syncFollowedLabelersInternal(followedPubkeys);
   }
@@ -489,7 +543,6 @@ class ModerationLabelService {
         .toSet();
 
     final toRemove = _followedLabelers.difference(normalized);
-    final toAdd = normalized.difference(_followedLabelers);
 
     for (final pubkey in toRemove) {
       _followedLabelers.remove(pubkey);
@@ -498,9 +551,10 @@ class ModerationLabelService {
       }
     }
 
-    for (final pubkey in toAdd) {
+    for (final pubkey in normalized) {
       _followedLabelers.add(pubkey);
-      if (!_subscribedLabelers.contains(pubkey)) {
+      if (!_subscribedLabelers.contains(pubkey) &&
+          !_loadedLabelers.contains(pubkey)) {
         await subscribeToLabeler(pubkey);
       }
     }
@@ -571,6 +625,32 @@ class ModerationLabelService {
       return cachedPubkey;
     }
     return fallbackModerationPubkeyHex;
+  }
+
+  String _cachedModerationPubkey(SharedPreferences prefs) {
+    final cachedPubkey = prefs.getString(_resolvedPubkeyKey);
+    if (cachedPubkey != null && cachedPubkey.isNotEmpty) {
+      return cachedPubkey;
+    }
+    return fallbackModerationPubkeyHex;
+  }
+
+  Future<void> _refreshModerationPubkey() async {
+    final previousPubkey = _divineModerationPubkey;
+    final resolvedPubkey = await _resolveModerationPubkey(_prefs);
+    if (resolvedPubkey == previousPubkey) return;
+
+    _divineModerationPubkey = resolvedPubkey;
+    _subscribedLabelers.remove(previousPubkey);
+    _subscribedLabelers.add(resolvedPubkey);
+    await _saveSubscribedLabelers();
+    await _unloadLabeler(previousPubkey);
+
+    Log.info(
+      'Updated moderation labeler from $previousPubkey to $resolvedPubkey',
+      name: 'ModerationLabelService',
+      category: LogCategory.system,
+    );
   }
 
   /// Migrate the legacy moderation pubkey out of stored subscriptions.
