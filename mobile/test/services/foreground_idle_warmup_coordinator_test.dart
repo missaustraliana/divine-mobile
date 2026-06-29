@@ -53,12 +53,7 @@ void main() {
         trigger: ForegroundIdleWarmupTrigger.videoPlaybackSettled,
       );
 
-      expect(calls, [
-        'forYou',
-        'newVideos',
-        'popular',
-        'notifications',
-      ]);
+      expect(calls, ['forYou', 'newVideos', 'popular', 'notifications']);
     });
 
     test('does not run while the app is backgrounded', () async {
@@ -168,6 +163,45 @@ void main() {
       expect(calls, ['forYou-start', 'forYou-end']);
     });
 
+    test('stops waiting for an in-flight task when a gate closes', () async {
+      final gateChanges = StreamController<void>.broadcast();
+      addTearDown(gateChanges.close);
+      final taskCompleter = Completer<void>();
+      final coordinator = ForegroundIdleWarmupCoordinator(
+        tasks: [
+          task(
+            ForegroundIdleWarmupTaskId.forYou,
+            run: () async {
+              calls.add('forYou-start');
+              await taskCompleter.future;
+              calls.add('forYou-end');
+            },
+          ),
+          task(ForegroundIdleWarmupTaskId.popular),
+        ],
+        isForeground: () => isForeground,
+        isIdle: () => isIdle,
+        gateChanges: gateChanges.stream,
+        now: () => now,
+      );
+
+      final warmup = coordinator.requestWarmup(
+        trigger: ForegroundIdleWarmupTrigger.startupSettled,
+      );
+
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, ['forYou-start']);
+
+      isIdle = false;
+      gateChanges.add(null);
+      await warmup;
+
+      expect(calls, ['forYou-start']);
+      expect(taskCompleter.isCompleted, isFalse);
+
+      taskCompleter.complete();
+    });
+
     test('skips tasks inside their cooldown window', () async {
       final coordinator = coordinatorWith([
         task(ForegroundIdleWarmupTaskId.forYou),
@@ -190,6 +224,31 @@ void main() {
       expect(calls, ['forYou', 'forYou']);
     });
 
+    test('not-applicable tasks do not consume cooldown', () async {
+      var shouldRun = false;
+      final coordinator = coordinatorWith([
+        ForegroundIdleWarmupTask(
+          id: ForegroundIdleWarmupTaskId.forYou,
+          cooldown: const Duration(minutes: 5),
+          shouldRun: () => shouldRun,
+          run: () async => calls.add('forYou'),
+        ),
+      ]);
+
+      await coordinator.requestWarmup(
+        trigger: ForegroundIdleWarmupTrigger.startupSettled,
+      );
+
+      expect(calls, isEmpty);
+
+      shouldRun = true;
+      await coordinator.requestWarmup(
+        trigger: ForegroundIdleWarmupTrigger.periodicIdleCheck,
+      );
+
+      expect(calls, ['forYou']);
+    });
+
     test('runs tasks again at the cooldown boundary', () async {
       final coordinator = coordinatorWith([
         task(ForegroundIdleWarmupTaskId.forYou),
@@ -210,10 +269,7 @@ void main() {
     test('applies cooldowns independently per task', () async {
       final coordinator = coordinatorWith([
         task(ForegroundIdleWarmupTaskId.forYou),
-        task(
-          ForegroundIdleWarmupTaskId.popular,
-          cooldown: Duration.zero,
-        ),
+        task(ForegroundIdleWarmupTaskId.popular, cooldown: Duration.zero),
       ]);
 
       await coordinator.requestWarmup(
@@ -255,7 +311,7 @@ void main() {
       expect(calls, ['forYou', 'popular', 'forYou']);
     });
 
-    test('timed out tasks do not block later tasks or consume cooldown', () {
+    test('a timed-out task blocks later passes until it settles', () {
       fakeAsync((async) {
         final slowTask = Completer<void>();
         final coordinator = coordinatorWith([
@@ -280,8 +336,12 @@ void main() {
         async.elapse(const Duration(seconds: 1));
         async.flushMicrotasks();
 
-        expect(calls, ['forYou', 'newVideos', 'popular']);
+        // The timed-out task stops the pass; later tasks are blocked rather
+        // than run alongside the still-active task.
+        expect(calls, ['forYou']);
 
+        // A new request cannot start an overlapping pass while the abandoned
+        // task is still active.
         unawaited(
           coordinator.requestWarmup(
             trigger: ForegroundIdleWarmupTrigger.periodicIdleCheck,
@@ -290,13 +350,77 @@ void main() {
         async.elapse(const Duration(seconds: 1));
         async.flushMicrotasks();
 
-        expect(calls, [
-          'forYou',
-          'newVideos',
-          'popular',
-          'forYou',
-        ]);
+        expect(calls, ['forYou']);
+
+        // Once it settles, the next request runs the remaining tasks. The
+        // timed-out task did not consume cooldown, so it runs again.
+        slowTask.complete();
+        async.flushMicrotasks();
+        unawaited(
+          coordinator.requestWarmup(
+            trigger: ForegroundIdleWarmupTrigger.periodicIdleCheck,
+          ),
+        );
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+
+        expect(calls, ['forYou', 'forYou', 'newVideos', 'popular']);
       });
+    });
+
+    test('blocks a new pass until an abandoned task settles after gate '
+        'close', () async {
+      final gateChanges = StreamController<void>.broadcast();
+      addTearDown(gateChanges.close);
+      final taskCompleter = Completer<void>();
+      final coordinator = ForegroundIdleWarmupCoordinator(
+        tasks: [
+          task(
+            ForegroundIdleWarmupTaskId.forYou,
+            run: () async {
+              calls.add('forYou');
+              await taskCompleter.future;
+            },
+          ),
+          task(ForegroundIdleWarmupTaskId.popular),
+        ],
+        isForeground: () => isForeground,
+        isIdle: () => isIdle,
+        gateChanges: gateChanges.stream,
+        now: () => now,
+      );
+
+      final first = coordinator.requestWarmup(
+        trigger: ForegroundIdleWarmupTrigger.startupSettled,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, ['forYou']);
+
+      // Gate closes mid-task: the pass returns but the task is still running.
+      isIdle = false;
+      gateChanges.add(null);
+      await first;
+      expect(calls, ['forYou']);
+
+      // Idle resumes, but a new request must not start an overlapping pass
+      // while the abandoned task is still active.
+      isIdle = true;
+      final held = coordinator.requestWarmup(
+        trigger: ForegroundIdleWarmupTrigger.periodicIdleCheck,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, ['forYou']);
+
+      // Once the abandoned task settles, the held request resolves and
+      // later requests run normally.
+      taskCompleter.complete();
+      await held;
+      expect(calls, ['forYou']);
+
+      await coordinator.requestWarmup(
+        trigger: ForegroundIdleWarmupTrigger.periodicIdleCheck,
+      );
+      expect(calls, ['forYou', 'forYou', 'popular']);
     });
 
     test('stops before the next task if the app stops being idle', () async {
