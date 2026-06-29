@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:nostr_app_bridge_repository/src/first_party_nostr_app_navigation.dart';
 import 'package:nostr_app_bridge_repository/src/models/nostr_app_directory_entry.dart';
 import 'package:nostr_app_bridge_repository/src/preloaded_nostr_apps.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -172,7 +173,7 @@ class NostrAppDirectoryService {
 
     for (final app in remoteOrCachedApps) {
       if (app.isApproved) {
-        appsBySlug[app.slug] = app;
+        appsBySlug[app.slug] = _withClientNavigationOrigins(app);
       } else {
         appsBySlug.remove(app.slug);
       }
@@ -180,5 +181,29 @@ class NostrAppDirectoryService {
 
     final apps = appsBySlug.values.toList(growable: false)..sort(_compareApps);
     return List<NostrAppDirectoryEntry>.unmodifiable(apps);
+  }
+
+  NostrAppDirectoryEntry _withClientNavigationOrigins(
+    NostrAppDirectoryEntry app,
+  ) {
+    final navigationConfig = firstPartyNostrAppNavigationBySlug[app.slug];
+    if (navigationConfig == null ||
+        !_hasExpectedFirstPartyOrigin(app, navigationConfig.expectedOrigin)) {
+      return app;
+    }
+
+    final origins = <String>{
+      ...app.allowedNavigationOrigins,
+      ...navigationConfig.allowedNavigationOrigins,
+    }.toList(growable: false);
+    return app.copyWith(allowedNavigationOrigins: origins);
+  }
+
+  bool _hasExpectedFirstPartyOrigin(
+    NostrAppDirectoryEntry app,
+    String expectedOrigin,
+  ) {
+    return app.primaryOrigin == expectedOrigin ||
+        app.allowedOrigins.contains(expectedOrigin);
   }
 }

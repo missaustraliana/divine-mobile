@@ -1,3 +1,4 @@
+import 'package:nostr_app_bridge_repository/src/first_party_nostr_app_navigation.dart';
 import 'package:nostr_app_bridge_repository/src/models/nostr_app_directory_entry.dart';
 
 const List<String> _sharedAllowedMethods = [
@@ -285,6 +286,10 @@ NostrAppDirectoryEntry _buildPreloadedApp({
   List<String> promptRequiredFor = _sharedPromptRequiredFor,
 }) {
   final origin = Uri.parse(launchUrl).origin;
+  final navigationConfig = firstPartyNostrAppNavigationBySlug[slug];
+  final allowedNavigationOrigins = navigationConfig?.expectedOrigin == origin
+      ? navigationConfig!.allowedNavigationOrigins
+      : const <String>[];
 
   return NostrAppDirectoryEntry(
     id: id,
@@ -295,6 +300,7 @@ NostrAppDirectoryEntry _buildPreloadedApp({
     iconUrl: '$origin/favicon.ico',
     launchUrl: launchUrl,
     allowedOrigins: [origin],
+    allowedNavigationOrigins: allowedNavigationOrigins,
     allowedMethods: allowedMethods,
     allowedSignEventKinds: allowedSignEventKinds,
     promptRequiredFor: promptRequiredFor,
