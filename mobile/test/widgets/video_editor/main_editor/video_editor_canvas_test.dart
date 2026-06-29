@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -301,6 +302,61 @@ void main() {
           isPlaying: false,
         ),
         isFalse,
+      );
+    });
+  });
+
+  group('VideoEditorCanvas.guardClipLoad', () {
+    test('returns true when the composition builds', () async {
+      final built = await VideoEditorCanvas.guardClipLoad(() async {});
+
+      expect(built, isTrue);
+    });
+
+    test(
+      'returns false and swallows a COMPOSITION_ERROR rejection (#3410)',
+      () async {
+        // The iOS player rejects an unbuildable composition for stale draft
+        // clips. The rejection must not escape as an unhandled async error and
+        // surface as a Crashlytics non-fatal.
+        Future<bool> guard() => VideoEditorCanvas.guardClipLoad(
+          () async => throw PlatformException(
+            code: 'COMPOSITION_ERROR',
+            message: 'Video composition has an invalid render size.',
+          ),
+        );
+
+        await expectLater(guard(), completion(isFalse));
+      },
+    );
+
+    test('rethrows a non-platform error so genuine bugs still surface', () {
+      // A programming-invariant violation (StateError/ArgumentError) is not a
+      // composition rejection — it must propagate so it reaches Crashlytics
+      // instead of being hidden behind a silent thumbnail fallback.
+      expect(
+        VideoEditorCanvas.guardClipLoad(
+          () async => throw ArgumentError('clips must not be empty'),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('rethrows non-composition platform errors', () {
+      expect(
+        VideoEditorCanvas.guardClipLoad(
+          () async => throw PlatformException(
+            code: 'PLAYER_ERROR',
+            message: 'Decoder failed while loading clips.',
+          ),
+        ),
+        throwsA(
+          isA<PlatformException>().having(
+            (error) => error.code,
+            'code',
+            'PLAYER_ERROR',
+          ),
+        ),
       );
     });
   });
