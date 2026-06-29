@@ -318,25 +318,43 @@ class ProfileRepository {
         switch (result) {
           case UserProfileFound():
             final funnelcakeProfile = UserProfile.fromUserProfileFound(result);
-            // Funnelcake profiles use DateTime.now() as a synthetic
-            // createdAt (the REST API does not expose the Nostr event
-            // timestamp), so _cacheProfileIfNewer cannot reliably guard
-            // against overwriting a freshly-saved bio. Only write to
-            // cache when no local profile exists yet; otherwise fall
+            await _cacheProfileStatsFromResult(pubkey, result);
+
+            if (result.profile.createdAt != null) {
+              // Funnelcake exposes the original Nostr Kind 0 `created_at`
+              // (the `profile.profile_updated` field), so a newest-wins
+              // merge against the local cache is safe — a stale Funnelcake
+              // copy can no longer clobber a freshly-saved bio, and a
+              // genuinely newer Funnelcake profile can upgrade an older
+              // local one (#3141).
+              final existing = await _userProfilesDao.getProfile(pubkey);
+              final funnelcakeWon = await _cacheProfileIfNewer(
+                funnelcakeProfile,
+                cached: existing,
+                cachedResolved: true,
+              );
+              // Mirror the cache decision exactly: when the Funnelcake copy
+              // did not win (older-or-equal, so the cache kept `existing`),
+              // return `existing` too. Returning the Funnelcake copy here
+              // would hand the caller a profile that disagrees with the
+              // cache and may be missing fields the local one carries
+              // (lud06, eventId, custom rawData).
+              return funnelcakeWon ? funnelcakeProfile : existing;
+            }
+
+            // Defensive fallback: a found profile without a parseable
+            // timestamp. Keep the conservative behavior — only write to
+            // cache when no local profile exists yet, otherwise fall
             // through to the relay/indexer path so a newer Kind 0 on
             // relays can still upgrade the cache.
             final existing = await _userProfilesDao.getProfile(pubkey);
             if (existing == null) {
               _knownCached.add(pubkey);
               await _userProfilesDao.upsertProfile(funnelcakeProfile);
+              return funnelcakeProfile;
             }
-            await _cacheProfileStatsFromResult(pubkey, result);
-            if (existing != null) {
-              // Local profile exists — skip the early return and let
-              // the relay/indexer path run so a newer Kind 0 can win.
-              break;
-            }
-            return funnelcakeProfile;
+          // Local profile exists — let the relay/indexer path below run
+          // so a newer Kind 0 can still win.
           case UserProfileNotPublished():
             // User exists but has no Kind 0. Cache stats and skip relay
             // fallback — the profile genuinely does not exist yet.
@@ -381,16 +399,33 @@ class ProfileRepository {
     return null;
   }
 
-  Future<void> _cacheProfileIfNewer(UserProfile profile) async {
-    final cachedProfile = await _userProfilesDao.getProfile(profile.pubkey);
+  /// Upserts [profile] into the local cache only when it is strictly newer
+  /// than the currently-cached profile for the same pubkey.
+  ///
+  /// Returns `true` when the cache was written ([profile] won), `false` when
+  /// an existing, newer-or-equal cache entry was kept.
+  ///
+  /// Pass [cached] together with `cachedResolved: true` when the caller has
+  /// already read the current cache entry, to skip a redundant DAO read. A
+  /// `null` [cached] with [cachedResolved] true means "confirmed no local
+  /// profile".
+  Future<bool> _cacheProfileIfNewer(
+    UserProfile profile, {
+    UserProfile? cached,
+    bool cachedResolved = false,
+  }) async {
+    final cachedProfile = cachedResolved
+        ? cached
+        : await _userProfilesDao.getProfile(profile.pubkey);
     if (cachedProfile != null &&
         !profile.createdAt.isAfter(cachedProfile.createdAt)) {
-      return;
+      return false;
     }
 
     _confirmedMissing.remove(profile.pubkey);
     _knownCached.add(profile.pubkey);
     await _userProfilesDao.upsertProfile(profile);
+    return true;
   }
 
   /// Queries connected relays and indexer relays in parallel for a
