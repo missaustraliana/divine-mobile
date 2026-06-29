@@ -1535,7 +1535,7 @@ void main() {
         () async {
           const sticker = StickerData.network(
             'https://stickers.example.com/heart.png',
-            description: 'Red heart',
+            description: LocalizedText({'en': 'Red heart'}),
             tags: ['heart'],
             packData: StickerPackData(
               packId: 'reactions',
@@ -1550,7 +1550,7 @@ void main() {
             ),
             meta: sticker.toJson(),
             exportConfigs: WidgetLayerExportConfigs(
-              id: 'sticker-${sticker.description}',
+              id: 'sticker-${sticker.description.fallback}',
               meta: sticker.toJson(),
             ),
           );

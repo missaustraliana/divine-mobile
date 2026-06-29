@@ -26,6 +26,7 @@ import 'package:openvine/mixins/codec_heavy_surface_guard.dart';
 import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/providers/clip_manager_provider.dart';
 import 'package:openvine/providers/video_editor_provider.dart';
+import 'package:openvine/repositories/sticker_repository.dart';
 import 'package:openvine/screens/library_screen.dart';
 import 'package:openvine/screens/video_editor/video_text_editor_screen.dart';
 import 'package:openvine/screens/video_editor/voice_over_recorder_screen.dart';
@@ -110,6 +111,12 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen>
   /// failed probe isn't retried on every audio-track change.
   final Set<String> _durationHealAttempted = {};
 
+  /// The locale the sticker catalog was last loaded for. Tracked so a locale
+  /// change while the editor is open re-localizes descriptions. The active
+  /// locale is only readable from a [Localizations] ancestor (available from
+  /// [didChangeDependencies] onward), not from [initState].
+  String? _loadedStickerLocale;
+
   ProImageEditorState? get _editor => _editorKey.currentState;
 
   DivineVideoClip? get _clip => ref.read(clipManagerProvider).firstClipOrNull;
@@ -128,8 +135,10 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen>
       name: 'VideoEditorScreen',
       category: LogCategory.video,
     );
-    _stickerBloc = VideoEditorStickerBloc(onPrecacheStickers: _precacheStickers)
-      ..add(const VideoEditorStickerLoad());
+    _stickerBloc = VideoEditorStickerBloc(
+      stickerRepository: StickerRepository(),
+      onPrecacheStickers: _precacheStickers,
+    );
     _clipEditorBloc = ClipEditorBloc(
       onFinalClipInvalidated: () {
         ref.read(videoEditorProvider.notifier).invalidateFinalRenderedClip();
@@ -199,6 +208,16 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen>
         _isLoadingDraft.value = false;
       }
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final localeCode = Localizations.localeOf(context).languageCode;
+    if (localeCode != _loadedStickerLocale) {
+      _loadedStickerLocale = localeCode;
+      _stickerBloc.add(VideoEditorStickerLoad(localeCode));
+    }
   }
 
   @override
@@ -375,7 +394,7 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen>
 
     if (sticker != null) {
       Log.debug(
-        '🎨 Adding sticker layer: ${sticker.description}',
+        '🎨 Adding sticker layer: ${sticker.description.fallback}',
         name: 'VideoEditorScreen',
         category: LogCategory.video,
       );

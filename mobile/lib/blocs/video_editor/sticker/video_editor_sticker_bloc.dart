@@ -1,10 +1,8 @@
-import 'dart:convert';
-
 import 'package:equatable/equatable.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:models/models.dart' show StickerData, StickerPackData;
+import 'package:models/models.dart' show StickerData;
 import 'package:openvine/observability/reportable_error.dart';
+import 'package:openvine/repositories/sticker_repository.dart';
 import 'package:unified_logger/unified_logger.dart';
 
 part 'video_editor_sticker_event.dart';
@@ -13,12 +11,14 @@ part 'video_editor_sticker_state.dart';
 /// BLoC for managing sticker selection in the video editor.
 ///
 /// Handles:
-/// - Loading stickers from assets
+/// - Loading stickers from the repository
 /// - Filtering stickers by search query
 class VideoEditorStickerBloc
     extends Bloc<VideoEditorStickerEvent, VideoEditorStickerState> {
-  VideoEditorStickerBloc({required this.onPrecacheStickers})
-    : super(const VideoEditorStickerInitial()) {
+  VideoEditorStickerBloc({
+    required this.stickerRepository,
+    required this.onPrecacheStickers,
+  }) : super(const VideoEditorStickerInitial()) {
     on<VideoEditorStickerLoad>(_onLoad);
     on<VideoEditorStickerSearch>(_onSearch);
   }
@@ -26,7 +26,8 @@ class VideoEditorStickerBloc
   /// Maximum number of stickers to precache on initial load.
   static const maxPrecacheCount = 18;
 
-  List<StickerData> _allStickers = [];
+  /// Loads the sticker catalog from bundled assets.
+  final StickerRepository stickerRepository;
 
   /// Called after stickers are loaded for precaching.
   final Function(List<StickerData> stickers) onPrecacheStickers;
@@ -38,29 +39,16 @@ class VideoEditorStickerBloc
     emit(const VideoEditorStickerLoading());
 
     try {
-      // Load stickers from JSON to support shareable sticker packs in the
-      // future.
-      final jsonString = await rootBundle.loadString(
-        'assets/stickers/stickers.json',
-      );
-      final jsonList = json.decode(jsonString) as List<dynamic>;
-
-      _allStickers = jsonList.map((e) {
-        final sticker = StickerData.fromJson(e as Map<String, dynamic>);
-        if (sticker.packData.packId.isEmpty) {
-          return sticker.copyWith(packData: StickerPackData.fallback);
-        }
-        return sticker;
-      }).toList();
+      final stickers = await stickerRepository.loadStickers(event.localeCode);
 
       Log.debug(
-        '🌟 Loaded ${_allStickers.length} stickers',
+        '🌟 Loaded ${stickers.length} stickers',
         name: 'VideoEditorStickerBloc',
         category: LogCategory.video,
       );
 
-      emit(VideoEditorStickerLoaded(stickers: _allStickers));
-      onPrecacheStickers(_allStickers.take(maxPrecacheCount).toList());
+      emit(VideoEditorStickerLoaded(stickers: stickers, allStickers: stickers));
+      onPrecacheStickers(stickers.take(maxPrecacheCount).toList());
     } catch (e, stackTrace) {
       // Matrix-YES: every failure path here is a build/asset invariant —
       // missing bundled asset (FlutterError), corrupt JSON (FormatException),
@@ -80,21 +68,40 @@ class VideoEditorStickerBloc
     VideoEditorStickerSearch event,
     Emitter<VideoEditorStickerState> emit,
   ) {
+    final currentState = state;
+    if (currentState is! VideoEditorStickerLoaded) return;
+
+    final allStickers = currentState.allStickers;
     final query = event.query.trim().toLowerCase();
 
     if (query.isEmpty) {
-      emit(VideoEditorStickerLoaded(stickers: _allStickers));
+      emit(
+        VideoEditorStickerLoaded(
+          stickers: allStickers,
+          allStickers: allStickers,
+        ),
+      );
       return;
     }
 
-    final filtered = _allStickers.where((sticker) {
-      final description = sticker.description.toLowerCase();
-      final tags = sticker.tags.map((t) => t.toLowerCase()).toList();
+    final filtered = allStickers.where((sticker) {
+      // Match across every localized description so a sticker is findable
+      // regardless of the user's locale (and by its English search keywords).
+      final descriptions = sticker.description.values.values.map(
+        (value) => value.toLowerCase(),
+      );
+      final tags = sticker.tags.map((tag) => tag.toLowerCase());
 
-      return description.contains(query) ||
+      return descriptions.any((value) => value.contains(query)) ||
           tags.any((tag) => tag.contains(query));
     }).toList();
 
-    emit(VideoEditorStickerLoaded(stickers: filtered, searchQuery: query));
+    emit(
+      VideoEditorStickerLoaded(
+        stickers: filtered,
+        allStickers: allStickers,
+        searchQuery: query,
+      ),
+    );
   }
 }

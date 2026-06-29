@@ -7,7 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:models/models.dart' show StickerData, StickerPackData;
+import 'package:models/models.dart'
+    show LocalizedText, StickerData, StickerPackData;
 import 'package:openvine/blocs/video_editor/sticker/video_editor_sticker_bloc.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/widgets/video_editor/sticker_editor/video_editor_sticker_sheet.dart';
@@ -23,19 +24,19 @@ void main() {
     final testStickers = [
       const StickerData(
         assetPath: 'assets/stickers/happy.png',
-        description: 'Happy face',
+        description: LocalizedText({'en': 'Happy face'}),
         tags: ['happy', 'smile'],
         packData: StickerPackData.fallback,
       ),
       const StickerData(
         assetPath: 'assets/stickers/sad.png',
-        description: 'Sad face',
+        description: LocalizedText({'en': 'Sad face'}),
         tags: ['sad', 'cry'],
         packData: StickerPackData.fallback,
       ),
       const StickerData(
         assetPath: 'assets/stickers/star.png',
-        description: 'Golden star',
+        description: LocalizedText({'en': 'Golden star'}),
         tags: ['star', 'gold'],
         packData: StickerPackData.fallback,
       ),
@@ -48,7 +49,13 @@ void main() {
     Widget buildSubject({VideoEditorStickerState? state}) {
       when(
         () => mockBloc.state,
-      ).thenReturn(state ?? VideoEditorStickerLoaded(stickers: testStickers));
+      ).thenReturn(
+        state ??
+            VideoEditorStickerLoaded(
+              stickers: testStickers,
+              allStickers: testStickers,
+            ),
+      );
 
       return MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -92,7 +99,12 @@ void main() {
         tester,
       ) async {
         await tester.pumpWidget(
-          buildSubject(state: VideoEditorStickerLoaded(stickers: testStickers)),
+          buildSubject(
+            state: VideoEditorStickerLoaded(
+              stickers: testStickers,
+              allStickers: testStickers,
+            ),
+          ),
         );
 
         // Should find GestureDetectors for each sticker (tappable items)
@@ -103,7 +115,12 @@ void main() {
         tester,
       ) async {
         await tester.pumpWidget(
-          buildSubject(state: const VideoEditorStickerLoaded(stickers: [])),
+          buildSubject(
+            state: const VideoEditorStickerLoaded(
+              stickers: [],
+              allStickers: [],
+            ),
+          ),
         );
 
         expect(find.text('No stickers available'), findsOneWidget);
@@ -116,6 +133,7 @@ void main() {
           buildSubject(
             state: const VideoEditorStickerLoaded(
               stickers: [],
+              allStickers: [],
               searchQuery: 'nonexistent',
             ),
           ),
@@ -161,6 +179,7 @@ void main() {
       ) async {
         final stateWithQuery = VideoEditorStickerLoaded(
           stickers: testStickers,
+          allStickers: testStickers,
           searchQuery: 'test',
         );
         whenListen(
@@ -183,7 +202,12 @@ void main() {
       testWidgets('hides clear button when no search query', (tester) async {
         when(
           () => mockBloc.state,
-        ).thenReturn(VideoEditorStickerLoaded(stickers: testStickers));
+        ).thenReturn(
+          VideoEditorStickerLoaded(
+            stickers: testStickers,
+            allStickers: testStickers,
+          ),
+        );
 
         await tester.pumpWidget(buildSubject());
         await tester.pump();
