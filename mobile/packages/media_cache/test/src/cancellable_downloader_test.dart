@@ -238,7 +238,7 @@ void main() {
       expect(target.existsSync(), isFalse);
     });
 
-    test('returns null for non-2xx responses', () async {
+    test('returns null for non-OK responses', () async {
       final client = _CallbackClient(
         (_) async => http.StreamedResponse(
           Stream<List<int>>.value(utf8.encode('not found')),
@@ -258,6 +258,54 @@ void main() {
       expect(file, isNull);
       expect(target.existsSync(), isFalse);
     });
+
+    test('does not write HTTP 202 processing bodies to disk', () async {
+      final client = _CallbackClient(
+        (_) async => http.StreamedResponse(
+          Stream<List<int>>.value(utf8.encode('{"status":"processing"}')),
+          HttpStatus.accepted,
+          headers: {'retry-after': '2'},
+        ),
+      );
+      final downloader = HttpCancellableDownloader(client);
+      final target = File('${tempDir.path}/processing.mp4');
+
+      final file = await downloader
+          .download(
+            url: 'https://example.com/processing.mp4',
+            targetFile: target,
+          )
+          .file;
+
+      expect(file, isNull);
+      expect(target.existsSync(), isFalse);
+    });
+
+    for (final statusCode in [
+      HttpStatus.noContent,
+      HttpStatus.partialContent,
+    ]) {
+      test('rejects HTTP $statusCode responses', () async {
+        final client = _CallbackClient(
+          (_) async => http.StreamedResponse(
+            Stream<List<int>>.value(utf8.encode('unexpected bytes')),
+            statusCode,
+          ),
+        );
+        final downloader = HttpCancellableDownloader(client);
+        final target = File('${tempDir.path}/http_$statusCode.mp4');
+
+        final file = await downloader
+            .download(
+              url: 'https://example.com/http_$statusCode.mp4',
+              targetFile: target,
+            )
+            .file;
+
+        expect(file, isNull);
+        expect(target.existsSync(), isFalse);
+      });
+    }
 
     test(
       'returns null when stream emits an error and cleans partial file',
