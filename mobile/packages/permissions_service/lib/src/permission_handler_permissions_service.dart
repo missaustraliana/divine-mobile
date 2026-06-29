@@ -1,6 +1,7 @@
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/services.dart';
 import 'package:meta/meta.dart';
 import 'package:permission_handler/permission_handler.dart' as ph;
 import 'package:permissions_service/src/models/models.dart';
@@ -26,8 +27,19 @@ class PermissionHandlerPermissionsService implements PermissionsService {
   /// {@macro permission_handler_permissions_service}
   const PermissionHandlerPermissionsService();
 
+  static const MethodChannel _nativeCameraChannel = MethodChannel(
+    'openvine/native_camera',
+  );
+
   @override
   Future<PermissionStatus> checkCameraStatus() async {
+    if (_usesMacOSNativeMediaPermissions) {
+      final status = await _nativeCameraChannel.invokeMethod<String>(
+        'cameraPermissionStatus',
+      );
+      return mapMacOSAuthorizationStatus(status);
+    }
+
     // coverage:ignore-start
     final status = await ph.Permission.camera.status;
     return mapPermissionStatus(status);
@@ -36,6 +48,13 @@ class PermissionHandlerPermissionsService implements PermissionsService {
 
   @override
   Future<PermissionStatus> requestCameraPermission() async {
+    if (_usesMacOSNativeMediaPermissions) {
+      final status = await _nativeCameraChannel.invokeMethod<String>(
+        'requestCameraPermission',
+      );
+      return mapMacOSAuthorizationStatus(status);
+    }
+
     // coverage:ignore-start
     final status = await ph.Permission.camera.request();
     return mapPermissionStatus(status);
@@ -44,6 +63,13 @@ class PermissionHandlerPermissionsService implements PermissionsService {
 
   @override
   Future<PermissionStatus> checkMicrophoneStatus() async {
+    if (_usesMacOSNativeMediaPermissions) {
+      final status = await _nativeCameraChannel.invokeMethod<String>(
+        'microphonePermissionStatus',
+      );
+      return mapMacOSAuthorizationStatus(status);
+    }
+
     // coverage:ignore-start
     final status = await ph.Permission.microphone.status;
     return mapPermissionStatus(status);
@@ -52,6 +78,13 @@ class PermissionHandlerPermissionsService implements PermissionsService {
 
   @override
   Future<PermissionStatus> requestMicrophonePermission() async {
+    if (_usesMacOSNativeMediaPermissions) {
+      final status = await _nativeCameraChannel.invokeMethod<String>(
+        'requestMicrophonePermission',
+      );
+      return mapMacOSAuthorizationStatus(status);
+    }
+
     // coverage:ignore-start
     final status = await ph.Permission.microphone.request();
     return mapPermissionStatus(status);
@@ -59,9 +92,18 @@ class PermissionHandlerPermissionsService implements PermissionsService {
   }
 
   @override
-  // coverage:ignore-start
-  Future<bool> openAppSettings() => ph.openAppSettings();
-  // coverage:ignore-end
+  Future<bool> openAppSettings() async {
+    if (_usesMacOSNativeMediaPermissions) {
+      final opened = await _nativeCameraChannel.invokeMethod<bool>(
+        'openSystemSettings',
+      );
+      return opened ?? false;
+    }
+
+    // coverage:ignore-start
+    return ph.openAppSettings();
+    // coverage:ignore-end
+  }
 
   @override
   Future<PermissionStatus> checkGalleryStatus() async {
@@ -139,4 +181,22 @@ class PermissionHandlerPermissionsService implements PermissionsService {
 
     return PermissionStatus.canRequest;
   }
+
+  /// Maps a macOS AVFoundation authorization status string (as returned by
+  /// `NativeCameraPlugin`) to our domain [PermissionStatus].
+  ///
+  /// `denied`/`restricted` require a System Settings trip on macOS; an
+  /// unknown or `notDetermined` status is still requestable.
+  @visibleForTesting
+  @internal
+  PermissionStatus mapMacOSAuthorizationStatus(String? status) {
+    return switch (status) {
+      'authorized' => PermissionStatus.granted,
+      'denied' || 'restricted' => PermissionStatus.requiresSettings,
+      _ => PermissionStatus.canRequest,
+    };
+  }
+
+  bool get _usesMacOSNativeMediaPermissions =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
 }
