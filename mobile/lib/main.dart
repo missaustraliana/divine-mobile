@@ -63,6 +63,7 @@ import 'package:openvine/providers/deep_link_provider.dart';
 import 'package:openvine/providers/environment_provider.dart';
 import 'package:openvine/providers/foreground_idle_warmup_provider.dart';
 import 'package:openvine/providers/nostr_client_provider.dart';
+import 'package:openvine/providers/service_providers.dart';
 import 'package:openvine/providers/shared_preferences_provider.dart';
 import 'package:openvine/router/router.dart';
 import 'package:openvine/screens/auth/welcome_screen.dart';
@@ -84,7 +85,6 @@ import 'package:openvine/services/database_encryption_bootstrap.dart';
 import 'package:openvine/services/deep_link_service.dart';
 import 'package:openvine/services/firebase_initialization.dart';
 import 'package:openvine/services/locale_preference_service.dart';
-import 'package:openvine/services/logging_config_service.dart';
 import 'package:openvine/services/mention_resolution_service.dart';
 import 'package:openvine/services/nip98_auth_service.dart' show HttpMethod;
 import 'package:openvine/services/notification_helpers.dart'
@@ -93,7 +93,6 @@ import 'package:openvine/services/notification_service.dart'
     show NotificationTapEvent;
 import 'package:openvine/services/notification_target_resolver.dart';
 import 'package:openvine/services/openvine_media_cache.dart';
-import 'package:openvine/services/performance_monitoring_service.dart';
 import 'package:openvine/services/pro_video_editor_log_forwarder.dart';
 import 'package:openvine/services/quick_actions_coordinator.dart';
 import 'package:openvine/services/secure_storage_options.dart';
@@ -780,7 +779,7 @@ StartupCoordinator _createStartupCoordinator(ProviderContainer container) {
       await _runTimedStartupTask(
         phaseName: 'performance_monitoring',
         initializationStep: 'Initializing performance monitoring',
-        task: PerformanceMonitoringService.instance.initialize,
+        task: container.read(performanceMonitoringServiceProvider).initialize,
       );
     },
     optional: true,
@@ -794,7 +793,7 @@ StartupCoordinator _createStartupCoordinator(ProviderContainer container) {
         phaseName: 'logging_config',
         initializationStep: 'Initializing logging configuration',
         task: () async {
-          await LoggingConfigService.instance.initialize();
+          await container.read(loggingConfigServiceProvider).initialize();
           LogMessageBatcher.instance.initialize();
         },
       );
