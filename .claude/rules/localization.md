@@ -24,6 +24,12 @@ When creating new UI, add strings to the ARB file first:
 3. Add `@` metadata for parameterized strings with placeholders
 4. Run `flutter gen-l10n` from `mobile/`
 5. Use `context.l10n.keyName` in the widget
+6. Mirror the key into every other `app_*.arb` locale, or add it to
+   `_knownUntranslatedDebt` in `test/l10n/arb_consistency_test.dart` when
+   translations are deferred to a later pass. Then run
+   `flutter test test/l10n/arb_consistency_test.dart` (or the check-l10n
+   skill). Adding a key to `app_en.arb` only — without mirroring it or
+   marking it as known debt — fails that test in CI.
 
 ```json
 {

@@ -383,6 +383,19 @@ If a line is genuinely unreachable, exclude it from coverage with a
 justified `// coverage:ignore-line` (or block) comment rather than
 leaving the gate red.
 
+### Untested-services floor
+
+Every service under `mobile/lib/services/` must have a same-named
+`*_test.dart`. The set of untested services is frozen in
+`mobile/scripts/baseline/untested_services.txt` and may only ever
+**shrink** — adding a new `*_service.dart` without a test fails CI
+(`check_untested_services_floor.sh`) and the pre-push hook. After adding
+the test, ratchet the floor and commit the baseline:
+
+```bash
+UPDATE_BASELINE=1 bash mobile/scripts/check_untested_services_floor.sh
+```
+
 ---
 
 ## Widget tests that use `context.l10n`
