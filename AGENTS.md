@@ -7,6 +7,15 @@
 - Start with current code and focused docs, especially `CONTRIBUTING.md`, `docs/STATE_MANAGEMENT.md`, `docs/BLOC_UI_MIGRATION_PRD.md`, `docs/NOSTR_EVENT_TYPES.md`, `mobile/docs/NOSTR_VIDEO_EVENTS.md`, `mobile/docs/DESIGN_SYSTEM_COMPONENTS.md`, and `mobile/docs/GOLDEN_TESTING_GUIDE.md`.
 - Older docs can drift. If documentation conflicts, trust the current implementation, targeted tests, and the newest focused doc over historical notes.
 
+## Divine Context And Brain
+
+- Before starting broad product, architecture, protocol, or cross-repo work, read `${DIVINE_CONTEXT_ROOT:-../divine-context}/AGENT_CONTEXT.md` if it exists. If it is unavailable, rely on this repo's focused docs and ask before making cross-repo assumptions.
+- `divine-context` is the cross-repo handbook for product goals, architecture, terminology, Nostr usage, and the service catalog. Use it before inventing a new service, protocol shape, or product assumption.
+- Divine Brain is an optional developer-local knowledge source for company context that is not visible in the local working tree: Slack decisions, Drive docs, GitHub history, Gmail threads, Figma context, Cloudflare Workers, Fastly services, incidents, customer themes, and prior implementation rationale.
+- When Divine Brain MCP tools are configured and a task would benefit from company memory, prefer `mcp__divine_brain__search` for raw engineering/context retrieval, `mcp__divine_brain__ask` for synthesized answers, `mcp__divine_brain__world` for typed entity lookup, and `mcp__divine_brain__sql` for allow-listed rollups.
+- Cite Brain results back to the user or PR text when they influence the answer. If Brain is unavailable, say that directly and continue only from local evidence; do not guess missing company context.
+- Do not commit Divine Brain CF Access headers, service tokens, nsecs, or other credentials to this repo. Brain auth belongs in developer-local/global MCP configuration. The repo `.mcp.json` may list non-secret public MCP servers only.
+
 ## Worktree-First Task Workflow
 
 > See `.claude/rules/agent_workflow.md` for detailed rationale and forbidden patterns. The bullets below are the operational summary.
@@ -113,3 +122,44 @@
 - Before opening the PR, review the diff and remove stray edits, generated junk, logs, scratch files, and half-finished experiments.
 - After opening or updating a PR, inspect GitHub checks and rerun stale semantic jobs if needed.
 - After a branch is merged or abandoned, prune the worktree and branch so stale task state does not accumulate.
+
+## metaswarm
+
+This repo includes a portable metaswarm project profile for agents that have the metaswarm plugin installed. Metaswarm is optional local orchestration; it does not replace this repo's GitHub Actions, review, test, or coverage policies.
+
+### Workflow
+
+- **Most tasks**: `$start` -- primes context, guides scoping, picks the right level of process
+- **Complex features** (multi-file, spec-driven): Describe what you want built with a Definition of Done, then say: `Use the full metaswarm orchestration workflow.`
+
+### Available Skills
+
+Codex discovers skills by their SKILL.md `name` field. Invoke with `$name` syntax.
+
+| Invoke | Purpose |
+|---|---|
+| `$start` | Begin tracked work on a task |
+| `$setup` | Interactive guided setup |
+| `$design-review-gate` | Trigger design review gate (5 reviewers) |
+| `$pr-shepherd` | Monitor a PR through to merge |
+| `$handling-pr-comments` | Handle PR review comments |
+| `$brainstorming-extension` | Refine an idea with design review gate |
+| `$create-issue` | Create a well-structured GitHub Issue |
+| `$plan-review-gate` | Adversarial plan review (3 reviewers) |
+
+### Quality Gates
+
+- **Design Review Gate** -- 5-reviewer design review after design is drafted (`$design-review-gate`)
+- **Plan Review Gate** -- 3 adversarial reviewers (Feasibility, Completeness, Scope & Alignment) -- ALL must PASS
+- **Testing Gate** -- use the existing repo policy in `.claude/rules/testing.md` plus package-specific workflow coverage gates. Do not invent a root coverage threshold for this repo.
+
+### Testing & Quality
+
+- **Test-backed changes** -- add or update tests with the change according to the repo policy above. For metaswarm-led implementation plans, prefer a red/green TDD loop when it is practical and keeps the task reviewable.
+- **Coverage policy** -- follow `.claude/rules/testing.md` and any package-specific `min_coverage` workflows. Run the relevant package tests and coverage checks called out by AGENTS.md.
+
+### Workflow Enforcement
+
+- Use design and plan review gates when a task is complex enough to warrant metaswarm orchestration.
+- Run the smallest relevant verification first, then broaden when the change is cross-cutting.
+- Follow the repo guardrails above: never use `--no-verify`, never `git push --force` without approval, never self-certify, and stay within file scope.
