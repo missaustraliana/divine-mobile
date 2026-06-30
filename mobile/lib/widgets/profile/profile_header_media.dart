@@ -1,5 +1,24 @@
 part of 'profile_header_widget.dart';
 
+/// Hero tag for the avatar ↔ lightbox shared-element flight, scoped to the
+/// user. A global tag would let two profile headers with the same tag in one
+/// navigator (e.g. other-profile → other-profile, both on the root navigator)
+/// morph one user's avatar into another's during the page transition.
+String _avatarHeroTag(String userIdHex) => 'profile_avatar_hero_$userIdHex';
+
+/// Size and corner radius of the full-screen lightbox avatar.
+const double _lightboxAvatarSize = 288;
+const double _lightboxAvatarCornerRadius = 112;
+
+/// Corner-radius-to-size ratio of the lightbox avatar, also matched by the
+/// 144px header avatar (56px radius). The Hero flight reproduces this ratio at
+/// every interpolated size so the corner stays proportional. The default
+/// flight shuttle instead paints the destination's fixed 112px radius onto the
+/// shrinking flight box, which clamps to a full circle while the box is smaller
+/// than 224px and makes the avatar briefly round mid-flight.
+const double _avatarHeroCornerRatio =
+    _lightboxAvatarCornerRadius / _lightboxAvatarSize;
+
 class _AboutText extends StatefulWidget {
   const _AboutText({required this.about});
 
@@ -331,7 +350,14 @@ class _ProfileAvatarWithColor extends StatelessWidget {
               imageUrl: imageUrl,
               userIdHex: userIdHex,
             ),
-            child: avatarWidget,
+            child: Hero(
+              tag: _avatarHeroTag(userIdHex),
+              flightShuttleBuilder: (_, _, _, _, _) => _AvatarHeroFlightShuttle(
+                imageUrl: imageUrl,
+                userIdHex: userIdHex,
+              ),
+              child: avatarWidget,
+            ),
           )
         : avatarWidget;
 
@@ -445,18 +471,52 @@ class _ProfileActionLabel extends StatelessWidget {
 // Avatar lightbox
 // ---------------------------------------------------------------------------
 
+class _AvatarHeroFlightShuttle extends StatelessWidget {
+  const _AvatarHeroFlightShuttle({required this.userIdHex, this.imageUrl});
+
+  final String? imageUrl;
+  final String userIdHex;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final boxSize = constraints.biggest.shortestSide;
+        return UserAvatar(
+          imageUrl: imageUrl,
+          placeholderSeed: userIdHex,
+          size: boxSize,
+          cornerRadius: boxSize * _avatarHeroCornerRatio,
+        );
+      },
+    );
+  }
+}
+
 void _showAvatarLightbox(
   BuildContext context, {
   required String userIdHex,
   String? imageUrl,
 }) {
-  showGeneralDialog<void>(
-    context: context,
-    barrierColor: VineTheme.transparent,
-    barrierDismissible: true,
-    barrierLabel: context.l10n.profileAvatarLightboxBarrierLabel,
-    pageBuilder: (context, _, _) =>
-        _AvatarLightbox(imageUrl: imageUrl, userIdHex: userIdHex),
+  // Push on the root navigator so the full-screen blurred backdrop covers the
+  // bottom navigation bar: on the own-profile tab the nearest navigator is the
+  // StatefulShellRoute branch, confined to the Scaffold body. (The previous
+  // showGeneralDialog used useRootNavigator: true for the same reason.) The
+  // Hero flight still runs across the boundary because Flutter collects heroes
+  // from the current PageRoute of nested navigators, so the header avatar
+  // (branch) and the lightbox (root) are matched. A PageRoute — not a
+  // PopupRoute like showGeneralDialog — is required for the HeroController.
+  Navigator.of(context, rootNavigator: true).push<void>(
+    PageRouteBuilder<void>(
+      opaque: false,
+      barrierColor: VineTheme.transparent,
+      barrierDismissible: true,
+      barrierLabel: context.l10n.profileAvatarLightboxBarrierLabel,
+      pageBuilder: (context, _, _) =>
+          _AvatarLightbox(imageUrl: imageUrl, userIdHex: userIdHex),
+      transitionsBuilder: (context, animation, _, child) =>
+          FadeTransition(opacity: animation, child: child),
+    ),
   );
 }
 
@@ -486,11 +546,14 @@ class _AvatarLightbox extends StatelessWidget {
               child: Stack(
                 children: [
                   Center(
-                    child: UserAvatar(
-                      imageUrl: imageUrl,
-                      placeholderSeed: userIdHex,
-                      size: 288,
-                      cornerRadius: 112,
+                    child: Hero(
+                      tag: _avatarHeroTag(userIdHex),
+                      child: UserAvatar(
+                        imageUrl: imageUrl,
+                        placeholderSeed: userIdHex,
+                        size: _lightboxAvatarSize,
+                        cornerRadius: _lightboxAvatarCornerRadius,
+                      ),
                     ),
                   ),
                   Positioned(
