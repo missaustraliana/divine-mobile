@@ -63,15 +63,45 @@ PersonalEventCacheService personalEventCacheService(Ref ref) {
   final service = PersonalEventCacheService();
   ref.onDispose(service.dispose);
 
-  // Initialize with current user's pubkey when authenticated
-  if (authService.isAuthenticated && authService.currentPublicKeyHex != null) {
-    service.initialize(authService.currentPublicKeyHex!).catchError((e) {
-      Log.warning(
-        'Failed to initialize PersonalEventCacheService: $e',
-        name: 'PersonalEventCacheService',
-      );
-    });
+  String? initializingPubkey;
+  void syncWithAuthState(AuthState authState) {
+    if (authState == AuthState.unauthenticated) {
+      initializingPubkey = null;
+      service.resetCurrentUser();
+      return;
+    }
+
+    final pubkey = authService.currentPublicKeyHex;
+    if (!authService.isAuthenticated || pubkey == null) {
+      return;
+    }
+    if (initializingPubkey == pubkey) {
+      return;
+    }
+
+    initializingPubkey = pubkey;
+    unawaited(
+      service
+          .initialize(pubkey)
+          .catchError((e) {
+            Log.warning(
+              'Failed to initialize PersonalEventCacheService: $e',
+              name: 'PersonalEventCacheService',
+            );
+          })
+          .whenComplete(() {
+            if (initializingPubkey == pubkey) {
+              initializingPubkey = null;
+            }
+          }),
+    );
   }
+
+  final authSubscription = authService.authStateStream.listen(
+    syncWithAuthState,
+  );
+  ref.onDispose(authSubscription.cancel);
+  syncWithAuthState(authService.authState);
 
   return service;
 }
