@@ -22,6 +22,47 @@ class MediaAuthInterceptor {
   final ContentFilterService _contentFilterService;
   final MediaViewerAuthService _mediaViewerAuthService;
 
+  bool get canAutoAuthorizeAdultMedia =>
+      _ageVerificationService.isAdultContentVerified &&
+      _contentFilterService.adultPlaybackPreference ==
+          ContentFilterPreference.show;
+
+  /// Creates viewer-auth headers only when the user's existing adult-content
+  /// preferences allow automatic playback.
+  ///
+  /// Unlike [handleUnauthorizedMedia], this never shows an age-verification
+  /// dialog. Callers use it for background retries where a surprise prompt would
+  /// be worse than leaving the explicit Verify age button on screen.
+  Future<ViewerAuthResult> createAutoAuthHeadersForAdultMedia({
+    String? sha256Hash,
+    String? url,
+    String? serverUrl,
+  }) async {
+    try {
+      if (!canAutoAuthorizeAdultMedia) {
+        return const ViewerAuthUnavailable();
+      }
+
+      Log.debug(
+        '✅ Auto-authorizing adult media playback',
+        name: 'MediaAuthInterceptor',
+        category: LogCategory.system,
+      );
+      return await _mediaViewerAuthService.createAuthHeaders(
+        sha256Hash: sha256Hash,
+        url: url,
+        serverUrl: serverUrl,
+      );
+    } catch (e) {
+      Log.error(
+        'Failed to auto-authorize adult media: $e',
+        name: 'MediaAuthInterceptor',
+        category: LogCategory.system,
+      );
+      return const ViewerAuthUnavailable();
+    }
+  }
+
   /// Handle 401 unauthorized response from Blossom media server.
   ///
   /// Returns [ViewerAuthAuthorized] with request headers when the viewer can
@@ -62,8 +103,7 @@ class MediaAuthInterceptor {
 
       // Auto-create auth headers only when the user is already verified and
       // every adult category is configured to show.
-      if (isAdultContentVerified &&
-          playbackPreference == ContentFilterPreference.show) {
+      if (canAutoAuthorizeAdultMedia) {
         Log.debug(
           '✅ Auto-showing adult content (user preference: always show)',
           name: 'MediaAuthInterceptor',

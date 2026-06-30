@@ -10,6 +10,7 @@ import 'package:infinite_video_feed/infinite_video_feed.dart';
 import 'package:models/models.dart';
 import 'package:openvine/blocs/codec_heavy_surface/codec_heavy_surface_cubit.dart';
 import 'package:openvine/blocs/feed_loading_moderation/feed_loading_moderation_cubit.dart';
+import 'package:openvine/blocs/feed_loading_moderation/feed_loading_moderation_state.dart';
 import 'package:openvine/blocs/video_interactions/video_interactions_bloc.dart';
 import 'package:openvine/blocs/video_playback_status/video_playback_status_cubit.dart';
 import 'package:openvine/blocs/video_playback_status/video_playback_status_state.dart';
@@ -368,6 +369,7 @@ class FeedVideosState extends ConsumerState<FeedVideos> with RouteAware {
           return VerifyingAwareVideoErrorOverlay(
             video: video,
             index: index,
+            resolveSha256: VideoModerationStatusService.resolveSha256,
             onRetry: onRetry,
             retryPlayback: (httpHeaders) =>
                 _retryPooledVideoAt(index, httpHeaders),
@@ -534,6 +536,7 @@ class __OverlayState extends ConsumerState<_Overlay> {
       ref: ref,
       video: widget.video,
       index: widget.index,
+      resolveSha256: VideoModerationStatusService.resolveSha256,
       retryPlayback: (httpHeaders) =>
           _feedState?.retryAt(widget.index, httpHeaders: httpHeaders) ??
           Future.value(false),
@@ -935,7 +938,7 @@ class _FeedLoadingOrRestrictedOverlay extends ConsumerWidget {
   }
 }
 
-class _FeedLoadingOrRestrictedOverlayView extends StatelessWidget {
+class _FeedLoadingOrRestrictedOverlayView extends ConsumerWidget {
   const _FeedLoadingOrRestrictedOverlayView({
     required this.video,
     required this.index,
@@ -951,36 +954,75 @@ class _FeedLoadingOrRestrictedOverlayView extends StatelessWidget {
   final bool shouldPortraitExpand;
 
   @override
-  Widget build(BuildContext context) {
-    final isRestricted = context.select(
-      (FeedLoadingModerationCubit c) => c.state.isRestricted,
-    );
+  Widget build(BuildContext context, WidgetRef ref) {
+    return BlocListener<FeedLoadingModerationCubit, FeedLoadingModerationState>(
+      listenWhen: (previous, current) =>
+          previous.status != current.status && current.isAgeRestricted,
+      listener: (context, state) {
+        unawaited(
+          autoRetryAgeRestrictedPooledVideo(
+            context: context,
+            ref: ref,
+            video: video,
+            index: index,
+            resolveSha256: VideoModerationStatusService.resolveSha256,
+            retryPlayback: (httpHeaders) =>
+                context
+                    .findAncestorStateOfType<InfiniteVideoFeedState>()
+                    ?.retryAt(index, httpHeaders: httpHeaders) ??
+                Future.value(false),
+          ),
+        );
+      },
+      child:
+          BlocBuilder<FeedLoadingModerationCubit, FeedLoadingModerationState>(
+            builder: (context, state) {
+              if (state.isRestricted) {
+                return VerifyingAwareVideoErrorOverlay(
+                  video: video,
+                  index: index,
+                  resolveSha256: VideoModerationStatusService.resolveSha256,
+                  // Retry is hidden for moderation-restricted content.
+                  onRetry: () {},
+                  retryPlayback: (httpHeaders) =>
+                      context
+                          .findAncestorStateOfType<InfiniteVideoFeedState>()
+                          ?.retryAt(index, httpHeaders: httpHeaders) ??
+                      Future.value(false),
+                  errorType: VideoErrorType.forbidden,
+                  shouldPortraitExpand: shouldPortraitExpand,
+                  isSquare: isSquare,
+                );
+              }
 
-    if (isRestricted) {
-      return VerifyingAwareVideoErrorOverlay(
-        video: video,
-        index: index,
-        // Retry is hidden for moderation-restricted content.
-        onRetry: () {},
-        retryPlayback: (httpHeaders) =>
-            context.findAncestorStateOfType<InfiniteVideoFeedState>()?.retryAt(
-              index,
-              httpHeaders: httpHeaders,
-            ) ??
-            Future.value(false),
-        errorType: VideoErrorType.notFound,
-        shouldPortraitExpand: shouldPortraitExpand,
-        isSquare: isSquare,
-      );
-    }
+              if (state.isAgeRestricted) {
+                return VerifyingAwareVideoErrorOverlay(
+                  video: video,
+                  index: index,
+                  resolveSha256: VideoModerationStatusService.resolveSha256,
+                  // Retry is hidden while age-gated playback uses Verify age.
+                  onRetry: () {},
+                  retryPlayback: (httpHeaders) =>
+                      context
+                          .findAncestorStateOfType<InfiniteVideoFeedState>()
+                          ?.retryAt(index, httpHeaders: httpHeaders) ??
+                      Future.value(false),
+                  errorType: VideoErrorType.ageRestricted,
+                  shouldPortraitExpand: shouldPortraitExpand,
+                  isSquare: isSquare,
+                );
+              }
 
-    return VideoLoadingPlaceholder(
-      videoId: video.id,
-      index: index,
-      feedMode: feedMode,
-      thumbnailUrl: video.thumbnailUrl,
-      isSquare: isSquare,
-      shouldPortraitExpand: shouldPortraitExpand,
+              return VideoLoadingPlaceholder(
+                videoId: video.id,
+                index: index,
+                feedMode: feedMode,
+                thumbnailUrl: video.thumbnailUrl,
+                isSquare: isSquare,
+                shouldPortraitExpand: shouldPortraitExpand,
+              );
+            },
+          ),
     );
   }
 }
