@@ -42,7 +42,21 @@ Before writing a new helper, utility, or formatter, search `mobile/packages/` fo
 ## Code Quality
 
 ### Line Length
-Lines should be 80 characters or fewer.
+Dart source lines should use `dart format`'s default 80-character page
+width. In this repo, the `very_good_analysis`
+`lines_longer_than_80_chars` lint is disabled, so formatting checks enforce
+this rule, not `flutter analyze`.
+
+The 80-character limit applies **only to Dart code**. Other file types are
+not bound by it and should follow their own formatter and conventions:
+
+- **Markdown** (PR / issue descriptions, docs, these rule files):
+  renderers soft-wrap automatically, so the limit does not apply. Do not
+  hard-wrap PR or issue descriptions mid-sentence — GitHub shows the
+  manual breaks as broken lines in its editor.
+- **Kotlin / Swift / Gradle / YAML / JSON / shell / etc.**: use that
+  language's standard formatter or conventions; do not impose Dart's
+  80-column rule.
 
 ### Functions
 - Keep functions short with a single purpose
