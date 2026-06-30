@@ -9363,4 +9363,22 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get subtitleEditorCueHint => 'Caption text';
+
+  @override
+  String get imageCropEditorRotateLabel => 'Putar';
+
+  @override
+  String get imageCropEditorFlipLabel => 'Balik';
+
+  @override
+  String get imageCropEditorResetLabel => 'Atur ulang';
+
+  @override
+  String get imageCropEditorCloseSemanticLabel => 'Batalkan pemangkasan';
+
+  @override
+  String get imageCropEditorDoneSemanticLabel => 'Terapkan pemangkasan';
+
+  @override
+  String get imageCropEditorProcessing => 'Menerapkan pemangkasan…';
 }

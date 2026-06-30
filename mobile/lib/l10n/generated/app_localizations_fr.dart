@@ -9512,4 +9512,22 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get subtitleEditorCueHint => 'Caption text';
+
+  @override
+  String get imageCropEditorRotateLabel => 'Pivoter';
+
+  @override
+  String get imageCropEditorFlipLabel => 'Retourner';
+
+  @override
+  String get imageCropEditorResetLabel => 'Réinitialiser';
+
+  @override
+  String get imageCropEditorCloseSemanticLabel => 'Annuler le recadrage';
+
+  @override
+  String get imageCropEditorDoneSemanticLabel => 'Appliquer le recadrage';
+
+  @override
+  String get imageCropEditorProcessing => 'Application du recadrage…';
 }

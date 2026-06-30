@@ -9360,4 +9360,22 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get subtitleEditorCueHint => 'Caption text';
+
+  @override
+  String get imageCropEditorRotateLabel => 'Döndür';
+
+  @override
+  String get imageCropEditorFlipLabel => 'Çevir';
+
+  @override
+  String get imageCropEditorResetLabel => 'Sıfırla';
+
+  @override
+  String get imageCropEditorCloseSemanticLabel => 'Kırpmayı iptal et';
+
+  @override
+  String get imageCropEditorDoneSemanticLabel => 'Kırpmayı uygula';
+
+  @override
+  String get imageCropEditorProcessing => 'Kırpma uygulanıyor…';
 }

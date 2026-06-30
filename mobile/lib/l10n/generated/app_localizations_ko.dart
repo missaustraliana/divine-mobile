@@ -9082,4 +9082,22 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get subtitleEditorCueHint => 'Caption text';
+
+  @override
+  String get imageCropEditorRotateLabel => '회전';
+
+  @override
+  String get imageCropEditorFlipLabel => '뒤집기';
+
+  @override
+  String get imageCropEditorResetLabel => '초기화';
+
+  @override
+  String get imageCropEditorCloseSemanticLabel => '자르기 취소';
+
+  @override
+  String get imageCropEditorDoneSemanticLabel => '자르기 적용';
+
+  @override
+  String get imageCropEditorProcessing => '자르기 적용 중…';
 }

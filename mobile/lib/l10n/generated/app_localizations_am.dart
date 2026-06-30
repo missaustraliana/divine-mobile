@@ -9211,4 +9211,22 @@ class AppLocalizationsAm extends AppLocalizations {
 
   @override
   String get subtitleEditorCueHint => 'Caption text';
+
+  @override
+  String get imageCropEditorRotateLabel => 'አሽከርክር';
+
+  @override
+  String get imageCropEditorFlipLabel => 'ግልብጥ';
+
+  @override
+  String get imageCropEditorResetLabel => 'ዳግም አስጀምር';
+
+  @override
+  String get imageCropEditorCloseSemanticLabel => 'መከርከምን ሰርዝ';
+
+  @override
+  String get imageCropEditorDoneSemanticLabel => 'መከርከምን ተግብር';
+
+  @override
+  String get imageCropEditorProcessing => 'መከርከም በመተግበር ላይ…';
 }

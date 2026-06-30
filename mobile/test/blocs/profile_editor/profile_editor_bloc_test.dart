@@ -2471,55 +2471,6 @@ void main() {
       );
 
       blocTest<ProfileEditorBloc, ProfileEditorState>(
-        'ProfilePictureUploadRequested with file stages on success',
-        setUp: () {
-          when(
-            () => mockBlossomUploadService.uploadImage(
-              imageFile: any(named: 'imageFile'),
-              nostrPubkey: any(named: 'nostrPubkey'),
-              mimeType: any(named: 'mimeType'),
-            ),
-          ).thenAnswer(
-            (_) async => const BlossomUploadResult(
-              success: true,
-              url: testStagedUrl,
-              fallbackUrl: testStagedUrl,
-            ),
-          );
-        },
-        build: createBloc,
-        act: (bloc) => bloc.add(
-          ProfilePictureUploadRequested(pubkey: testPubkey, file: _FakeFile()),
-        ),
-        expect: () => [
-          isA<ProfileEditorState>().having(
-            (s) => s.pendingAvatarStatus,
-            'pendingAvatarStatus',
-            PendingAvatarStatus.uploading,
-          ),
-          isA<ProfileEditorState>()
-              .having(
-                (s) => s.pendingAvatarStatus,
-                'pendingAvatarStatus',
-                PendingAvatarStatus.staged,
-              )
-              .having(
-                (s) => s.pendingPictureUrl,
-                'pendingPictureUrl',
-                testStagedUrl,
-              ),
-        ],
-        verify: (_) {
-          verify(
-            () => mockBlossomUploadService.uploadImage(
-              imageFile: any(named: 'imageFile'),
-              nostrPubkey: testPubkey,
-            ),
-          ).called(1);
-        },
-      );
-
-      blocTest<ProfileEditorBloc, ProfileEditorState>(
         'upload failure leaves pendingPictureUrl untouched and emits failed',
         setUp: () {
           when(
@@ -2543,7 +2494,11 @@ void main() {
           pendingPictureUrl: testStagedUrl,
         ),
         act: (bloc) => bloc.add(
-          ProfilePictureUploadRequested(pubkey: testPubkey, bytes: testBytes),
+          ProfilePictureUploadRequested(
+            pubkey: testPubkey,
+            bytes: testBytes,
+            filename: 'avatar.jpg',
+          ),
         ),
         expect: () => [
           // Optimistic transition to uploading retains the prior staged URL
@@ -2603,7 +2558,11 @@ void main() {
         },
         build: createBloc,
         act: (bloc) => bloc.add(
-          ProfilePictureUploadRequested(pubkey: testPubkey, bytes: testBytes),
+          ProfilePictureUploadRequested(
+            pubkey: testPubkey,
+            bytes: testBytes,
+            filename: 'avatar.jpg',
+          ),
         ),
         skip: 1, // skip the "uploading" emission, only assert final state
         expect: () => [
@@ -2636,7 +2595,11 @@ void main() {
         },
         build: createBloc,
         act: (bloc) => bloc.add(
-          ProfilePictureUploadRequested(pubkey: testPubkey, bytes: testBytes),
+          ProfilePictureUploadRequested(
+            pubkey: testPubkey,
+            bytes: testBytes,
+            filename: 'avatar.jpg',
+          ),
         ),
         skip: 1,
         expect: () => [
@@ -2669,7 +2632,11 @@ void main() {
         },
         build: createBloc,
         act: (bloc) => bloc.add(
-          ProfilePictureUploadRequested(pubkey: testPubkey, bytes: testBytes),
+          ProfilePictureUploadRequested(
+            pubkey: testPubkey,
+            bytes: testBytes,
+            filename: 'avatar.jpg',
+          ),
         ),
         skip: 1,
         expect: () => [
@@ -2702,7 +2669,11 @@ void main() {
         },
         build: createBloc,
         act: (bloc) => bloc.add(
-          ProfilePictureUploadRequested(pubkey: testPubkey, bytes: testBytes),
+          ProfilePictureUploadRequested(
+            pubkey: testPubkey,
+            bytes: testBytes,
+            filename: 'avatar.jpg',
+          ),
         ),
         skip: 1,
         expect: () => [
@@ -2735,7 +2706,11 @@ void main() {
         },
         build: createBloc,
         act: (bloc) => bloc.add(
-          ProfilePictureUploadRequested(pubkey: testPubkey, bytes: testBytes),
+          ProfilePictureUploadRequested(
+            pubkey: testPubkey,
+            bytes: testBytes,
+            filename: 'avatar.jpg',
+          ),
         ),
         skip: 1,
         expect: () => [
@@ -2762,7 +2737,11 @@ void main() {
         },
         build: createBloc,
         act: (bloc) => bloc.add(
-          ProfilePictureUploadRequested(pubkey: testPubkey, bytes: testBytes),
+          ProfilePictureUploadRequested(
+            pubkey: testPubkey,
+            bytes: testBytes,
+            filename: 'avatar.jpg',
+          ),
         ),
         skip: 1,
         expect: () => [
@@ -2948,7 +2927,11 @@ void main() {
         },
         build: createBloc,
         act: (bloc) => bloc.add(
-          ProfilePictureUploadRequested(pubkey: testPubkey, bytes: testBytes),
+          ProfilePictureUploadRequested(
+            pubkey: testPubkey,
+            bytes: testBytes,
+            filename: 'avatar.jpg',
+          ),
         ),
         verify: (_) {
           // The load-bearing invariant from reviewer bullet 6: upload alone
