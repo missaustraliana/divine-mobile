@@ -3104,6 +3104,10 @@ class AppLocalizationsAr extends AppLocalizations {
       'فشل تسجيل الدخول. حاول تسجيل الدخول يدويًا.';
 
   @override
+  String get authVerificationEmailAlreadyRegistered =>
+      'هذا البريد الإلكتروني مسجل بالفعل. سجّل الدخول بدلًا من ذلك.';
+
+  @override
   String get authInviteErrorAlreadyUsed =>
       'رمز الدعوة هذا لم يعد متاحًا. عد إلى رمز دعوتك، انضم لقائمة الانتظار، أو تواصل مع الدعم.';
 

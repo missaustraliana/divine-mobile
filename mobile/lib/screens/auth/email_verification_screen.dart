@@ -148,6 +148,9 @@ class _EmailVerificationScreenState
   Future<void> _initTokenModeWithPersistenceCheck() async {
     final pendingService = ref.read(pendingVerificationServiceProvider);
     final pending = await pendingService.load();
+    if (!mounted) {
+      return;
+    }
 
     if (pending != null) {
       Log.info(
@@ -158,17 +161,13 @@ class _EmailVerificationScreenState
         category: LogCategory.auth,
       );
 
-      // Verify the email first via OAuth client, then start polling to
-      // complete login
-      final oauth = ref.read(oauthClientProvider);
-      try {
-        await oauth.verifyEmail(token: widget.token!);
-      } catch (e) {
-        Log.error(
-          'Email verification error: $e',
-          name: 'EmailVerificationScreen',
-          category: LogCategory.auth,
-        );
+      // Verify the email first, then start polling to complete login.
+      final result = await _verifyEmailToken(
+        widget.token!,
+        pendingEmail: pending.email,
+      );
+      if (!mounted || !result.isSuccess) {
+        return;
       }
 
       _cubit.startPolling(
@@ -187,6 +186,26 @@ class _EmailVerificationScreenState
     }
   }
 
+  Future<EmailTokenVerificationResult> _verifyEmailToken(
+    String token, {
+    String? pendingEmail,
+    bool keepPollingOnTransient = false,
+  }) async {
+    final result = await _cubit.verifyEmailToken(
+      token: token,
+      pendingEmail: pendingEmail,
+      keepPollingOnTransient: keepPollingOnTransient,
+    );
+    if (!mounted) {
+      return result;
+    }
+
+    if (result.errorCode == EmailVerificationError.emailAlreadyRegistered) {
+      unawaited(ref.read(pendingVerificationServiceProvider).clear());
+    }
+    return result;
+  }
+
   /// Verify email with token (standalone token mode without polling)
   Future<void> _verifyWithToken(String token) async {
     Log.info(
@@ -195,33 +214,42 @@ class _EmailVerificationScreenState
       category: LogCategory.auth,
     );
 
-    final oauth = ref.read(oauthClientProvider);
-    try {
-      final result = await oauth.verifyEmail(token: token);
-      if (result.success) {
-        Log.info(
-          'Email verification successful (token mode)',
-          name: 'EmailVerificationScreen',
-          category: LogCategory.auth,
-        );
-        // In token mode without polling, redirect to login
-        _handleTokenModeSuccess();
-      } else {
-        Log.warning(
-          'Email verification failed: ${result.error}',
-          name: 'EmailVerificationScreen',
-          category: LogCategory.auth,
-        );
-        _cubit.emitFailure(EmailVerificationError.verificationLinkExpired);
-      }
-    } catch (e) {
-      Log.error(
-        'Email verification error: $e',
+    final result = await _verifyEmailToken(token);
+    if (!mounted) {
+      return;
+    }
+
+    if (result.isSuccess) {
+      Log.info(
+        'Email verification successful (token mode)',
         name: 'EmailVerificationScreen',
         category: LogCategory.auth,
       );
-      _cubit.emitFailure(EmailVerificationError.verificationConnectionError);
+      // In token mode without polling, redirect to login
+      _handleTokenModeSuccess();
     }
+  }
+
+  Future<void> _verifyDeepLinkToken() async {
+    final token = widget.token;
+    if (token == null || token.isEmpty) {
+      return;
+    }
+
+    final result = await _verifyEmailToken(
+      token,
+      pendingEmail: widget.email ?? _cubit.state.pendingEmail,
+      keepPollingOnTransient: true,
+    );
+    if (!mounted || !result.isSuccess) {
+      return;
+    }
+
+    Log.info(
+      'Email verification successful from token update',
+      name: 'EmailVerificationScreen',
+      category: LogCategory.auth,
+    );
   }
 
   @override
@@ -238,18 +266,7 @@ class _EmailVerificationScreenState
         name: 'EmailVerificationScreen',
         category: LogCategory.auth,
       );
-      final oauth = ref.read(oauthClientProvider);
-      unawaited(() async {
-        try {
-          await oauth.verifyEmail(token: widget.token!);
-        } catch (e) {
-          Log.error(
-            'verifyEmail failed from token update: $e',
-            name: 'EmailVerificationScreen',
-            category: LogCategory.auth,
-          );
-        }
-      }());
+      unawaited(_verifyDeepLinkToken());
     }
   }
 
@@ -314,6 +331,18 @@ class _EmailVerificationScreenState
 
   void _handleStartOver() {
     context.go('/');
+  }
+
+  void _handleSignInRecovery(String? email, EmailVerificationError errorCode) {
+    _cubit.stopPolling();
+    ref.read(pendingVerificationServiceProvider).clear();
+    context.read<InviteGateBloc>().add(const InviteGateAccessCleared());
+    context.go(
+      WelcomeScreen.loginOptionsPathWithRecovery(
+        email: email,
+        error: context.l10n.emailVerificationErrorMessage(errorCode),
+      ),
+    );
   }
 
   void _handleInviteRecovery(
@@ -381,6 +410,14 @@ class _EmailVerificationScreenState
                       EmailVerificationStatus.failure => _ErrorContent(
                         errorCode: state.errorCode,
                         onStartOver: _handleStartOver,
+                        onSignInInstead:
+                            state.errorCode ==
+                                EmailVerificationError.emailAlreadyRegistered
+                            ? () => _handleSignInRecovery(
+                                state.pendingEmail,
+                                state.errorCode!,
+                              )
+                            : null,
                         onReturnToInviteGate:
                             state.showInviteGateRecovery &&
                                 state.inviteRecoveryCode != null
@@ -692,11 +729,13 @@ class _ErrorContent extends StatelessWidget {
   const _ErrorContent({
     required this.onStartOver,
     required this.errorCode,
+    this.onSignInInstead,
     this.onReturnToInviteGate,
   });
 
   final VoidCallback onStartOver;
   final EmailVerificationError? errorCode;
+  final VoidCallback? onSignInInstead;
   final VoidCallback? onReturnToInviteGate;
 
   @override
@@ -741,10 +780,12 @@ class _ErrorContent extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 32),
           child: DivineButton(
             expanded: true,
-            label: onReturnToInviteGate == null
+            label: onSignInInstead != null
+                ? l10n.authSignInButton
+                : onReturnToInviteGate == null
                 ? l10n.authStartOver
                 : l10n.authBackToInviteCode,
-            onPressed: onReturnToInviteGate ?? onStartOver,
+            onPressed: onSignInInstead ?? onReturnToInviteGate ?? onStartOver,
           ),
         ),
       ],

@@ -3141,6 +3141,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Sign-in failed. Please try logging in manually.';
 
   @override
+  String get authVerificationEmailAlreadyRegistered =>
+      'This email is already registered. Sign in instead.';
+
+  @override
   String get authInviteErrorAlreadyUsed =>
       'That invite code is no longer available. Go back to your invite code, join the waitlist, or contact support.';
 
