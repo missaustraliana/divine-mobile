@@ -34,8 +34,16 @@ class VolumeKeyHandler: NSObject {
     
     // Temporary suppression during camera switch / audio route changes
     private var isSuppressed = false
-    
-    init(onTrigger: @escaping (String) -> Void) {
+
+    // Re-asserts the owning (UI) engine's diagnostics sink before emitting any
+    // native-only diagnostic. iOS has no Activity-attachment lifecycle to bind
+    // sink ownership to (unlike Android), so volume/Bluetooth callbacks — which
+    // fire without a method call — reclaim the sink here so a background engine
+    // that registered the plugin can't steal these UI-only events. See #5128.
+    private let reclaimLogSink: (() -> Void)?
+
+    init(reclaimLogSink: (() -> Void)? = nil, onTrigger: @escaping (String) -> Void) {
+        self.reclaimLogSink = reclaimLogSink
         self.onTrigger = onTrigger
         super.init()
     }
@@ -68,6 +76,9 @@ class VolumeKeyHandler: NSObject {
         isSuppressed = true
         DispatchQueue.main.asyncAfter(deadline: .now() + activationCooldownSeconds) { [weak self] in
             self?.isSuppressed = false
+            // Native-only event (timer callback, no method call): reclaim the
+            // UI engine's diagnostics sink first.
+            self?.reclaimLogSink?()
             DivineCameraLog.shared.debug("DivineCameraVolumeKeyHandler: Initial suppression ended")
         }
         DivineCameraLog.shared.debug("DivineCameraVolumeKeyHandler: Enabled (suppressed for \(activationCooldownSeconds)s)")
@@ -111,6 +122,9 @@ class VolumeKeyHandler: NSObject {
         DivineCameraLog.shared.debug("DivineCameraVolumeKeyHandler: Suppressed for \(duration)s")
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             self?.isSuppressed = false
+            // Native-only event (timer callback, no method call): reclaim the
+            // UI engine's diagnostics sink first.
+            self?.reclaimLogSink?()
             DivineCameraLog.shared.debug("DivineCameraVolumeKeyHandler: Suppression ended")
         }
     }
@@ -128,20 +142,23 @@ class VolumeKeyHandler: NSObject {
         
         // Play/Pause toggle (most common on Bluetooth headphones)
         commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+            self?.reclaimLogSink?()
             DivineCameraLog.shared.debug("DivineCameraVolumeKeyHandler: Bluetooth toggle play/pause")
             self?.handleBluetoothTrigger()
             return .success
         }
-        
+
         // Play command
         commandCenter.playCommand.addTarget { [weak self] _ in
+            self?.reclaimLogSink?()
             DivineCameraLog.shared.debug("DivineCameraVolumeKeyHandler: Bluetooth play")
             self?.handleBluetoothTrigger()
             return .success
         }
-        
+
         // Pause command
         commandCenter.pauseCommand.addTarget { [weak self] _ in
+            self?.reclaimLogSink?()
             DivineCameraLog.shared.debug("DivineCameraVolumeKeyHandler: Bluetooth pause")
             self?.handleBluetoothTrigger()
             return .success
@@ -283,7 +300,11 @@ class VolumeKeyHandler: NSObject {
               let oldValue = change?[.oldKey] as? Float else {
             return
         }
-        
+
+        // Native-only event: reclaim the UI engine's diagnostics sink before
+        // any logging below.
+        reclaimLogSink?()
+
         // Only trigger if volume keys are enabled, not suppressed,
         // and this is an external change.
         // The isSuppressed check prevents audio route changes during camera
