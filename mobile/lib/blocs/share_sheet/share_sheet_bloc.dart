@@ -55,7 +55,11 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
     on<ShareSheetContactsLoadRequested>(_onContactsLoadRequested);
     on<ShareSheetQuickSendRequested>(
       _onQuickSendRequested,
-      transformer: droppable(),
+      // Concurrent (not droppable): each tap gives instant optimistic feedback
+      // and its send runs in the background, so tapping several people in a row
+      // confirms each immediately instead of dropping taps during an in-flight
+      // send. See #5391.
+      transformer: concurrent(),
     );
     on<ShareSheetRecipientSelected>(_onRecipientSelected);
     on<ShareSheetRecipientCleared>(_onRecipientCleared);
@@ -109,37 +113,30 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
           .where((pk) => !recentPubkeys.contains(pk))
           .toList();
 
-      // Batch-fetch uncached profiles
-      final allPubkeys = [...recentPubkeys, ...remainingFollows];
-      final cachedChecks = await Future.wait(
-        allPubkeys.map((pk) => _profileRepository.getCachedProfile(pubkey: pk)),
-      );
-      final uncached = <String>[];
-      for (var i = 0; i < allPubkeys.length; i++) {
-        if (cachedChecks[i] == null) uncached.add(allPubkeys[i]);
-      }
-      if (uncached.isNotEmpty) {
-        await Future.wait(
-          uncached.map(
-            (pk) => _profileRepository.fetchFreshProfile(pubkey: pk),
-          ),
-        );
-      }
+      // One batched read (cache + bulk REST + relays, in the repository)
+      // instead of a per-pubkey DB/network storm fired on sheet open. The
+      // repository owns the source-selection strategy. Recents already carry
+      // their display data snapshotted at last-send time, so only the
+      // remaining follows need profiles. Staleness is session-bounded:
+      // VideoSharingService._recentlySharedWith is in-memory only and resets
+      // to empty on app restart, so a stale avatar or name is visible at most
+      // within the same session until the user shares with that contact again.
+      // Skip the call entirely when there are no follows to fetch. See #5391.
+      final profiles = remainingFollows.isEmpty
+          ? const <String, UserProfile>{}
+          : await _profileRepository.fetchBatchProfiles(
+              pubkeys: remainingFollows,
+            );
 
-      final contacts = <ShareableUser>[...recentUsers];
-
-      for (final pubkey in remainingFollows) {
-        final profile = await _profileRepository.getCachedProfile(
-          pubkey: pubkey,
-        );
-        contacts.add(
+      final contacts = <ShareableUser>[
+        ...recentUsers,
+        for (final pubkey in remainingFollows)
           ShareableUser(
             pubkey: pubkey,
-            displayName: profile?.bestDisplayName,
-            picture: profile?.picture,
+            displayName: profiles[pubkey]?.bestDisplayName,
+            picture: profiles[pubkey]?.picture,
           ),
-        );
-      }
+      ];
 
       emit(
         state.copyWith(
@@ -206,14 +203,20 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
     Emitter<ShareSheetState> emit,
   ) async {
     final user = event.recipient;
-    if (state.isSending || state.sentPubkeys.contains(user.pubkey)) return;
+    if (state.sentPubkeys.contains(user.pubkey)) return;
 
-    // Clear any selected recipient so More Actions stays visible
+    final recipientName = user.displayName ?? 'user';
+
+    // Optimistic: confirm instantly (checkmark + toast) and clear any selected
+    // recipient so More Actions stays visible. The actual NIP-17 send (crypto +
+    // relay publish) runs in the background below — the rumor is enqueued
+    // durably before publishing, so the send survives a crash and is retried.
+    // This is what removes the felt wait-for-network lag. See #5391.
     emit(
       state.copyWith(
-        isSending: true,
+        sentPubkeys: {...state.sentPubkeys, user.pubkey},
         clearRecipient: true,
-        clearActionResult: true,
+        actionResult: ShareSheetSendSuccess(recipientName),
       ),
     );
 
@@ -222,24 +225,16 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
         video: _video,
         recipientPubkey: user.pubkey,
       );
-
-      final recipientName = user.displayName ?? 'user';
-      if (result.success) {
-        emit(
-          state.copyWith(
-            isSending: false,
-            sentPubkeys: {...state.sentPubkeys, user.pubkey},
-            actionResult: ShareSheetSendSuccess(recipientName),
-          ),
-        );
-      } else {
-        emit(
-          state.copyWith(
-            isSending: false,
-            actionResult: ShareSheetSendFailure(),
-          ),
-        );
-      }
+      // Success was already shown optimistically; nothing more to emit. If the
+      // sheet was dismissed mid-send, the bloc is closed — don't emit.
+      if (result.success || isClosed) return;
+      // Roll back the optimistic checkmark and surface the failure.
+      emit(
+        state.copyWith(
+          sentPubkeys: {...state.sentPubkeys}..remove(user.pubkey),
+          actionResult: ShareSheetSendFailure(),
+        ),
+      );
     } catch (e, stackTrace) {
       _addUnexpectedError(
         e,
@@ -251,8 +246,12 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
         name: 'ShareSheetBloc',
         category: LogCategory.ui,
       );
+      if (isClosed) return;
       emit(
-        state.copyWith(isSending: false, actionResult: ShareSheetSendFailure()),
+        state.copyWith(
+          sentPubkeys: {...state.sentPubkeys}..remove(user.pubkey),
+          actionResult: ShareSheetSendFailure(),
+        ),
       );
     }
   }
@@ -267,6 +266,9 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
   ) async {
     if (state.selectedRecipient == null || state.isSending) return;
 
+    // Send-with-message is a deliberate compose-then-send: it keeps the
+    // awaited flow with a visible "sending" spinner (isSending) and surfaces
+    // failures in-sheet. Only the no-feedback quick-send tap is optimistic.
     emit(state.copyWith(isSending: true, clearActionResult: true));
 
     try {

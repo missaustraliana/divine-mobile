@@ -10,6 +10,7 @@ import 'package:nostr_sdk/client_utils/keys.dart';
 import 'package:nostr_sdk/event.dart';
 import 'package:nostr_sdk/event_kind.dart';
 import 'package:nostr_sdk/nip59/gift_wrap_util.dart';
+import 'package:nostr_sdk/signer/isolate_decrypt_signer.dart';
 import 'package:nostr_sdk/signer/local_nostr_signer.dart';
 import 'package:nostr_sdk/signer/nostr_signer.dart';
 import 'package:unified_logger/unified_logger.dart';
@@ -19,6 +20,52 @@ class _MockNostrClient extends Mock implements NostrClient {}
 class _MockNostrSigner extends Mock implements NostrSigner {}
 
 class _FakeEvent extends Fake implements Event {}
+
+/// A local-key signer that advertises the isolate-offload capability,
+/// delegating all crypto to a real [LocalNostrSigner]. Used to exercise the
+/// `_buildWrap` isolate branch in [NIP17MessageService]. See #5391.
+class _LocalIsolateSigner implements IsolateDecryptSigner {
+  _LocalIsolateSigner(this._privateKeyHex)
+    : _delegate = LocalNostrSigner(_privateKeyHex);
+
+  final String _privateKeyHex;
+  final LocalNostrSigner _delegate;
+
+  @override
+  bool get canDecryptInIsolate => true;
+
+  @override
+  T withPrivateKeyHex<T>(T Function(String hex) operation) =>
+      operation(_privateKeyHex);
+
+  @override
+  Future<String?> getPublicKey() => _delegate.getPublicKey();
+
+  @override
+  Future<Event?> signEvent(Event event) => _delegate.signEvent(event);
+
+  @override
+  Future<Map<dynamic, dynamic>?> getRelays() => _delegate.getRelays();
+
+  @override
+  Future<String?> encrypt(String pubkey, String plaintext) =>
+      _delegate.encrypt(pubkey, plaintext);
+
+  @override
+  Future<String?> decrypt(String pubkey, String ciphertext) =>
+      _delegate.decrypt(pubkey, ciphertext);
+
+  @override
+  Future<String?> nip44Encrypt(String pubkey, String plaintext) =>
+      _delegate.nip44Encrypt(pubkey, plaintext);
+
+  @override
+  Future<String?> nip44Decrypt(String pubkey, String ciphertext) =>
+      _delegate.nip44Decrypt(pubkey, ciphertext);
+
+  @override
+  void close() => _delegate.close();
+}
 
 // Valid 64-character hex keys for testing.
 const _testPrivateKey =
@@ -1037,6 +1084,224 @@ void main() {
           expect(result.success, isFalse);
           expect(result.error, isNotNull);
           verifyNever(() => mockNostrClient.publishEvent(any()));
+        },
+      );
+    });
+
+    group('gift-wrap build offload (#5391)', () {
+      late String localPrivateKey;
+      late String localPubkey;
+
+      setUp(() {
+        localPrivateKey = generatePrivateKey();
+        localPubkey = getPublicKey(localPrivateKey);
+        when(() => mockNostrClient.publishEvent(any())).thenAnswer(
+          (inv) async =>
+              PublishSuccess(event: inv.positionalArguments[0] as Event),
+        );
+      });
+
+      test(
+        'local-key signer builds wraps via the isolate seam, not the main '
+        'builder',
+        () async {
+          var mainBuilderCalls = 0;
+          var isolateSeamCalls = 0;
+
+          final service = NIP17MessageService(
+            signer: _LocalIsolateSigner(localPrivateKey),
+            senderPublicKey: localPubkey,
+            nostrService: mockNostrClient,
+            giftWrapBuilder: (nostr, rumor, recipient) async {
+              mainBuilderCalls++;
+              return null;
+            },
+            isolateGiftWrapBatchBuilder: (request) {
+              isolateSeamCalls++;
+              // Build inline (no real isolate) — exercises the same worker.
+              return buildGiftWrapBatch(request);
+            },
+          );
+
+          final rumor = service.buildRumor(
+            recipientPubkey: _recipientPubkey,
+            content: 'via isolate',
+          );
+          final result = await service.sendRumor(
+            rumorEvent: rumor,
+            recipientPubkey: _recipientPubkey,
+          );
+
+          expect(result.success, isTrue);
+          // One combined batch hop builds both the recipient and self wraps.
+          expect(isolateSeamCalls, equals(1));
+          expect(mainBuilderCalls, equals(0));
+        },
+      );
+
+      test(
+        'remote signer builds wraps on the main isolate, never the isolate '
+        'seam',
+        () async {
+          var mainBuilderCalls = 0;
+          var isolateSeamCalls = 0;
+
+          final remoteSigner = _MockNostrSigner();
+          when(remoteSigner.getPublicKey).thenAnswer((_) async => localPubkey);
+
+          final service = NIP17MessageService(
+            signer: remoteSigner,
+            senderPublicKey: localPubkey,
+            nostrService: mockNostrClient,
+            giftWrapBuilder: (nostr, rumor, recipient) async {
+              mainBuilderCalls++;
+              return Event(localPubkey, EventKind.giftWrap, [
+                ['p', recipient],
+              ], 'ciphertext');
+            },
+            isolateGiftWrapBatchBuilder: (request) async {
+              isolateSeamCalls++;
+              return const <BuiltGiftWrapResult>[];
+            },
+          );
+
+          final rumor = service.buildRumor(
+            recipientPubkey: _recipientPubkey,
+            content: 'via main isolate',
+          );
+          final result = await service.sendRumor(
+            rumorEvent: rumor,
+            recipientPubkey: _recipientPubkey,
+          );
+
+          expect(result.success, isTrue);
+          expect(mainBuilderCalls, equals(2));
+          expect(isolateSeamCalls, equals(0));
+        },
+      );
+
+      test(
+        'batch builder throws falls back to single-receiver isolate path '
+        'for recipient and self-wrap',
+        () async {
+          var batchCalls = 0;
+          final service = NIP17MessageService(
+            signer: _LocalIsolateSigner(localPrivateKey),
+            senderPublicKey: localPubkey,
+            nostrService: mockNostrClient,
+            isolateGiftWrapBatchBuilder: (request) {
+              batchCalls++;
+              if (request.receiverPublicKeys.length == 2) {
+                throw Exception('batch boom');
+              }
+              // Single-receiver call from _buildWrap fallback — succeed.
+              return buildGiftWrapBatch(request);
+            },
+          );
+
+          final rumor = service.buildRumor(
+            recipientPubkey: _recipientPubkey,
+            content: 'batch-throw fallback',
+          );
+          final result = await service.sendRumor(
+            rumorEvent: rumor,
+            recipientPubkey: _recipientPubkey,
+          );
+
+          expect(result.success, isTrue);
+          // 1 batch (throws) + 1 single-receiver for recipient + 1 for self.
+          expect(batchCalls, equals(3));
+        },
+      );
+
+      test(
+        'batch builder reports self-wrap slot failure triggers _buildWrap '
+        'for the self-wrap lazily',
+        () async {
+          final service = NIP17MessageService(
+            signer: _LocalIsolateSigner(localPrivateKey),
+            senderPublicKey: localPubkey,
+            nostrService: mockNostrClient,
+            isolateGiftWrapBatchBuilder: (request) async {
+              final all = await buildGiftWrapBatch(request);
+              if (request.receiverPublicKeys.length == 2) {
+                // Recipient succeeds; self-wrap slot reports failure.
+                return [
+                  all[0],
+                  const BuiltGiftWrapResult.failure('self-wrap slot failed'),
+                ];
+              }
+              return all;
+            },
+          );
+
+          final rumor = service.buildRumor(
+            recipientPubkey: _recipientPubkey,
+            content: 'self-wrap-slot-failure',
+          );
+          final result = await service.sendRumor(
+            rumorEvent: rumor,
+            recipientPubkey: _recipientPubkey,
+          );
+
+          expect(result.success, isTrue);
+          expect(result.selfWrapPublished, isTrue);
+        },
+      );
+
+      test(
+        'batch builder reports recipient slot failure causes sendRumor to '
+        'return failure',
+        () async {
+          final service = NIP17MessageService(
+            signer: _LocalIsolateSigner(localPrivateKey),
+            senderPublicKey: localPubkey,
+            nostrService: mockNostrClient,
+            isolateGiftWrapBatchBuilder: (request) async {
+              final all = await buildGiftWrapBatch(request);
+              if (request.receiverPublicKeys.length == 2) {
+                // Recipient slot fails; self-wrap slot succeeds.
+                return [
+                  const BuiltGiftWrapResult.failure('recipient slot failed'),
+                  all[1],
+                ];
+              }
+              return all;
+            },
+          );
+
+          final rumor = service.buildRumor(
+            recipientPubkey: _recipientPubkey,
+            content: 'recipient-slot-failure',
+          );
+          final result = await service.sendRumor(
+            rumorEvent: rumor,
+            recipientPubkey: _recipientPubkey,
+          );
+
+          expect(result.success, isFalse);
+          verifyNever(() => mockNostrClient.publishEvent(any()));
+        },
+      );
+
+      test(
+        'uses compute() isolate by default when no isolateGiftWrapBatchBuilder '
+        'is injected (covers the _computeGiftWrapBatch static method)',
+        () async {
+          // No isolateGiftWrapBatchBuilder injection — exercises the default
+          // _computeGiftWrapBatch static tear-off that calls compute().
+          final realIsolateService = NIP17MessageService(
+            signer: _LocalIsolateSigner(localPrivateKey),
+            senderPublicKey: localPubkey,
+            nostrService: mockNostrClient,
+          );
+
+          final result = await realIsolateService.sendPrivateMessage(
+            recipientPubkey: _recipientPubkey,
+            content: 'real compute isolate test',
+          );
+
+          expect(result.success, isTrue);
         },
       );
     });

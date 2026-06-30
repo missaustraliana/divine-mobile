@@ -110,6 +110,11 @@ void main() {
       // Default stubs
       when(() => mockSharingService.recentlySharedWith).thenReturn([]);
       when(() => mockFollowRepository.followingPubkeys).thenReturn([]);
+      when(
+        () => mockProfileRepository.fetchBatchProfiles(
+          pubkeys: any(named: 'pubkeys'),
+        ),
+      ).thenAnswer((_) async => <String, UserProfile>{});
     });
 
     ShareSheetBloc createBloc({
@@ -146,6 +151,11 @@ void main() {
     // -----------------------------------------------------------------------
 
     group('ShareSheetContactsLoadRequested', () {
+      const profiledFollow =
+          'cccc456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+      const unprofiledFollow =
+          'dddd456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
       blocTest<ShareSheetBloc, ShareSheetState>(
         'emits [loading, ready] with empty contacts when no follows or recents',
         build: createBloc,
@@ -165,16 +175,6 @@ void main() {
           when(() => mockFollowRepository.followingPubkeys).thenReturn([
             'bbbb456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
           ]);
-          when(
-            () => mockProfileRepository.getCachedProfile(
-              pubkey: any(named: 'pubkey'),
-            ),
-          ).thenAnswer((_) async => null);
-          when(
-            () => mockProfileRepository.fetchFreshProfile(
-              pubkey: any(named: 'pubkey'),
-            ),
-          ).thenAnswer((_) async => null);
         },
         build: createBloc,
         act: (bloc) => bloc.add(const ShareSheetContactsLoadRequested()),
@@ -213,16 +213,6 @@ void main() {
           when(
             () => mockSharingService.recentlySharedWith,
           ).thenReturn([testRecipient]);
-          when(
-            () => mockProfileRepository.getCachedProfile(
-              pubkey: any(named: 'pubkey'),
-            ),
-          ).thenAnswer((_) async => null);
-          when(
-            () => mockProfileRepository.fetchFreshProfile(
-              pubkey: any(named: 'pubkey'),
-            ),
-          ).thenAnswer((_) async => null);
         },
         build: createBloc,
         act: (bloc) => bloc.add(const ShareSheetContactsLoadRequested()),
@@ -235,35 +225,27 @@ void main() {
       );
 
       blocTest<ShareSheetBloc, ShareSheetState>(
-        'fetches uncached profiles when getCachedProfile returns null',
+        'loads follow profiles via one fetchBatchProfiles call, no per-pubkey '
+        'storm',
         setUp: () {
-          const cachedPubkey =
-              'cccc456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-          const uncachedPubkey =
-              'dddd456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-
           when(() => mockSharingService.recentlySharedWith).thenReturn([]);
           when(
             () => mockFollowRepository.followingPubkeys,
-          ).thenReturn([cachedPubkey, uncachedPubkey]);
+          ).thenReturn([profiledFollow, unprofiledFollow]);
           when(
-            () => mockProfileRepository.getCachedProfile(pubkey: cachedPubkey),
-          ).thenAnswer(
-            (_) async => UserProfile(
-              pubkey: cachedPubkey,
-              createdAt: DateTime.now(),
-              eventId: 'event-$cachedPubkey',
-              rawData: const {},
+            () => mockProfileRepository.fetchBatchProfiles(
+              pubkeys: any(named: 'pubkeys'),
             ),
+          ).thenAnswer(
+            (_) async => {
+              profiledFollow: UserProfile(
+                pubkey: profiledFollow,
+                createdAt: DateTime.now(),
+                eventId: 'event-$profiledFollow',
+                rawData: const {'name': 'Bob'},
+              ),
+            },
           );
-          when(
-            () =>
-                mockProfileRepository.getCachedProfile(pubkey: uncachedPubkey),
-          ).thenAnswer((_) async => null);
-          when(
-            () =>
-                mockProfileRepository.fetchFreshProfile(pubkey: uncachedPubkey),
-          ).thenAnswer((_) async => null);
         },
         build: createBloc,
         act: (bloc) => bloc.add(const ShareSheetContactsLoadRequested()),
@@ -274,16 +256,23 @@ void main() {
               .having((s) => s.contacts.length, 'contacts.length', 2),
         ],
         verify: (_) {
-          verify(
-            () => mockProfileRepository.fetchFreshProfile(
-              pubkey:
-                  'dddd456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+          // Exactly one batched read covering both follows, in order — the
+          // per-pubkey getCachedProfile/fetchFreshProfile storm is gone.
+          final captured = verify(
+            () => mockProfileRepository.fetchBatchProfiles(
+              pubkeys: captureAny(named: 'pubkeys'),
             ),
-          ).called(1);
+          ).captured;
+          expect(captured, hasLength(1));
+          expect(captured.single, [profiledFollow, unprofiledFollow]);
+          verifyNever(
+            () => mockProfileRepository.getCachedProfile(
+              pubkey: any(named: 'pubkey'),
+            ),
+          );
           verifyNever(
             () => mockProfileRepository.fetchFreshProfile(
-              pubkey:
-                  'cccc456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+              pubkey: any(named: 'pubkey'),
             ),
           );
         },
@@ -307,16 +296,6 @@ void main() {
             duplicatePubkey,
             'bbbb456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
           ]);
-          when(
-            () => mockProfileRepository.getCachedProfile(
-              pubkey: any(named: 'pubkey'),
-            ),
-          ).thenAnswer((_) async => null);
-          when(
-            () => mockProfileRepository.fetchFreshProfile(
-              pubkey: any(named: 'pubkey'),
-            ),
-          ).thenAnswer((_) async => null);
         },
         build: createBloc,
         act: (bloc) => bloc.add(const ShareSheetContactsLoadRequested()),
@@ -391,8 +370,14 @@ void main() {
     // -----------------------------------------------------------------------
 
     group('ShareSheetQuickSendRequested', () {
+      const otherRecipient = ShareableUser(
+        pubkey:
+            'ffff456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        displayName: 'Bob',
+      );
+
       blocTest<ShareSheetBloc, ShareSheetState>(
-        'emits [sending, success] and marks pubkey as sent on success',
+        'optimistically marks sent and emits success immediately, no wait',
         setUp: () {
           when(
             () => mockSharingService.shareVideoWithUser(
@@ -405,12 +390,12 @@ void main() {
         build: createBloc,
         act: (bloc) =>
             bloc.add(const ShareSheetQuickSendRequested(testRecipient)),
+        // A single optimistic emit: marked sent + success toast, no isSending
+        // step. The background send succeeds, so nothing more is emitted.
         expect: () => [
           isA<ShareSheetState>()
-              .having((s) => s.isSending, 'isSending', isTrue)
-              .having((s) => s.selectedRecipient, 'selectedRecipient', isNull),
-          isA<ShareSheetState>()
               .having((s) => s.isSending, 'isSending', isFalse)
+              .having((s) => s.selectedRecipient, 'selectedRecipient', isNull)
               .having(
                 (s) => s.sentPubkeys.contains(testRecipient.pubkey),
                 'sentPubkeys contains recipient',
@@ -427,7 +412,7 @@ void main() {
       );
 
       blocTest<ShareSheetBloc, ShareSheetState>(
-        'emits failure when share returns error',
+        'rolls back the optimistic mark and emits failure when send fails',
         setUp: () {
           when(
             () => mockSharingService.shareVideoWithUser(
@@ -441,13 +426,25 @@ void main() {
         act: (bloc) =>
             bloc.add(const ShareSheetQuickSendRequested(testRecipient)),
         expect: () => [
-          isA<ShareSheetState>().having(
-            (s) => s.isSending,
-            'isSending',
-            isTrue,
-          ),
+          // Optimistic success first…
           isA<ShareSheetState>()
-              .having((s) => s.isSending, 'isSending', isFalse)
+              .having(
+                (s) => s.sentPubkeys.contains(testRecipient.pubkey),
+                'optimistically sent',
+                isTrue,
+              )
+              .having(
+                (s) => s.actionResult,
+                'actionResult',
+                isA<ShareSheetSendSuccess>(),
+              ),
+          // …then rolled back with a failure once the background send fails.
+          isA<ShareSheetState>()
+              .having(
+                (s) => s.sentPubkeys.contains(testRecipient.pubkey),
+                'rolled back',
+                isFalse,
+              )
               .having(
                 (s) => s.actionResult,
                 'actionResult',
@@ -457,15 +454,26 @@ void main() {
       );
 
       blocTest<ShareSheetBloc, ShareSheetState>(
-        'ignores event when already sending',
-        seed: () => const ShareSheetState(
-          status: ShareSheetStatus.ready,
-          isSending: true,
-        ),
+        'confirms multiple recipients tapped in a row (concurrent)',
+        setUp: () {
+          when(
+            () => mockSharingService.shareVideoWithUser(
+              video: any(named: 'video'),
+              recipientPubkey: any(named: 'recipientPubkey'),
+            ),
+          ).thenAnswer((_) async => ShareResult.createSuccess('msg-event-id'));
+        },
+        seed: () => const ShareSheetState(status: ShareSheetStatus.ready),
         build: createBloc,
-        act: (bloc) =>
-            bloc.add(const ShareSheetQuickSendRequested(testRecipient)),
-        expect: () => <ShareSheetState>[],
+        act: (bloc) => bloc
+          ..add(const ShareSheetQuickSendRequested(testRecipient))
+          ..add(const ShareSheetQuickSendRequested(otherRecipient)),
+        verify: (bloc) {
+          expect(
+            bloc.state.sentPubkeys,
+            containsAll([testRecipient.pubkey, otherRecipient.pubkey]),
+          );
+        },
       );
 
       blocTest<ShareSheetBloc, ShareSheetState>(
