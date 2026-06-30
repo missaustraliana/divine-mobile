@@ -4,11 +4,13 @@
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_video_feed/infinite_video_feed.dart'
     show VideoErrorType;
 import 'package:models/models.dart';
+import 'package:openvine/blocs/video_playback_status/video_playback_status_cubit.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/services/video_moderation_status_service.dart';
 import 'package:openvine/widgets/video_feed_item/pooled_video_error_overlay.dart';
@@ -49,7 +51,15 @@ void main() {
       VideoEvent? video,
       VoidCallback? onVerifyAge,
       bool isVerifying = false,
+      VideoPlaybackStatusCubit? playbackStatusCubit,
     }) {
+      final overlay = PooledVideoErrorOverlay(
+        video: video ?? divineVideo,
+        onRetry: () => retryPressed = true,
+        onVerifyAge: onVerifyAge,
+        errorType: errorType,
+        isVerifying: isVerifying,
+      );
       return ProviderScope(
         overrides: [
           videoModerationStatusProvider.overrideWith(
@@ -60,13 +70,15 @@ void main() {
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           home: Scaffold(
-            body: PooledVideoErrorOverlay(
-              video: video ?? divineVideo,
-              onRetry: () => retryPressed = true,
-              onVerifyAge: onVerifyAge,
-              errorType: errorType,
-              isVerifying: isVerifying,
-            ),
+            body: playbackStatusCubit == null
+                ? BlocProvider(
+                    create: (_) => VideoPlaybackStatusCubit(),
+                    child: overlay,
+                  )
+                : BlocProvider<VideoPlaybackStatusCubit>.value(
+                    value: playbackStatusCubit,
+                    child: overlay,
+                  ),
           ),
         ),
       );
@@ -77,7 +89,14 @@ void main() {
       required VideoModerationStatus moderationStatus,
       VideoEvent? video,
       VoidCallback? onVerifyAge,
+      VideoPlaybackStatusCubit? playbackStatusCubit,
     }) {
+      final overlay = PooledVideoErrorOverlay(
+        video: video ?? divineVideo,
+        onRetry: () => retryPressed = true,
+        onVerifyAge: onVerifyAge,
+        errorType: errorType,
+      );
       return ProviderScope(
         overrides: [
           videoModerationStatusProvider.overrideWith(
@@ -88,12 +107,15 @@ void main() {
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           home: Scaffold(
-            body: PooledVideoErrorOverlay(
-              video: video ?? divineVideo,
-              onRetry: () => retryPressed = true,
-              onVerifyAge: onVerifyAge,
-              errorType: errorType,
-            ),
+            body: playbackStatusCubit == null
+                ? BlocProvider(
+                    create: (_) => VideoPlaybackStatusCubit(),
+                    child: overlay,
+                  )
+                : BlocProvider<VideoPlaybackStatusCubit>.value(
+                    value: playbackStatusCubit,
+                    child: overlay,
+                  ),
           ),
         ),
       );
@@ -163,6 +185,78 @@ void main() {
           expect(verifyAgePressed, isFalse);
         },
       );
+
+      testWidgets('auto-runs Verify age for already-authorized viewers', (
+        tester,
+      ) async {
+        final playbackStatusCubit = VideoPlaybackStatusCubit(
+          canAutoAuthorizeAgeRestrictedMedia: () => true,
+        );
+
+        await tester.pumpWidget(
+          buildWidget(
+            errorType: VideoErrorType.ageRestricted,
+            onVerifyAge: () => verifyAgePressed = true,
+            playbackStatusCubit: playbackStatusCubit,
+          ),
+        );
+        await tester.pump();
+
+        expect(verifyAgePressed, isTrue);
+        await playbackStatusCubit.close();
+      });
+
+      testWidgets(
+        'auto-runs Verify age only once across overlay teardown and rebuild',
+        (tester) async {
+          final playbackStatusCubit = VideoPlaybackStatusCubit(
+            canAutoAuthorizeAgeRestrictedMedia: () => true,
+          );
+          var verifyAgeCalls = 0;
+
+          await tester.pumpWidget(
+            buildWidget(
+              errorType: VideoErrorType.ageRestricted,
+              onVerifyAge: () => verifyAgeCalls++,
+              playbackStatusCubit: playbackStatusCubit,
+            ),
+          );
+          await tester.pump();
+
+          expect(verifyAgeCalls, 1);
+
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump();
+          await tester.pumpWidget(
+            buildWidget(
+              errorType: VideoErrorType.ageRestricted,
+              onVerifyAge: () => verifyAgeCalls++,
+              playbackStatusCubit: playbackStatusCubit,
+            ),
+          );
+          await tester.pump();
+
+          expect(verifyAgeCalls, 1);
+
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump();
+          await playbackStatusCubit.close();
+        },
+      );
+
+      testWidgets('does not auto-run Verify age when adult content is hidden', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          buildWidget(
+            errorType: VideoErrorType.ageRestricted,
+            onVerifyAge: () => verifyAgePressed = true,
+          ),
+        );
+        await tester.pump();
+
+        expect(verifyAgePressed, isFalse);
+      });
     });
 
     group('notFound', () {
@@ -251,6 +345,35 @@ void main() {
           await tester.tap(find.text(l10n.videoErrorVerifyAgeButton));
 
           expect(verifyAgePressed, isTrue);
+        },
+      );
+
+      testWidgets(
+        'auto-runs verify action for moderation age restriction when already authorized',
+        (tester) async {
+          final playbackStatusCubit = VideoPlaybackStatusCubit(
+            canAutoAuthorizeAgeRestrictedMedia: () => true,
+          );
+
+          await tester.pumpWidget(
+            buildWidgetWithModeration(
+              errorType: VideoErrorType.notFound,
+              moderationStatus: const VideoModerationStatus(
+                moderated: true,
+                blocked: false,
+                quarantined: false,
+                ageRestricted: true,
+                needsReview: false,
+                aiGenerated: false,
+              ),
+              onVerifyAge: () => verifyAgePressed = true,
+              playbackStatusCubit: playbackStatusCubit,
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          expect(verifyAgePressed, isTrue);
+          await playbackStatusCubit.close();
         },
       );
 
