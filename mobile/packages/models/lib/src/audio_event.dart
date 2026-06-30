@@ -10,6 +10,22 @@ import 'package:nostr_sdk/event.dart';
 /// Kind number for audio file metadata events (NIP-94)
 const int audioEventKind = 1063;
 
+/// The kind of underlying media source backing an [AudioEvent].
+///
+/// Used to pick the correct loading strategy: a bundled [asset], an
+/// on-disk [file] (imported audio), or a remote [network] URL.
+enum AudioSourceKind {
+  /// Bundled app asset. The resolved path is the bare asset path, with the
+  /// `asset://` scheme stripped.
+  asset,
+
+  /// Local file on disk (imported audio).
+  file,
+
+  /// Remote `http`/`https` URL.
+  network,
+}
+
 /// Represents an audio file metadata event (Kind 1063)
 /// for the audio reuse feature.
 ///
@@ -268,6 +284,49 @@ class AudioEvent {
       return url!.substring(prefix.length);
     }
     return null;
+  }
+
+  /// Classifies the playable source for this audio and returns the matching
+  /// path, or `null` when no usable source exists.
+  ///
+  /// Imported audio stores its on-disk path in [url]; it must be loaded as a
+  /// file rather than parsed as a network URL (which fails with "No host
+  /// specified in URI" / iOS "unsupported URL"). Bundled sounds expose a bare
+  /// asset path. Bare absolute paths (`/var/mobile/...`) and `file://` URIs —
+  /// e.g. clip-extracted J-cut audio whose [url] is a raw on-disk path — are
+  /// also classified as files, matching the `#4395` file-vs-network guard used
+  /// at the duration/render/waveform call sites so this getter is a true
+  /// superset they can migrate onto without reintroducing that bug. Everything
+  /// else (`http(s)`, plus unhandled schemes like `content://`/`blob:`) is
+  /// network.
+  ({AudioSourceKind kind, String path})? get resolvedSource {
+    if (isBundled) {
+      final path = assetPath;
+      return path == null || path.isEmpty
+          ? null
+          : (kind: AudioSourceKind.asset, path: path);
+    }
+    if (isLocalImport) {
+      final path = localFilePath;
+      return path == null || path.isEmpty
+          ? null
+          : (kind: AudioSourceKind.file, path: path);
+    }
+    final rawUrl = url;
+    if (rawUrl == null || rawUrl.isEmpty) return null;
+    final parsed = Uri.tryParse(rawUrl);
+    final isLocalFile =
+        parsed == null ||
+        parsed.scheme.isEmpty ||
+        parsed.scheme == 'file' ||
+        rawUrl.startsWith('/');
+    if (isLocalFile) {
+      final filePath = parsed != null && parsed.scheme == 'file'
+          ? parsed.toFilePath()
+          : rawUrl;
+      return (kind: AudioSourceKind.file, path: filePath);
+    }
+    return (kind: AudioSourceKind.network, path: rawUrl);
   }
 
   /// The Nostr event ID (64-character hex string).

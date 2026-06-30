@@ -413,6 +413,104 @@ void main() {
       });
     });
 
+    group('resolvedSource', () {
+      test('classifies imported audio as a file source', () {
+        final event = AudioEvent.fromLocalImport(
+          id: 'local_import_1700000000000',
+          filePath: '/var/mobile/draft_audio/import.mp3',
+          createdAt: 1700000000,
+          title: 'import',
+          mimeType: 'audio/mpeg',
+        );
+
+        expect(
+          event.resolvedSource,
+          equals((
+            kind: AudioSourceKind.file,
+            path: '/var/mobile/draft_audio/import.mp3',
+          )),
+        );
+      });
+
+      test('classifies bundled sounds as an asset source', () {
+        final event = AudioEvent.fromBundledSound(
+          VineSound(
+            id: 'bruh',
+            title: 'Bruh',
+            assetPath: 'assets/sounds/bruh.mp3',
+            duration: const Duration(seconds: 1),
+          ),
+        );
+
+        expect(
+          event.resolvedSource,
+          equals((
+            kind: AudioSourceKind.asset,
+            path: 'assets/sounds/bruh.mp3',
+          )),
+        );
+      });
+
+      test('classifies remote sounds as a network source', () {
+        const event = AudioEvent(
+          id: 'remote',
+          pubkey: 'abc',
+          createdAt: 0,
+          url: 'https://example.com/audio.mp3',
+        );
+
+        expect(
+          event.resolvedSource,
+          equals((
+            kind: AudioSourceKind.network,
+            path: 'https://example.com/audio.mp3',
+          )),
+        );
+      });
+
+      test('classifies a bare absolute path as a file source', () {
+        // Clip-extracted J-cut audio: not a `local_import_` id, `url` is a
+        // raw on-disk path (clip_editor_bloc writes `result.audioFilePath`).
+        const event = AudioEvent(
+          id: 'local_extracted_1700000000000',
+          pubkey: '',
+          createdAt: 0,
+          url: '/var/mobile/clip_audio/extracted.m4a',
+        );
+
+        expect(
+          event.resolvedSource,
+          equals((
+            kind: AudioSourceKind.file,
+            path: '/var/mobile/clip_audio/extracted.m4a',
+          )),
+        );
+      });
+
+      test('classifies a file:// URI as a file source', () {
+        const event = AudioEvent(
+          id: 'local_extracted_1700000000000',
+          pubkey: '',
+          createdAt: 0,
+          url: 'file:///var/mobile/clip_audio/extracted.m4a',
+        );
+
+        expect(
+          event.resolvedSource,
+          equals((
+            kind: AudioSourceKind.file,
+            path: '/var/mobile/clip_audio/extracted.m4a',
+          )),
+        );
+      });
+
+      test('returns null when no source url is present', () {
+        const event = AudioEvent(id: 'empty', pubkey: 'abc', createdAt: 0);
+
+        expect(event.resolvedSource, isNull);
+      });
+    });
+
     group('external provider metadata', () {
       test('round trips external source and license metadata through JSON', () {
         const audioEvent = AudioEvent(
