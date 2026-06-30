@@ -996,20 +996,42 @@ class NostrClient {
     return null;
   }
 
-  /// Sends a user profile (Kind 0 metadata event).
+  /// Sends a user profile (Kind 0 metadata event), waiting for relay
+  /// confirmation before reporting success.
   ///
-  /// Delegates to [publishEvent], which handles relay connectivity checks,
-  /// retry, caching, and statistics. Kind 0 is replaceable, so it is cached
-  /// only on successful publish (not optimistically).
+  /// Routes through [publishEventAwaitOk] and only reports [PublishSuccess]
+  /// once at least one relay has returned `OK true` (NIP-20). A Kind 0 that is
+  /// accepted at the socket layer but then rejected by every relay (rate limit,
+  /// PoW, auth required) is reported as [PublishFailed]. Kind 0 is replaceable,
+  /// so [publishEventAwaitOk] caches it only after confirmation.
   ///
-  /// Returns a [PublishResult] that callers can switch exhaustively over:
-  /// - [PublishSuccess] — the event was broadcast to at least one relay.
-  /// - [PublishNoRelays] — no relays were connected even after retry.
-  /// - [PublishFailed] — the relay pool was reachable but the send
-  ///   returned null (e.g. a serialisation error).
-  Future<PublishResult> sendProfile({
+  /// The underlying [PublishOutcome] is mapped onto [PublishResult]:
+  /// - [PublishSuccess] — at least one relay confirmed the event.
+  /// - [PublishNoRelays] — no relay was connected even after retry, so the
+  ///   publish never left the device. Preserves the dedicated no-relays
+  ///   signal callers branch on.
+  /// - [PublishFailed] — relays were connected but the event was not confirmed:
+  ///   every relay rejected it, none responded before the confirmation
+  ///   timeout, or the send failed before reaching them (e.g. the signer
+  ///   returned null).
+  Future<PublishResult> sendProfileAwaitOk({
     required Map<String, dynamic> profileContent,
-  }) {
+  }) async {
+    // Resolve the no-relays case up front. [publishEventAwaitOk] returns an
+    // all-empty [PublishOutcome] both when no relay was ever connected AND
+    // when the relay pool was connected but the send failed before any `OK`
+    // could arrive (e.g. the signer returned null) — the two are
+    // indistinguishable from its result. Only the former is [PublishNoRelays],
+    // so detect it here, mirroring [publishEvent]'s connectivity check. Any
+    // non-confirmed outcome afterwards means relays were reached but did not
+    // persist the event, which is [PublishFailed].
+    if (_relayManager.connectedRelays.isEmpty) {
+      await retryDisconnectedRelays();
+      if (_relayManager.connectedRelays.isEmpty) {
+        return const PublishNoRelays();
+      }
+    }
+
     final event = Event(
       publicKey,
       EventKind.metadata,
@@ -1017,7 +1039,13 @@ class NostrClient {
       jsonEncode(profileContent),
     );
 
-    return publishEvent(event);
+    final outcome = await publishEventAwaitOk(event);
+
+    if (outcome.confirmed) {
+      return PublishSuccess(event: event);
+    }
+
+    return const PublishFailed();
   }
 
   /// Sends a repost
