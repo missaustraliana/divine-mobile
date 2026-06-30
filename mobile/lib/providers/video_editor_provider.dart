@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:db_client/db_client.dart' show ClipsDao, DraftsDao;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -93,6 +94,23 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
 
   Timer? _autosaveTimer;
 
+  /// Clip/thumbnail files an autosave stopped referencing this session.
+  ///
+  /// They may still be reachable through the editor's undo/redo history (e.g.
+  /// the pre-split source clip after a split), so deleting them mid-session
+  /// breaks undo/redo — it lands on a clip whose source file is gone. We hold
+  /// them here and reap them at editor-session end via
+  /// [_flushDeferredFileCleanup] ([reset], with [build]'s `onDispose` as a
+  /// teardown safety net), once the history that could resurrect them no longer
+  /// exists. The reaper still runs each path through the reference check, so a
+  /// file the user restored (and a later autosave re-referenced) is kept.
+  final Set<String> _deferredFileCleanup = {};
+
+  /// DAOs captured while a valid [Ref] is in scope, so the teardown reaper can
+  /// run from `onDispose` without reading providers after disposal.
+  DraftsDao? _deferredCleanupDraftsDao;
+  ClipsDao? _deferredCleanupClipsDao;
+
   /// Get clip manager notifier.
   ClipManagerNotifier get _clipManager =>
       ref.read(clipManagerProvider.notifier);
@@ -124,6 +142,11 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
   VideoEditorProviderState build() {
     ref.onDispose(() {
       _autosaveTimer?.cancel();
+      // Safety net for files [reset] didn't already reap (e.g. a crash before
+      // session end). Best-effort and fire-and-forget: the container is tearing
+      // down. On mobile this often never fires (OS kill), which is why [reset]
+      // is the primary reaper.
+      unawaited(_flushDeferredFileCleanup());
       Log.debug(
         '🧹 VideoEditorNotifier disposed',
         name: 'VideoEditorNotifier',
@@ -214,6 +237,12 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
   ///
   /// Also cancels any pending autosave and deletes the autosaved draft
   /// unless [keepAutosavedDraft] is true.
+  ///
+  /// This is the editor-session boundary (publish, discard, start-over), so it
+  /// reaps any [_deferredFileCleanup] now that the undo/redo history protecting
+  /// those files is gone. [build]'s `onDispose` only fires at container
+  /// teardown (app shutdown), which a mobile OS kill routinely skips — relying
+  /// on it alone would leak the deferred files for the whole app run.
   Future<void> reset({bool keepAutosavedDraft = false}) async {
     Log.debug(
       '🔄 Resetting editor state',
@@ -225,6 +254,7 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
         .isAudioSharingEnabled;
     state = VideoEditorProviderState(allowAudioReuse: audioSharingEnabled);
     _autosaveTimer?.cancel();
+    unawaited(_flushDeferredFileCleanup());
     draftId = null;
     if (!keepAutosavedDraft) {
       unawaited(removeAutosavedDraft());
@@ -676,7 +706,16 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
 
     try {
       final draft = getActiveDraft(isAutosave: isAutosavedDraft);
-      await _draftService.saveDraft(draft);
+      // Defer orphan cleanup: files this autosave drops may still be reachable
+      // through the live undo/redo history (see [_deferredFileCleanup]).
+      final db = ref.read(databaseProvider);
+      _deferredCleanupDraftsDao = db.draftsDao;
+      _deferredCleanupClipsDao = db.clipsDao;
+      await _draftService.saveDraft(
+        draft,
+        deferOrphanCleanup: (paths) =>
+            _deferredFileCleanup.addAll(paths.whereType<String>()),
+      );
 
       Log.info(
         '✅ Autosave completed - $clipCount clip(s), '
@@ -697,6 +736,31 @@ class VideoEditorNotifier extends Notifier<VideoEditorProviderState> {
       return false;
     }
   }
+
+  /// Reap the clip/thumbnail files deferred during this session (see
+  /// [_deferredFileCleanup]). Runs at editor-session end ([reset]) and as a
+  /// teardown safety net ([build]'s `onDispose`); both call it, and it clears
+  /// the set so a second call is a no-op. Each path still goes through the
+  /// draft/library reference check, so anything a surviving draft (or the
+  /// library) references is kept — only genuinely-orphaned files are removed.
+  Future<void> _flushDeferredFileCleanup() async {
+    if (_deferredFileCleanup.isEmpty) return;
+    final draftsDao = _deferredCleanupDraftsDao;
+    final clipsDao = _deferredCleanupClipsDao;
+    if (draftsDao == null || clipsDao == null) return;
+
+    final paths = _deferredFileCleanup.toList();
+    _deferredFileCleanup.clear();
+    await FileCleanupService.deleteFilesIfUnreferenced(
+      paths,
+      draftsDao: draftsDao,
+      clipsDao: clipsDao,
+    );
+  }
+
+  /// Test hook: the set of files awaiting cleanup.
+  @visibleForTesting
+  Set<String> get deferredFileCleanupForTest => _deferredFileCleanup;
 
   /// Save the current video project as a draft.
   ///
