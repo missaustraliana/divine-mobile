@@ -3002,6 +3002,22 @@ class AppLocalizationsFr extends AppLocalizations {
   String get authUnknownError => 'Une erreur inconnue est survenue.';
 
   @override
+  String get authBunkerRejectedConnection =>
+      'Ton app de signature a refusé la connexion.';
+
+  @override
+  String get authNostrConnectStartFailed =>
+      'Impossible de joindre l\'app de signature. Vérifie ta connexion et réessaie.';
+
+  @override
+  String get authNostrConnectInvalidSession =>
+      'Ce lien de connexion n\'est plus valide. Génères-en un nouveau.';
+
+  @override
+  String get authNostrConnectSetupFailed =>
+      'On y est presque — impossible de finaliser ta connexion. Réessaie.';
+
+  @override
   String get authUrlCopied => 'URL copiée dans le presse-papiers';
 
   @override

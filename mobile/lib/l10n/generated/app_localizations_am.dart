@@ -2908,6 +2908,21 @@ class AppLocalizationsAm extends AppLocalizations {
   String get authUnknownError => 'ያልታወቀ ስህተት ተከስቷል።';
 
   @override
+  String get authBunkerRejectedConnection => 'ፈራሚ መተግበሪያዎ ግንኙነቱን አልተቀበለም።';
+
+  @override
+  String get authNostrConnectStartFailed =>
+      'ፈራሚውን ማግኘት አልተቻለም። ግንኙነትዎን ያረጋግጡ እና እንደገና ይሞክሩ።';
+
+  @override
+  String get authNostrConnectInvalidSession =>
+      'ይህ የግንኙነት አገናኝ ከአሁን በኋላ የሚሰራ አይደለም። አዲስ ይጀምሩ።';
+
+  @override
+  String get authNostrConnectSetupFailed =>
+      'ጥቂት ቀርቷል — መግባትዎን ማጠናቀቅ አልቻልንም። እንደገና ይሞክሩ።';
+
+  @override
   String get authUrlCopied => 'URL ወደ ቅንጥብ ሰሌዳ ተቀድቷል።';
 
   @override

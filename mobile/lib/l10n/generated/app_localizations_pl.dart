@@ -3033,6 +3033,22 @@ class AppLocalizationsPl extends AppLocalizations {
   String get authUnknownError => 'Wystąpił nieznany błąd.';
 
   @override
+  String get authBunkerRejectedConnection =>
+      'Twoja aplikacja do podpisywania odrzuciła połączenie.';
+
+  @override
+  String get authNostrConnectStartFailed =>
+      'Nie udało się połączyć z aplikacją do podpisywania. Sprawdź połączenie i spróbuj ponownie.';
+
+  @override
+  String get authNostrConnectInvalidSession =>
+      'Ten link do połączenia jest już nieważny. Utwórz nowy.';
+
+  @override
+  String get authNostrConnectSetupFailed =>
+      'Prawie gotowe — nie udało się dokończyć logowania. Spróbuj ponownie.';
+
+  @override
   String get authUrlCopied => 'URL skopiowany do schowka';
 
   @override

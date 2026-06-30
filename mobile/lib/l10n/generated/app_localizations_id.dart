@@ -2936,6 +2936,22 @@ class AppLocalizationsId extends AppLocalizations {
   String get authUnknownError => 'Terjadi kesalahan yang tidak diketahui.';
 
   @override
+  String get authBunkerRejectedConnection =>
+      'Aplikasi signer-mu menolak koneksi.';
+
+  @override
+  String get authNostrConnectStartFailed =>
+      'Tidak bisa menghubungi signer. Periksa koneksi kamu dan coba lagi.';
+
+  @override
+  String get authNostrConnectInvalidSession =>
+      'Tautan koneksi ini sudah tidak valid lagi. Buat yang baru.';
+
+  @override
+  String get authNostrConnectSetupFailed =>
+      'Hampir selesai — kami belum berhasil menyelesaikan proses masukmu. Coba lagi.';
+
+  @override
   String get authUrlCopied => 'URL disalin ke clipboard';
 
   @override

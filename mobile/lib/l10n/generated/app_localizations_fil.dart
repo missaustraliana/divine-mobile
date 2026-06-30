@@ -3007,6 +3007,22 @@ class AppLocalizationsFil extends AppLocalizations {
   String get authUnknownError => 'May hindi inaasahang error na nangyari.';
 
   @override
+  String get authBunkerRejectedConnection =>
+      'Tinanggihan ng iyong signer app ang connection.';
+
+  @override
+  String get authNostrConnectStartFailed =>
+      'Hindi maabot ang signer app. Pakitsek ang iyong connection at subukan ulit.';
+
+  @override
+  String get authNostrConnectInvalidSession =>
+      'Hindi na valid ang connection link na ito. Magsimula ng bago.';
+
+  @override
+  String get authNostrConnectSetupFailed =>
+      'Malapit na — hindi namin natapos ang pag-sign in sa iyo. Subukan ulit.';
+
+  @override
   String get authUrlCopied => 'Nakopya ang URL sa clipboard';
 
   @override

@@ -2959,6 +2959,22 @@ class AppLocalizationsSv extends AppLocalizations {
   String get authUnknownError => 'Ett okänt fel uppstod.';
 
   @override
+  String get authBunkerRejectedConnection =>
+      'Din sign-app nekade anslutningen.';
+
+  @override
+  String get authNostrConnectStartFailed =>
+      'Kunde inte nå sign-appen. Kontrollera din anslutning och försök igen.';
+
+  @override
+  String get authNostrConnectInvalidSession =>
+      'Den här anslutningslänken är inte längre giltig. Starta en ny.';
+
+  @override
+  String get authNostrConnectSetupFailed =>
+      'Nästan klart — vi kunde inte slutföra inloggningen. Försök igen.';
+
+  @override
   String get authUrlCopied => 'URL kopierad till urklipp';
 
   @override

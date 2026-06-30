@@ -2944,6 +2944,22 @@ class AppLocalizationsTr extends AppLocalizations {
   String get authUnknownError => 'Bilinmeyen bir hata oluştu.';
 
   @override
+  String get authBunkerRejectedConnection =>
+      'İmzalama uygulaman bağlantıyı reddetti.';
+
+  @override
+  String get authNostrConnectStartFailed =>
+      'İmzalama uygulamasına ulaşılamadı. Bağlantını kontrol et ve tekrar dene.';
+
+  @override
+  String get authNostrConnectInvalidSession =>
+      'Bu bağlantı artık geçerli değil. Yeni bir tane oluştur.';
+
+  @override
+  String get authNostrConnectSetupFailed =>
+      'Az kaldı — girişini tamamlayamadık. Tekrar dene.';
+
+  @override
   String get authUrlCopied => 'URL panoya kopyalandı';
 
   @override

@@ -2972,6 +2972,22 @@ class AppLocalizationsNl extends AppLocalizations {
   String get authUnknownError => 'Er is een onbekende fout opgetreden.';
 
   @override
+  String get authBunkerRejectedConnection =>
+      'Je signer-app heeft de verbinding geweigerd.';
+
+  @override
+  String get authNostrConnectStartFailed =>
+      'De signer-app is niet bereikbaar. Controleer je verbinding en probeer het opnieuw.';
+
+  @override
+  String get authNostrConnectInvalidSession =>
+      'Deze verbindingslink is niet meer geldig. Start een nieuwe.';
+
+  @override
+  String get authNostrConnectSetupFailed =>
+      'Bijna gelukt — we konden het inloggen niet afronden. Probeer het opnieuw.';
+
+  @override
   String get authUrlCopied => 'URL gekopieerd naar klembord';
 
   @override

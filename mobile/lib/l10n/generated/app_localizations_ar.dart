@@ -2928,6 +2928,22 @@ class AppLocalizationsAr extends AppLocalizations {
   String get authUnknownError => 'حدث خطأ غير معروف.';
 
   @override
+  String get authBunkerRejectedConnection =>
+      'رفض تطبيق التوقيع الخاص بك الاتصال.';
+
+  @override
+  String get authNostrConnectStartFailed =>
+      'تعذّر الوصول إلى تطبيق التوقيع. تحقّق من اتصالك وحاول مرّة أخرى.';
+
+  @override
+  String get authNostrConnectInvalidSession =>
+      'لم يعد رابط الاتصال هذا صالحًا. أنشئ رابطًا جديدًا.';
+
+  @override
+  String get authNostrConnectSetupFailed =>
+      'اقتربنا — لكن لم نتمكّن من إتمام تسجيل دخولك. حاول مرّة أخرى.';
+
+  @override
   String get authUrlCopied => 'تم نسخ الرابط إلى الحافظة';
 
   @override

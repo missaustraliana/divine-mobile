@@ -3007,6 +3007,22 @@ class AppLocalizationsBg extends AppLocalizations {
   String get authUnknownError => 'Възникна неизвестна грешка.';
 
   @override
+  String get authBunkerRejectedConnection =>
+      'Приложението ти за подписване отказа връзката.';
+
+  @override
+  String get authNostrConnectStartFailed =>
+      'Не успяхме да се свържем с приложението за подписване. Провери връзката си и опитай пак.';
+
+  @override
+  String get authNostrConnectInvalidSession =>
+      'Тази връзка вече не е валидна. Започни нова.';
+
+  @override
+  String get authNostrConnectSetupFailed =>
+      'Почти готово — не успяхме да завършим влизането ти. Опитай пак.';
+
+  @override
   String get authUrlCopied => 'URL адресът е копиран в клипборда';
 
   @override
