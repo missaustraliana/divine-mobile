@@ -538,11 +538,13 @@ class _ThumbnailImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // No cacheHeight: reuse the plain FileImage key the poster/grid already
+    // warmed so this is a cache hit, not a cold resized decode that flashes
+    // black. Strip thumbnails below keep it — they have no warm entry to share.
     final fallback = thumbnailPath != null
         ? Image.file(
             File(thumbnailPath!),
             fit: BoxFit.cover,
-            cacheHeight: cacheHeight,
             excludeFromSemantics: true,
             errorBuilder: (_, _, _) =>
                 const ColoredBox(color: VineTheme.surfaceContainerHigh),
