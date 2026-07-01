@@ -1,8 +1,11 @@
 // ABOUTME: Upload & media Riverpod providers split from app_providers.dart
 // ABOUTME: Blossom upload, media-auth chain, upload manager, API clients, audio playback
 
+import 'package:background_uploader/background_uploader.dart';
 import 'package:blossom_upload_service/blossom_upload_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:openvine/blocs/background_publish/publish_foreground_session.dart';
+import 'package:openvine/l10n/current_app_l10n.dart';
 import 'package:openvine/providers/active_video_provider.dart';
 import 'package:openvine/providers/app_foreground_provider.dart';
 import 'package:openvine/providers/auth_providers.dart';
@@ -11,6 +14,7 @@ import 'package:openvine/providers/moderation_providers.dart';
 import 'package:openvine/providers/overlay_visibility_provider.dart';
 import 'package:openvine/providers/route_feed_providers.dart';
 import 'package:openvine/providers/service_providers.dart';
+import 'package:openvine/providers/shared_preferences_provider.dart';
 import 'package:openvine/providers/shell_obscured_provider.dart';
 import 'package:openvine/services/api_service.dart';
 import 'package:openvine/services/auth_service.dart' hide UserProfile;
@@ -48,6 +52,97 @@ class _BlossomAuthAdapter implements BlossomAuthProvider {
     if (event == null) return null;
     return BlossomSignedEvent(json: event.toJson());
   }
+}
+
+/// Adapts the [BackgroundUploader] plugin to the package-level
+/// [BlossomBackgroundTransport] port, so the Blossom service can hand a single
+/// PUT to the OS without depending on the plugin directly.
+class _BackgroundUploadTransportAdapter implements BlossomBackgroundTransport {
+  const _BackgroundUploadTransportAdapter(
+    this._uploader, {
+    required String Function() notificationTitle,
+  }) : _notificationTitle = notificationTitle;
+
+  final BackgroundUploader _uploader;
+
+  /// Resolves the Android foreground-service notification title in the app's
+  /// current locale. Owned by the app layer because the `background_uploader`
+  /// plugin is intentionally domain-agnostic and l10n-free. Called per enqueue
+  /// so a locale change between uploads is picked up.
+  final String Function() _notificationTitle;
+
+  @override
+  Stream<BlossomBackgroundTransferEvent> get events =>
+      _uploader.events.map(_toTransferEvent);
+
+  @override
+  Future<void> enqueue({
+    required String taskId,
+    required String url,
+    required String method,
+    required Map<String, String> headers,
+    required String filePath,
+  }) {
+    return _uploader.enqueue(
+      BackgroundUploadRequest(
+        taskId: taskId,
+        url: Uri.parse(url),
+        filePath: filePath,
+        method: method,
+        headers: headers,
+        notificationTitle: _notificationTitle(),
+      ),
+    );
+  }
+
+  @override
+  Future<void> cancel(String taskId) => _uploader.cancel(taskId);
+
+  @override
+  Future<BlossomBackgroundTransferEvent?> takeBufferedTerminalEvent(
+    String taskId,
+  ) async {
+    final event = await _uploader.takeBufferedTerminalEvent(taskId);
+    return event == null ? null : _toTransferEvent(event);
+  }
+
+  static BlossomBackgroundTransferEvent _toTransferEvent(
+    BackgroundUploadEvent event,
+  ) {
+    return BlossomBackgroundTransferEvent(
+      taskId: event.taskId,
+      status: switch (event.status) {
+        BackgroundUploadStatus.running =>
+          BlossomBackgroundTransferStatus.running,
+        BackgroundUploadStatus.completed =>
+          BlossomBackgroundTransferStatus.completed,
+        BackgroundUploadStatus.failed => BlossomBackgroundTransferStatus.failed,
+        BackgroundUploadStatus.cancelled =>
+          BlossomBackgroundTransferStatus.cancelled,
+      },
+      progress: event.progress,
+      httpStatusCode: event.httpStatusCode,
+      responseBody: event.responseBody,
+      error: event.error,
+    );
+  }
+}
+
+/// Adapts the [BackgroundUploader] plugin to the [PublishForegroundSession]
+/// port, so the background-publish bloc can keep the process foregrounded for
+/// the whole publish without depending on the plugin directly.
+class _BackgroundUploaderForegroundSession implements PublishForegroundSession {
+  const _BackgroundUploaderForegroundSession(this._uploader);
+
+  final BackgroundUploader _uploader;
+
+  @override
+  Future<void> begin(String sessionId) =>
+      _uploader.beginForegroundSession(sessionId);
+
+  @override
+  Future<void> end(String sessionId) =>
+      _uploader.endForegroundSession(sessionId);
 }
 
 /// Adapts a [PerformanceTraceMonitor] to the package-level
@@ -118,6 +213,26 @@ final uploadBackpressureActiveProvider = Provider<bool>((ref) {
   return isHomeFeedActive;
 });
 
+/// OS-backed background upload transport (URLSession on iOS/macOS, a
+/// foreground service on Android), adapted to the Blossom transport port.
+final backgroundUploadTransportProvider = Provider<BlossomBackgroundTransport>(
+  (ref) {
+    final prefs = ref.watch(sharedPreferencesProvider);
+    return _BackgroundUploadTransportAdapter(
+      BackgroundUploader.instance,
+      notificationTitle: () =>
+          currentAppL10n(prefs).backgroundUploadNotificationTitle,
+    );
+  },
+);
+
+/// Foreground session used by the background-publish bloc to keep the process
+/// network alive across the whole publish (upload + signing + relay), not just
+/// the OS-backed blob transfer.
+final publishForegroundSessionProvider = Provider<PublishForegroundSession>(
+  (ref) => _BackgroundUploaderForegroundSession(BackgroundUploader.instance),
+);
+
 /// Blossom upload service (uses user-configured Blossom server)
 @riverpod
 BlossomUploadService blossomUploadService(Ref ref) {
@@ -129,6 +244,7 @@ BlossomUploadService blossomUploadService(Ref ref) {
       ref.watch(performanceMonitoringServiceProvider),
     ),
     defaultServerUrl: env.blossomUrl,
+    backgroundTransport: ref.watch(backgroundUploadTransportProvider),
     // Backpressure: while a feed video is actively playing in the foreground,
     // pause briefly between chunks so the upload doesn't starve playback on a
     // congested connection. No pause when nothing is streaming.
@@ -139,6 +255,13 @@ BlossomUploadService blossomUploadService(Ref ref) {
     },
   );
 }
+
+/// Whether video publishing routes through the OS background uploader so the
+/// transfer survives app suspension. Kept as a kill-switch: flip to `false` to
+/// fall back to the in-process chunked/resumable upload path if a regression
+/// surfaces in the OS-backed path (iOS/macOS URLSession + Android foreground
+/// service).
+const _backgroundUploadEnabled = true;
 
 /// Upload manager uses only Blossom upload service
 @Riverpod(keepAlive: true)
@@ -152,6 +275,7 @@ UploadManager uploadManager(Ref ref) {
     defaultBlossomUrl: env.blossomUrl,
     currentNostrPubkey: currentPubkey,
     scopeUploadsToCurrentUser: true,
+    useBackgroundUpload: _backgroundUploadEnabled,
   );
   ref.onDispose(manager.dispose);
   return manager;

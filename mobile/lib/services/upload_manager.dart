@@ -128,6 +128,7 @@ class UploadManager {
     VideoCircuitBreaker? circuitBreaker,
     UploadRetryConfig? retryConfig,
     UploadCrashReporter? crashReporter,
+    this.useBackgroundUpload = false,
   }) : _blossomService = blossomService,
        _defaultBlossomUrl =
            defaultBlossomUrl ?? BlossomUploadService.defaultBlossomServer,
@@ -149,6 +150,12 @@ class UploadManager {
     );
   }
 
+  /// Routes the video transfer through the OS background uploader
+  /// ([BlossomUploadService.uploadVideoInBackground]) instead of the in-process
+  /// chunked/legacy path, so it survives app suspension. Requires the
+  /// blossom service to have been built with a background transport.
+  final bool useBackgroundUpload;
+
   // Core services
   final PendingUploadStore _store;
   final BlossomUploadService _blossomService;
@@ -165,6 +172,15 @@ class UploadManager {
   // cancel them — an untracked periodic timer would keep firing against
   // a disposed manager for up to 5 minutes.
   final Map<String, Timer> _processingPollTimers = {};
+
+  // Uploads the user paused or cancelled while their transfer was still in
+  // flight. Cancelling an OS background transfer emits a `cancelled` terminal
+  // event that resolves the in-flight [_performUpload] future as a failure; a
+  // marker here lets that path recognise a user-initiated stop and skip
+  // [_handleUploadFailure], so a pause is not overwritten with `failed` and a
+  // cancel does not emit a spurious failure crash report. Cleared when the
+  // owning [_performUpload] run settles.
+  final Set<String> _userStoppedUploadIds = <String>{};
 
   bool _isInitialized = false;
 
@@ -730,12 +746,26 @@ class UploadManager {
       );
       await _performUploadWithRetry(upload, videoFile, onProgress);
     } catch (e) {
+      // A user-initiated pause/cancel tears down the in-flight transfer, which
+      // surfaces here as a failure. pauseUpload/cancelUpload already wrote the
+      // authoritative status, so don't overwrite it or report the stop as a
+      // crash — see [_userStoppedUploadIds].
+      if (_userStoppedUploadIds.contains(upload.id)) {
+        Log.info(
+          'Upload ${upload.id} stopped by user; skipping failure handling',
+          name: 'UploadManager',
+          category: LogCategory.video,
+        );
+        return;
+      }
       Log.error(
         '❌ Upload failed: $e',
         name: 'UploadManager',
         category: LogCategory.video,
       );
       await _handleUploadFailure(upload, e);
+    } finally {
+      _userStoppedUploadIds.remove(upload.id);
     }
   }
 
@@ -839,55 +869,75 @@ class UploadManager {
         );
       }
 
-      final result = await _blossomService
-          .uploadVideo(
-            videoFile: videoFile,
-            nostrPubkey: upload.nostrPubkey,
-            title: upload.title ?? '',
-            description: upload.description,
-            hashtags: upload.hashtags,
-            proofManifestJson: upload.proofManifestJson,
-            resumableSession: upload.resumableSession,
-            onResumableSessionUpdated: (session) {
-              _retryPolicy.enqueueSessionPersist(
-                upload.id,
-                session,
-                videoFile.lengthSync(),
-              );
-            },
-            onProgress: (value) {
-              final progress = value * 0.8; // Reserve 20% for thumbnail
+      void reportProgress(double value) {
+        final progress = value * 0.8; // Reserve 20% for thumbnail
+        _reporter.updateProgress(upload.id, progress);
+        onProgress?.call(progress);
+      }
 
-              _reporter.updateProgress(upload.id, progress);
-              onProgress?.call(progress);
-            },
-          )
-          .timeout(
-            _retryConfig.networkTimeout,
-            onTimeout: () {
-              Log.error(
-                '⏱️ Upload timed out!',
-                name: 'UploadManager',
-                category: LogCategory.video,
-              );
-              final timeoutError = TimeoutException(
-                'Upload timed out after ${_retryConfig.networkTimeout.inMinutes} minutes',
-              );
+      // Background uploads are a single OS-owned PUT that survives suspension.
+      // The OS keeps the transfer alive across app suspension, so it must not
+      // be cut off by the aggressive in-process network timeout;
+      // uploadVideoInBackground applies its own generous safety timeout and
+      // releases its event subscription internally. The in-process path keeps
+      // chunked-resumable behind networkTimeout.
+      final BlossomUploadResult result;
+      if (useBackgroundUpload) {
+        result = await _blossomService.uploadVideoInBackground(
+          videoFile: videoFile,
+          taskId: upload.id,
+          proofManifestJson: upload.proofManifestJson,
+          onProgress: reportProgress,
+        );
+      } else {
+        result = await _blossomService
+            .uploadVideo(
+              videoFile: videoFile,
+              nostrPubkey: upload.nostrPubkey,
+              title: upload.title ?? '',
+              description: upload.description,
+              hashtags: upload.hashtags,
+              proofManifestJson: upload.proofManifestJson,
+              resumableSession: upload.resumableSession,
+              onResumableSessionUpdated: (session) {
+                _retryPolicy.enqueueSessionPersist(
+                  upload.id,
+                  session,
+                  videoFile.lengthSync(),
+                );
+              },
+              onProgress: reportProgress,
+            )
+            .timeout(
+              _retryConfig.networkTimeout,
+              onTimeout: () {
+                Log.error(
+                  '⏱️ Upload timed out!',
+                  name: 'UploadManager',
+                  category: LogCategory.video,
+                );
+                final timeoutError = TimeoutException(
+                  'Upload timed out after '
+                  '${_retryConfig.networkTimeout.inMinutes} minutes',
+                );
 
-              // Send timeout crash report asynchronously
-              _reporter.sendTimeoutCrashReport(upload, timeoutError).catchError(
-                (e) {
-                  Log.error(
-                    'Failed to send timeout crash report: $e',
-                    name: 'UploadManager',
-                    category: LogCategory.video,
-                  );
-                },
-              );
+                // Send timeout crash report asynchronously
+                _reporter
+                    .sendTimeoutCrashReport(upload, timeoutError)
+                    .catchError((
+                      e,
+                    ) {
+                      Log.error(
+                        'Failed to send timeout crash report: $e',
+                        name: 'UploadManager',
+                        category: LogCategory.video,
+                      );
+                    });
 
-              throw timeoutError;
-            },
-          );
+                throw timeoutError;
+              },
+            );
+      }
 
       // Generate and upload thumbnail after video upload succeeds
       String? thumbnailCdnUrl;
@@ -1124,8 +1174,19 @@ class UploadManager {
       category: LogCategory.video,
     );
 
-    // Cancel the active upload (Blossom uploads are canceled by stopping the request)
-    // No additional cleanup needed for Blossom uploads
+    // Mark before tearing down the transfer: cancelling it emits a terminal
+    // event that would otherwise drive the in-flight upload into
+    // [_handleUploadFailure] and overwrite the paused status below.
+    _userStoppedUploadIds.add(uploadId);
+
+    // Stop the OS-owned background transfer while paused so it doesn't keep
+    // uploading in the background. A background transfer is a single OS-owned
+    // PUT with no resumable checkpoint, so resuming re-enqueues it from byte 0
+    // (unlike the in-process path, which resumes from its resumable session).
+    // The in-process path is torn down by its request timeout.
+    if (useBackgroundUpload) {
+      await _blossomService.cancelBackgroundUpload(uploadId);
+    }
 
     // Update status to paused instead of failed
     final pausedUpload = upload.copyWith(
@@ -1223,9 +1284,22 @@ class UploadManager {
       category: LogCategory.video,
     );
 
-    // Cancel any active upload
-    if (upload.cloudinaryPublicId != null) {
-      // Blossom upload cancellation handled by request timeout
+    // Only mark an in-flight transfer: tearing it down emits a terminal event
+    // that would otherwise reach [_handleUploadFailure] and report a spurious
+    // failure for this user-initiated cancel. A marker for an already-terminal
+    // upload would never be cleared (no [_performUpload] run owns it).
+    final isInFlight =
+        upload.status == UploadStatus.uploading ||
+        upload.status == UploadStatus.retrying;
+    if (isInFlight) {
+      _userStoppedUploadIds.add(uploadId);
+    }
+
+    // Stop the OS-owned background transfer if this upload used one; the
+    // in-process path is torn down by its request timeout. Without this the OS
+    // keeps uploading a video the user already cancelled.
+    if (useBackgroundUpload) {
+      await _blossomService.cancelBackgroundUpload(uploadId);
     }
 
     // Update status to failed so it can be retried later
@@ -1499,6 +1573,10 @@ class UploadManager {
       final uploadResult = await _blossomService.uploadImage(
         imageFile: thumbnailFile,
         nostrPubkey: nostrPubkey,
+        // A thumbnail is a few KB — a single PUT avoids the resumable
+        // init/chunk/complete handshake (two extra round-trips plus extra auth
+        // signings) that otherwise dominated short-clip publish time.
+        allowResumable: false,
         onProgress: (progress) {
           // Map thumbnail progress to 85%-100% of total upload
           _reporter.updateProgress(upload.id, 0.85 + (progress * 0.15));

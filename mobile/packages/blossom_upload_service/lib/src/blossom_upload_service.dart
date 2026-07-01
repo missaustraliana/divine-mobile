@@ -3,6 +3,7 @@
 // ABOUTME: authentication and returns media URLs from any
 // ABOUTME: Blossom server.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -297,6 +298,88 @@ class BlossomResumableUploadException implements Exception {
   String toString() => message;
 }
 
+/// Lifecycle status of a background transfer reported by a
+/// [BlossomBackgroundTransport].
+enum BlossomBackgroundTransferStatus {
+  /// In flight; [BlossomBackgroundTransferEvent.progress] is meaningful.
+  running,
+
+  /// The server accepted the upload (a 2xx response).
+  completed,
+
+  /// The upload failed — a transport error or a non-2xx response.
+  failed,
+
+  /// The upload was cancelled.
+  cancelled,
+}
+
+/// A progress or terminal event from a [BlossomBackgroundTransport].
+class BlossomBackgroundTransferEvent {
+  /// Creates a [BlossomBackgroundTransferEvent].
+  const BlossomBackgroundTransferEvent({
+    required this.taskId,
+    required this.status,
+    this.progress = 0,
+    this.httpStatusCode,
+    this.responseBody,
+    this.error,
+  });
+
+  /// Identifier correlating this event to the enqueued upload.
+  final String taskId;
+
+  /// Current lifecycle status.
+  final BlossomBackgroundTransferStatus status;
+
+  /// Fraction uploaded in `[0, 1]` while [status] is
+  /// [BlossomBackgroundTransferStatus.running].
+  final double progress;
+
+  /// HTTP status code for terminal events, when the server responded.
+  final int? httpStatusCode;
+
+  /// Response body for terminal events, when available.
+  final String? responseBody;
+
+  /// Transport error for a [BlossomBackgroundTransferStatus.failed] event that
+  /// was not an HTTP status (e.g. a dropped socket).
+  final String? error;
+
+  /// Whether this event is terminal (no further events follow for [taskId]).
+  bool get isTerminal => status != BlossomBackgroundTransferStatus.running;
+}
+
+/// Port for an OS-backed background uploader.
+///
+/// Injected by the app so the Blossom service can hand a single PUT to the
+/// operating system and let it finish the transfer across app suspension.
+/// Kept abstract so this package takes no dependency on the concrete
+/// background-upload plugin (mirroring [BlossomAuthProvider]).
+abstract class BlossomBackgroundTransport {
+  /// Hands a single upload request to the OS background facility.
+  Future<void> enqueue({
+    required String taskId,
+    required String url,
+    required String method,
+    required Map<String, String> headers,
+    required String filePath,
+  });
+
+  /// Cancels an in-flight background upload identified by [taskId].
+  Future<void> cancel(String taskId);
+
+  /// Progress and terminal events for all enqueued uploads, keyed by taskId.
+  Stream<BlossomBackgroundTransferEvent> get events;
+
+  /// Claims a terminal event for [taskId] that the OS delivered while nothing
+  /// was listening on [events] — e.g. an upload finished while the app was
+  /// dead — or `null` when none is buffered. Claiming removes it.
+  Future<BlossomBackgroundTransferEvent?> takeBufferedTerminalEvent(
+    String taskId,
+  );
+}
+
 /// Abstraction over the payload of a Blossom upload.
 ///
 /// Two implementations exist:
@@ -432,6 +515,7 @@ class BlossomUploadService {
     DateTime Function()? clock,
     Future<void> Function(Duration)? sleep,
     Future<void> Function()? betweenChunks,
+    this.backgroundTransport,
   }) : _performanceMonitor =
            performanceMonitor ?? const NoOpPerformanceMonitor(),
        dio = dio ?? Dio(),
@@ -478,8 +562,32 @@ class BlossomUploadService {
   /// How long a cached capability discovery result stays valid.
   static const Duration _capabilityCacheTtl = Duration(minutes: 5);
 
+  /// How long a signed Blossom auth event stays valid. The in-process upload
+  /// paths send the request within seconds of signing, so a short window is
+  /// fine.
+  static const Duration _defaultAuthTtl = Duration(minutes: 5);
+
+  /// Auth TTL for the OS background path. The operating system owns the
+  /// transfer and may defer it — or resume it after a long app suspension —
+  /// well after [uploadVideoInBackground] signed the header. A short TTL would
+  /// have expired by the time the PUT is actually sent, so the server would
+  /// reject it as unauthorized; this wider window keeps the header valid.
+  static const Duration _backgroundAuthTtl = Duration(hours: 6);
+
+  /// Safety timeout for [uploadVideoInBackground]. The OS drives the transfer,
+  /// so this is deliberately generous — it only exists to guarantee the
+  /// returned future completes (and its event subscription is released) if the
+  /// OS never reports a terminal event, e.g. the Android foreground service is
+  /// killed mid-transfer.
+  static const Duration _backgroundUploadTimeout = Duration(minutes: 30);
+
   /// The authentication provider for signing Blossom events.
   final BlossomAuthProvider authProvider;
+
+  /// Optional OS-backed background uploader used by [uploadVideoInBackground].
+  /// `null` disables background uploads; that method then fails fast.
+  final BlossomBackgroundTransport? backgroundTransport;
+
   final BlossomPerformanceMonitor _performanceMonitor;
 
   /// The HTTP client used for uploads.
@@ -568,6 +676,7 @@ class BlossomUploadService {
     required String fileHash,
     required int fileSize,
     String contentDescription = 'Upload video to Blossom server',
+    Duration authTtl = _defaultAuthTtl,
   }) async {
     try {
       // Blossom requires these tags (BUD-01):
@@ -576,9 +685,7 @@ class BlossomUploadService {
       // - x: SHA-256 hash of the file (optional but recommended)
 
       final now = DateTime.now();
-      final expiration = now.add(
-        const Duration(minutes: 5),
-      ); // 5 minute expiration
+      final expiration = now.add(authTtl);
       final expirationTimestamp = expiration.millisecondsSinceEpoch ~/ 1000;
 
       // Build tags for Blossom auth event (kind 24242)
@@ -653,6 +760,7 @@ class BlossomUploadService {
     required String fileHash,
     required int fileSize,
     required String contentDescription,
+    Duration authTtl = _defaultAuthTtl,
   }) async {
     final authEvent = await _createBlossomAuthEvent(
       url: url,
@@ -660,6 +768,7 @@ class BlossomUploadService {
       fileHash: fileHash,
       fileSize: fileSize,
       contentDescription: contentDescription,
+      authTtl: authTtl,
     );
     if (authEvent == null) {
       return null;
@@ -1951,6 +2060,289 @@ class BlossomUploadService {
     }
   }
 
+  /// Uploads [videoFile] through the injected [backgroundTransport] as a
+  /// single Blossom BUD-01 `PUT`, letting the OS finish the transfer across
+  /// app suspension.
+  ///
+  /// Unlike [uploadVideo], this does not chunk or fall back across servers — an
+  /// OS background transfer is a single request to the default server. The
+  /// returned future completes when the transfer reaches a terminal state,
+  /// which — after the app was suspended mid-upload — is when it resumes.
+  ///
+  /// [taskId] correlates the transfer; pass a stable id (e.g. the pending-
+  /// upload id) so it can be reconciled after a relaunch. Returns a failure
+  /// result (rather than throwing) when no transport is configured, the user
+  /// is unauthenticated, or the auth header cannot be built.
+  Future<BlossomUploadResult> uploadVideoInBackground({
+    required File videoFile,
+    required String taskId,
+    required String? proofManifestJson,
+    void Function(double)? onProgress,
+    Duration timeout = _backgroundUploadTimeout,
+  }) async {
+    final transport = backgroundTransport;
+    if (transport == null) {
+      return const BlossomUploadResult(
+        success: false,
+        errorMessage: 'Background upload transport is not configured',
+        failureReason: BlossomUploadFailureReason.unknown,
+      );
+    }
+
+    if (!authProvider.isAuthenticated) {
+      return const BlossomUploadResult(
+        success: false,
+        errorMessage: 'User not authenticated - please sign in to upload',
+        failureReason: BlossomUploadFailureReason.auth,
+      );
+    }
+
+    var traceRunning = false;
+    Future<void> stopTraceOnce() async {
+      if (!traceRunning) return;
+      traceRunning = false;
+      await _performanceMonitor.stopTrace('video_upload');
+    }
+
+    await _performanceMonitor.startTrace('video_upload');
+    traceRunning = true;
+    try {
+      onProgress?.call(0.1);
+      final hashResult = await HashUtil.sha256File(videoFile);
+      final fileSize = hashResult.size;
+      final fileHash = hashResult.hash;
+      _performanceMonitor.setMetric(
+        'video_upload',
+        'file_size_bytes',
+        fileSize,
+      );
+      onProgress?.call(0.2);
+
+      final serverUrl = (await _getServerUrlsForUpload()).first;
+
+      // Startup reconciliation: if the OS already finished this upload while
+      // the app was dead, its terminal event was buffered by the transport.
+      // Claim it and skip re-uploading the whole file. A failed/cancelled
+      // buffered event is simply discarded so this retry proceeds normally.
+      final buffered = await transport.takeBufferedTerminalEvent(taskId);
+      if (buffered != null &&
+          buffered.status == BlossomBackgroundTransferStatus.completed) {
+        final result = _backgroundTransferResult(
+          buffered,
+          fileHash: fileHash,
+          serverUrl: serverUrl,
+        );
+        if (result.success) {
+          onProgress?.call(1);
+          return result;
+        }
+      }
+
+      final uploadUrl = '$serverUrl/upload';
+      final authHeader = await _createBlossomAuthHeader(
+        url: uploadUrl,
+        method: 'PUT',
+        fileHash: fileHash,
+        fileSize: fileSize,
+        contentDescription: 'Upload video to Blossom server',
+        authTtl: _backgroundAuthTtl,
+      );
+      if (authHeader == null) {
+        return const BlossomUploadResult(
+          success: false,
+          errorMessage: 'Failed to create Blossom authentication',
+          failureReason: BlossomUploadFailureReason.authUnavailable,
+        );
+      }
+
+      final headers = <String, dynamic>{
+        'Authorization': authHeader,
+        'Content-Type': 'video/mp4',
+        'Content-Length': fileSize.toString(),
+      };
+      if (proofManifestJson != null && proofManifestJson.isNotEmpty) {
+        _addProofModeHeaders(headers, proofManifestJson);
+      }
+      final stringHeaders = headers.map(
+        (key, value) => MapEntry(key, value.toString()),
+      );
+
+      final completer = Completer<BlossomUploadResult>();
+      final sub = transport.events
+          .where((event) => event.taskId == taskId)
+          .listen((event) {
+            if (!event.isTerminal) {
+              onProgress?.call((0.2 + event.progress * 0.7).clamp(0.2, 0.9));
+              return;
+            }
+            if (completer.isCompleted) return;
+            final result = _backgroundTransferResult(
+              event,
+              fileHash: fileHash,
+              serverUrl: serverUrl,
+            );
+            if (result.success) onProgress?.call(1);
+            completer.complete(result);
+          });
+
+      // Cancel the subscription no matter how the future resolves — terminal
+      // event, enqueue failure, or the safety timeout below — so we never leak
+      // a listener on the shared broadcast stream.
+      try {
+        try {
+          await transport.enqueue(
+            taskId: taskId,
+            url: uploadUrl,
+            method: 'PUT',
+            headers: stringHeaders,
+            filePath: videoFile.path,
+          );
+        } on Object catch (e) {
+          if (!completer.isCompleted) {
+            completer.complete(
+              BlossomUploadResult(
+                success: false,
+                errorMessage: 'Failed to enqueue background upload: $e',
+                failureReason: _classifyUploadException(e),
+              ),
+            );
+          }
+        }
+
+        // Setup + enqueue are the only in-process work; stop the trace here so
+        // it doesn't span the OS-owned transfer wait (which can include a long
+        // app suspension and would otherwise pollute the perf metric).
+        await stopTraceOnce();
+        return await completer.future.timeout(
+          timeout,
+          onTimeout: () => BlossomUploadResult(
+            success: false,
+            errorMessage:
+                'Background upload reported no terminal event within '
+                '${timeout.inMinutes} minutes',
+            isTransientNetworkFailure: true,
+            failureReason: BlossomUploadFailureReason.network,
+          ),
+        );
+      } finally {
+        await sub.cancel();
+      }
+    } finally {
+      await stopTraceOnce();
+    }
+  }
+
+  /// Stops an in-flight OS background upload previously enqueued via
+  /// [uploadVideoInBackground] under [taskId].
+  ///
+  /// Without this the OS keeps streaming the file to completion even after the
+  /// user cancels, wasting bandwidth on a video that will never be published.
+  /// A no-op when no [backgroundTransport] is configured.
+  Future<void> cancelBackgroundUpload(String taskId) async {
+    await backgroundTransport?.cancel(taskId);
+  }
+
+  /// Maps a terminal [BlossomBackgroundTransferEvent] to a
+  /// [BlossomUploadResult].
+  ///
+  /// On success it prefers the `url` / `fallbackUrl` the server returned in the
+  /// response body (mirroring [_parseUploadResponse]); when the body carries
+  /// none, it falls back to the content-addressed URL on [serverUrl] — the
+  /// server the file was actually uploaded to, which is not necessarily the
+  /// default server when a custom Blossom server is configured.
+  BlossomUploadResult _backgroundTransferResult(
+    BlossomBackgroundTransferEvent event, {
+    required String fileHash,
+    required String serverUrl,
+  }) {
+    switch (event.status) {
+      case BlossomBackgroundTransferStatus.completed:
+        final canonicalUrl = '$serverUrl/$fileHash';
+        final body = event.responseBody;
+        final decoded = body == null ? null : _tryDecodeJsonMap(body);
+        String? responseUrl;
+        String? responseFallbackUrl;
+        String? thumbnailUrl;
+        String? streamingMp4Url;
+        String? streamingHlsUrl;
+        String? streamingStatus;
+        if (decoded != null) {
+          responseUrl = decoded['url']?.toString();
+          responseFallbackUrl = decoded['fallbackUrl']?.toString();
+          thumbnailUrl =
+              decoded['thumbnail']?.toString() ?? responseFallbackUrl;
+          final streaming = decoded['streaming'];
+          if (streaming is Map) {
+            streamingMp4Url = streaming['mp4Url']?.toString();
+            streamingHlsUrl = streaming['hlsUrl']?.toString();
+            streamingStatus = streaming['status']?.toString();
+            thumbnailUrl =
+                streaming['thumbnailUrl']?.toString() ??
+                streaming['thumbnail']?.toString() ??
+                thumbnailUrl;
+          }
+        }
+        return BlossomUploadResult(
+          success: true,
+          url: (responseUrl != null && responseUrl.isNotEmpty)
+              ? responseUrl
+              : canonicalUrl,
+          fallbackUrl:
+              (responseFallbackUrl != null && responseFallbackUrl.isNotEmpty)
+              ? responseFallbackUrl
+              : canonicalUrl,
+          videoId: fileHash,
+          thumbnailUrl: thumbnailUrl,
+          streamingMp4Url: streamingMp4Url,
+          streamingHlsUrl: streamingHlsUrl,
+          streamingStatus: streamingStatus,
+        );
+      case BlossomBackgroundTransferStatus.cancelled:
+        return const BlossomUploadResult(
+          success: false,
+          errorMessage: 'Upload cancelled',
+          failureReason: BlossomUploadFailureReason.unknown,
+        );
+      case BlossomBackgroundTransferStatus.running:
+      case BlossomBackgroundTransferStatus.failed:
+        final statusCode = event.httpStatusCode;
+        // A 409 means the blob is already stored (BUD dedup convention);
+        // mirror the in-process parse and treat it as success at the
+        // content-addressed URL on the server the file was actually uploaded
+        // to (not necessarily the default when a custom server is configured).
+        if (statusCode == 409) {
+          final existingUrl = '$serverUrl/$fileHash';
+          return BlossomUploadResult(
+            success: true,
+            url: existingUrl,
+            fallbackUrl: existingUrl,
+            videoId: fileHash,
+          );
+        }
+        return BlossomUploadResult(
+          success: false,
+          statusCode: statusCode,
+          errorMessage:
+              event.error ?? 'Upload failed: ${statusCode ?? 'no response'}',
+          isTransientNetworkFailure: statusCode == null && event.error != null,
+          failureReason:
+              BlossomUploadFailureReason.fromStatusCode(statusCode) ??
+              (event.error != null
+                  ? BlossomUploadFailureReason.network
+                  : BlossomUploadFailureReason.unknown),
+        );
+    }
+  }
+
+  Map<String, dynamic>? _tryDecodeJsonMap(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } on Object {
+      return null;
+    }
+  }
+
   /// Resume a previously interrupted resumable upload session.
   Future<BlossomResumableUploadSession> resumeUploadSession({
     required BlossomResumableUploadSession session,
@@ -1977,6 +2369,7 @@ class BlossomUploadService {
     String mimeType = 'image/jpeg',
     void Function(double)? onProgress,
     int maxAttempts = _defaultUploadImageMaxAttempts,
+    bool allowResumable = true,
   }) async {
     assert(maxAttempts >= 1, 'maxAttempts must be at least 1');
     try {
@@ -2020,6 +2413,7 @@ class BlossomUploadService {
         fileSize: fileSize,
         contentType: mimeType,
         maxAttempts: maxAttempts,
+        allowResumable: allowResumable,
         onProgress: onProgress,
       );
     } on Object catch (e) {
@@ -2121,6 +2515,7 @@ class BlossomUploadService {
     required int fileSize,
     required String contentType,
     required int maxAttempts,
+    bool allowResumable = true,
     void Function(double)? onProgress,
   }) async {
     // Get ordered list of servers to try
@@ -2147,7 +2542,7 @@ class BlossomUploadService {
 
         final result = await _uploadWithRetry(
           attempt: () {
-            if (capability.supportsResumable) {
+            if (capability.supportsResumable && allowResumable) {
               return _uploadWithSingleLegacyFallback(
                 serverUrl: serverUrl,
                 uploadResumable: () => _uploadToServerResumable(
