@@ -13,11 +13,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:keycast_flutter/keycast_flutter.dart';
 import 'package:nostr_client/nostr_client.dart' show Nip89ClientTag;
 import 'package:nostr_key_manager/nostr_key_manager.dart'
-    show
-        NostrKeyManager,
-        SecureKeyContainer,
-        SecureKeyStorage,
-        SecureKeyStorageException;
+    show SecureKeyContainer, SecureKeyStorage, SecureKeyStorageException;
 import 'package:nostr_sdk/nostr_sdk.dart';
 import 'package:openvine/constants/app_constants.dart';
 import 'package:openvine/models/auth_rpc_capability.dart';
@@ -254,7 +250,6 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
   AuthService({
     required UserDataCleanupService userDataCleanupService,
     SecureKeyStorage? keyStorage,
-    NostrKeyManager? nostrKeyManager,
     KeycastOAuth? oauthClient,
     FlutterSecureStorage? flutterSecureStorage,
     OAuthConfig? oauthConfig,
@@ -269,7 +264,6 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
     Duration expiredSessionRefreshTimeout = defaultExpiredSessionRefreshTimeout,
     Duration? startupNetworkOperationTimeout,
   }) : _keyStorage = keyStorage ?? SecureKeyStorage(),
-       _nostrKeyManager = nostrKeyManager,
        _userDataCleanupService = userDataCleanupService,
        _oauthClient = oauthClient,
        _flutterSecureStorage = flutterSecureStorage,
@@ -290,7 +284,6 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
            startupNetworkOperationTimeout ??
            defaultStartupNetworkOperationTimeout;
   final SecureKeyStorage _keyStorage;
-  final NostrKeyManager? _nostrKeyManager;
   final UserDataCleanupService _userDataCleanupService;
   final KeycastOAuth? _oauthClient;
   final FlutterSecureStorage? _flutterSecureStorage;
@@ -412,9 +405,6 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
   /// Current user profile (null if not authenticated)
   UserProfile? get currentProfile => _currentProfile;
 
-  /// Stream of profile changes
-  Stream<UserProfile?> get profileStream => _profileController.stream;
-
   /// Current public key (npub format).
   ///
   /// Reads from [currentIdentity] when available (post-authentication),
@@ -431,13 +421,6 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
       _currentIdentity?.pubkey ??
       _currentKeyContainer?.publicKeyHex ??
       _currentProfile?.publicKeyHex;
-
-  /// Current secure key container (null if not authenticated).
-  ///
-  /// Production code should use [currentIdentity] instead. This getter
-  /// exists for tests that need direct access to the key container.
-  @visibleForTesting
-  SecureKeyContainer? get currentKeyContainer => _currentKeyContainer;
 
   /// Check if user is authenticated
   @override
@@ -1209,46 +1192,6 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
     }
   }
 
-  /// Check if there are saved keys on device (without authenticating)
-  ///
-  /// Useful for showing different UI on welcome screen when user has
-  /// previously used the app vs fresh install.
-  Future<bool> hasSavedKeys() async {
-    try {
-      return await _keyStorage.hasKeys();
-    } catch (e, stack) {
-      Log.error(
-        'Secure storage error checking for saved keys: $e',
-        name: 'AuthService',
-        category: LogCategory.auth,
-      );
-      _reportStorageError(e, stack, 'hasSavedKeys()');
-      return false;
-    }
-  }
-
-  /// Get the saved npub from storage (without authenticating)
-  ///
-  /// Returns null if no keys are saved. Used to show which identity
-  /// will be resumed on welcome screen.
-  Future<String?> getSavedNpub() async {
-    try {
-      final hasKeys = await _keyStorage.hasKeys();
-      if (!hasKeys) return null;
-
-      final keyContainer = await _keyStorage.getKeyContainer();
-      return keyContainer?.npub;
-    } catch (e, stack) {
-      Log.error(
-        'Secure storage error loading saved npub: $e',
-        name: 'AuthService',
-        category: LogCategory.auth,
-      );
-      _reportStorageError(e, stack, 'getSavedNpub()');
-      return null;
-    }
-  }
-
   /// Initialize the authentication service
   Future<void> initialize() async {
     Log.debug(
@@ -1864,32 +1807,6 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
   /// Set this before calling [signOut] when the user picks a different account
   /// from the account-switcher. [WelcomeBloc] reads and clears this on start.
   String? pendingAccountSwitchPubkey;
-
-  /// Updates [lastUsedAt] for an existing known account without signing in.
-  ///
-  /// Use this before [signOut] when the user explicitly selects a different
-  /// account from the account-switcher, so the welcome screen presents that
-  /// account as the pre-selected returning user.
-  Future<void> touchKnownAccount(String pubkeyHex) async {
-    final accounts = await getKnownAccounts();
-    final index = accounts.indexWhere((a) => a.pubkeyHex == pubkeyHex);
-    if (index < 0) return;
-    final updated = accounts[index].copyWith(lastUsedAt: DateTime.now());
-    accounts[index] = updated;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        kKnownAccountsKey,
-        jsonEncode(accounts.map((a) => a.toJson()).toList()),
-      );
-    } catch (e) {
-      Log.warning(
-        'touchKnownAccount: failed to persist for $pubkeyHex: $e',
-        name: 'AuthService',
-        category: LogCategory.auth,
-      );
-    }
-  }
 
   // ---------------------------------------------------------------------------
   // Per-account signer info archival
@@ -4410,25 +4327,6 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
     }
   }
 
-  /// Get the private key for signing operations
-  Future<String?> getPrivateKeyForSigning({String? biometricPrompt}) async {
-    if (!isAuthenticated) return null;
-
-    try {
-      return await _keyStorage.withPrivateKey<String?>(
-        (privateKeyHex) => privateKeyHex,
-        biometricPrompt: biometricPrompt,
-      );
-    } catch (e) {
-      Log.error(
-        'Failed to get private key: $e',
-        name: 'AuthService',
-        category: LogCategory.auth,
-      );
-      return null;
-    }
-  }
-
   /// Export nsec for backup purposes
   Future<String?> exportNsec({String? biometricPrompt}) async {
     if (!isAuthenticated) return null;
@@ -4638,7 +4536,7 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
           name: 'AuthService',
           category: LogCategory.auth,
         );
-        final cachedPrimaryIdentity = _restoreFromLoadedPrimaryIdentity(
+        final cachedPrimaryIdentity = await _restoreFromLoadedPrimaryIdentity(
           lastNpub,
         );
         if (cachedPrimaryIdentity != null) {
@@ -4769,22 +4667,45 @@ class AuthService implements BackgroundAwareService, BlockListSigner {
     return false;
   }
 
-  SecureKeyContainer? _restoreFromLoadedPrimaryIdentity(String lastNpub) {
-    final keyManager = _nostrKeyManager;
-    final publicKeyHex = keyManager?.publicKey;
-    final privateKeyHex = keyManager?.privateKey;
-
-    if (publicKeyHex == null || privateKeyHex == null) {
+  /// Fast path: reuse the PRIMARY key when it matches the last-used npub,
+  /// avoiding a redundant per-identity storage read.
+  ///
+  /// Reads the primary container from [SecureKeyStorage] — a cache hit when it
+  /// was already loaded during init, otherwise a single platform read. The
+  /// npub guard keeps the reuse correct.
+  Future<SecureKeyContainer?> _restoreFromLoadedPrimaryIdentity(
+    String lastNpub,
+  ) async {
+    final SecureKeyContainer? primary;
+    try {
+      primary = await _keyStorage.getKeyContainer();
+    } catch (e) {
+      Log.warning(
+        '_restoreFromLoadedPrimaryIdentity: failed to load primary identity: '
+        '$e',
+        name: 'AuthService',
+        category: LogCategory.auth,
+      );
       return null;
     }
 
-    final primaryNpub = NostrKeyUtils.encodePubKey(publicKeyHex);
+    if (primary == null || !primary.hasPrivateKey) {
+      return null;
+    }
+
+    final primaryNpub = NostrKeyUtils.encodePubKey(primary.publicKeyHex);
     if (primaryNpub != lastNpub) {
       return null;
     }
 
+    String? privateKeyHex;
+    primary.withPrivateKey<void>((hex) => privateKeyHex = hex);
+    if (privateKeyHex == null || privateKeyHex!.isEmpty) {
+      return null;
+    }
+
     try {
-      return SecureKeyContainer.fromPrivateKeyHex(privateKeyHex);
+      return SecureKeyContainer.fromPrivateKeyHex(privateKeyHex!);
     } catch (e) {
       Log.warning(
         '_restoreFromLoadedPrimaryIdentity: failed to reuse loaded identity: '
