@@ -197,6 +197,61 @@ if [ "$CURRENT_BRANCH" != "main" ]; then
     fi
 fi
 
+# ARB locale consistency (mirrors CI's test/l10n/arb_consistency_test.dart).
+# ARB files are non-dart, so the changed-Dart filter below never sees them and
+# an ARB-only push would hit the "No Dart files changed" early-exit — hence the
+# separate detection here, ahead of that exit. The test asserts every app_*.arb
+# locale defines the same keys as app_en.arb (minus _knownUntranslatedDebt).
+CHANGED_ARB_FILES=$(git -C "$REPO_ROOT" diff --name-only "$BASE_BRANCH"...HEAD 2>/dev/null \
+    | grep -E '^mobile/lib/l10n/app_.*\.arb$' || true)
+if [ -n "$CHANGED_ARB_FILES" ]; then
+    echo "ARB locale files changed; checking locale consistency..."
+    if ! mise exec -- flutter test test/l10n/arb_consistency_test.dart 2>&1; then
+        echo ""
+        echo "ARB locale consistency check failed!"
+        echo "Mirror the app_en.arb key into every other app_*.arb locale (or add"
+        echo "it to _knownUntranslatedDebt in test/l10n/arb_consistency_test.dart),"
+        echo "then re-run: cd mobile && mise exec -- flutter test test/l10n/arb_consistency_test.dart"
+        exit 1
+    fi
+    echo "ARB locale consistency OK"
+    echo ""
+fi
+
+# Untested-services floor (mirrors CI's check_untested_services_floor.sh).
+# The floor invariant covers ANY service file under lib/services (generated
+# excluded), and a NEW offender appears not only when a service is added but
+# also when a same-named test is deleted/renamed away. Mirror that here: trigger
+# on any added/deleted/renamed mobile/lib/services/*.dart OR any deleted/renamed
+# mobile/test/**/*_test.dart, then run the check READ-ONLY (no UPDATE_BASELINE) —
+# the check does the full baseline comparison (NEW/STALE/GROWTH) and fails
+# closed. Ratcheting the baseline stays a deliberate, manual author step. The
+# trigger stays conditional so unrelated pushes are not slowed.
+CHANGED_SERVICE_FILES=$(git -C "$REPO_ROOT" diff --name-only --diff-filter=ADR "$BASE_BRANCH"...HEAD 2>/dev/null \
+    | grep -E '^mobile/lib/services/.*\.dart$' \
+    | grep -vE '\.(g|freezed)\.dart$' || true)
+CHANGED_TEST_FILES=$(git -C "$REPO_ROOT" diff --name-only --diff-filter=DR "$BASE_BRANCH"...HEAD 2>/dev/null \
+    | grep -E '^mobile/test/.*_test\.dart$' || true)
+if [ -n "$CHANGED_SERVICE_FILES" ] || [ -n "$CHANGED_TEST_FILES" ]; then
+    echo "Service/test file(s) changed; checking untested-services floor..."
+    if ! bash "$REPO_ROOT/mobile/scripts/check_untested_services_floor.sh"; then
+        echo ""
+        echo "Untested-services floor check failed!"
+        echo "If it reported a NEW untested service: add a same-named *_test.dart"
+        echo "for the service (or delete the dead service), then ratchet the"
+        echo "baseline:"
+        echo "  UPDATE_BASELINE=1 bash mobile/scripts/check_untested_services_floor.sh"
+        echo "If it reported 'baseline GREW vs origin/main': your branch is behind an"
+        echo "origin/main that shrank the baseline — rebase instead of running"
+        echo "UPDATE_BASELINE (which would re-add the offending entries from your"
+        echo "stale checkout):"
+        echo "  git fetch origin main && git rebase origin/main"
+        exit 1
+    fi
+    echo "Untested-services floor OK"
+    echo ""
+fi
+
 # Get list of changed Dart files (excluding generated files)
 CHANGED_FILES=$(git -C "$REPO_ROOT" diff --name-only "$BASE_BRANCH"...HEAD 2>/dev/null \
     | grep '^mobile/.*\.dart$' \
@@ -329,6 +384,7 @@ chmod +x "$HOOKS_DIR/pre-push"
 echo "Git hooks installed!"
 echo ""
 echo "Pre-commit: format check, flutter analyze, codegen verification"
-echo "Pre-push:   merge conflict check, codegen verification, tests for changed files"
+echo "Pre-push:   merge conflict check, codegen verification, ARB locale consistency,"
+echo "            untested-services floor, tests for changed files"
 echo ""
 echo "To bypass hooks (not recommended): --no-verify"
