@@ -209,7 +209,13 @@ final class VideoRecorderScaleUpdated extends VideoRecorderEvent {
 /// transition is past the visible frame. Pair with
 /// [VideoRecorderInitializeRequested] on return.
 final class VideoRecorderCameraPausedForNavigation extends VideoRecorderEvent {
-  const VideoRecorderCameraPausedForNavigation();
+  const VideoRecorderCameraPausedForNavigation({this.completion});
+
+  /// Optional completion signal for callers that must run after camera dispose.
+  final Completer<void>? completion;
+
+  @override
+  List<Object?> get props => [completion];
 }
 
 /// Locks recording and detaches the remote (volume / Bluetooth) trigger the

@@ -73,7 +73,12 @@ Future<void> openVideoEditorFromRecorder(
       : context.push(VideoMetadataScreen.path);
 
   await awaitPushTransition(context);
-  bloc.add(const VideoRecorderCameraPausedForNavigation());
+  await _pauseCameraForNavigation(bloc);
+  if (recorderMode.hasVideoEditor) {
+    await ref.read(audioSessionServiceProvider).configureForMixedPlayback();
+  } else {
+    await ref.read(audioSessionServiceProvider).resetAudioSession();
+  }
 
   await navigation;
   if (!context.mounted) return;
@@ -97,11 +102,21 @@ Future<void> openRecorderLibrary(BuildContext context, WidgetRef ref) async {
   final navigation = context.pushNamed(LibraryScreen.clipsOnlyRouteName);
 
   await awaitPushTransition(context);
-  bloc.add(const VideoRecorderCameraPausedForNavigation());
+  await _pauseCameraForNavigation(bloc);
+  await ref.read(audioSessionServiceProvider).resetAudioSession();
 
   await navigation;
   if (!context.mounted) return;
   bloc.add(const VideoRecorderInitializeRequested());
+}
+
+Future<void> _pauseCameraForNavigation(VideoRecorderBloc bloc) {
+  // A closed bloc drops the event, so the completion would never resolve and
+  // the awaiting caller would hang. Skip the handoff instead.
+  if (bloc.isClosed) return Future<void>.value();
+  final completion = Completer<void>();
+  bloc.add(VideoRecorderCameraPausedForNavigation(completion: completion));
+  return completion.future;
 }
 
 Future<bool> _ensureAuthenticatedForRecorderExit(
