@@ -5,8 +5,8 @@ import 'package:keycast_flutter/keycast_flutter.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:nostr_key_manager/nostr_key_manager.dart';
 import 'package:nostr_sdk/nostr_sdk.dart';
+import 'package:openvine/services/auth/nostr_identity.dart';
 import 'package:openvine/services/local_key_signer.dart';
-import 'package:openvine/services/nostr_identity.dart';
 import 'package:openvine/utils/nostr_key_utils.dart';
 
 class _MockSecureKeyContainer extends Mock implements SecureKeyContainer {}
@@ -171,8 +171,8 @@ void main() {
       'signEvent rejects an invalid RPC fallback signature (#5450) so a remote '
       'result cannot bypass verification when signsWithLocalKey is true',
       () async {
-        // signsWithLocalKey is true (local signer present), so AuthService
-        // skips its post-sign verify. The local sign fails and the RPC
+        // signsWithLocalKey is true (local signer present), so the signing
+        // core skips its post-sign verify. The local sign fails and the RPC
         // fallback returns an UNSIGNED event — it must be rejected, not
         // returned, or the remote result would slip through unverified.
         final unsigned = Event(testPublicKey, EventKind.textNote, [], 'test');
