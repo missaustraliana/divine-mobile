@@ -9,6 +9,7 @@ import 'package:openvine/providers/shared_preferences_provider.dart';
 import 'package:openvine/repositories/protected_minor_repository.dart';
 import 'package:openvine/services/auth_service.dart';
 import 'package:openvine/services/protected_minor_override_service.dart';
+import 'package:openvine/services/protected_minor_sticky_store.dart';
 
 /// Developer-only override service (debug builds).
 final protectedMinorOverrideServiceProvider =
@@ -78,7 +79,61 @@ final protectedMinorStatusProvider = FutureProvider<ProtectedMinorStatus>((
 /// Note: unknown/error status is still exposed on [protectedMinorStatusProvider]
 /// for consumers that need to distinguish an unavailable check from confirmed
 /// not-protected.
+/// Persisted last-known protected-minor state (fail-safe backing, #175).
+final protectedMinorStickyStoreProvider = Provider<ProtectedMinorStickyStore>((
+  ref,
+) {
+  return ProtectedMinorStickyStore(prefs: ref.watch(sharedPreferencesProvider));
+});
+
+/// Whether a live protected-minor status may be trusted as a fresh signal for
+/// the current account, or `null` to fall back to the persisted sticky value.
+///
+/// A status is only trustworthy when the session is **authenticated** and the
+/// value is **freshly resolved** (`AsyncData`). This rejects two fail-safe
+/// hazards: the `notProtected()` the #174 seam emits merely because auth has
+/// not completed (cold start / session restore), and a stale value retained
+/// from a previous account during a refetch (`AsyncLoading`/`AsyncError`).
+ProtectedMinorStatus? trustedProtectedMinorStatus({
+  required bool authenticated,
+  required AsyncValue<ProtectedMinorStatus> live,
+}) {
+  if (!authenticated) return null;
+  if (live is! AsyncData<ProtectedMinorStatus>) return null;
+  return live.value;
+}
+
+/// Effective protected-minor seam for the protections (#175/#176), fail-safe.
+///
+/// The effective value is a trusted live status when available, else the
+/// persisted last-known (sticky). A trusted status is also persisted for the
+/// next cold start. Unknown/error and any untrusted status never weaken
+/// protection: an account confirmed a protected minor stays protected offline
+/// and at cold start, and lifts only on a positive not-a-minor signal from an
+/// authenticated check (age-up / revocation).
 final isProtectedMinorProvider = Provider<bool>((ref) {
-  return ref.watch(protectedMinorStatusProvider).value?.isProtectedMinor ??
-      false;
+  final authState = ref.watch(currentAuthStateProvider);
+  final pubkey = ref.watch(authServiceProvider).currentPublicKeyHex;
+  final store = ref.watch(protectedMinorStickyStoreProvider);
+  final live = ref.watch(protectedMinorStatusProvider);
+
+  // Account-switch safety relies on the invariant that every account swap
+  // transits a non-authenticated authState (authenticating/checking), which
+  // invalidates protectedMinorStatusProvider (it watches currentAuthStateProvider)
+  // back into AsyncLoading before authState returns to authenticated for the new
+  // account. That is why a stale AsyncData from a previous account can never be
+  // trusted here. A future silent same-authState pubkey swap would need to also
+  // invalidate the status provider to preserve this guarantee.
+  final trusted = trustedProtectedMinorStatus(
+    authenticated: authState == AuthState.authenticated,
+    live: live,
+  );
+  if (trusted != null) {
+    // Persist trusted transitions for future cold starts (fire-and-forget).
+    store.applyLiveStatus(pubkey, trusted);
+    if (trusted.kind == ProtectedMinorStatusKind.protected) return true;
+    if (trusted.kind == ProtectedMinorStatusKind.notProtected) return false;
+  }
+  // Untrusted / unknown -> last-known persisted value (sticky).
+  return store.isProtectedMinorFor(pubkey);
 });
