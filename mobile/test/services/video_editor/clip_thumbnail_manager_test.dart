@@ -1,6 +1,7 @@
 // ABOUTME: Unit tests for ClipThumbnailManager.
 // ABOUTME: Validates notifier lifecycle, sync logic, and disposal.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
@@ -126,10 +127,7 @@ void main() {
         expect(thumbnails[0].timestamp, equals(Duration.zero));
         // 2 s thumbnail shifted by −1 s → 1 s
         expect(thumbnails[1].path, equals('/t/2.jpg'));
-        expect(
-          thumbnails[1].timestamp,
-          equals(const Duration(seconds: 1)),
-        );
+        expect(thumbnails[1].timestamp, equals(const Duration(seconds: 1)));
       });
 
       test('excludes thumbnails outside the requested range', () {
@@ -161,10 +159,7 @@ void main() {
         final thumbnails = manager['tgt'].value;
         expect(thumbnails, hasLength(1));
         expect(thumbnails.first.path, equals('/t/5.jpg'));
-        expect(
-          thumbnails.first.timestamp,
-          equals(const Duration(seconds: 1)),
-        );
+        expect(thumbnails.first.timestamp, equals(const Duration(seconds: 1)));
       });
 
       test('is a no-op when source notifier does not exist', () {
@@ -200,10 +195,7 @@ void main() {
           currentSourcePath: '/video/src.mp4',
         );
 
-        expect(
-          manager['tgt'],
-          isA<ValueNotifier<List<StripThumbnail>>>(),
-        );
+        expect(manager['tgt'], isA<ValueNotifier<List<StripThumbnail>>>());
         expect(manager['tgt'].value, hasLength(1));
       });
 
@@ -239,10 +231,7 @@ void main() {
 
         // Re-sync with target added. targetClip uses a network URL so
         // _loadThumbnails exits early and never overwrites the notifier.
-        manager.sync(
-          clips: [sourceClip, targetClip],
-          devicePixelRatio: 1,
-        );
+        manager.sync(clips: [sourceClip, targetClip], devicePixelRatio: 1);
 
         expect(manager['tgt'].value, equals(seededValue));
       });
@@ -363,6 +352,100 @@ void main() {
         expect(thumbnails[0].timestamp, equals(const Duration(seconds: 3)));
         expect(thumbnails[1].path, equals('/t/4.jpg'));
         expect(thumbnails[1].timestamp, equals(const Duration(seconds: 4)));
+      });
+    });
+
+    group('pauseAll / resumeAll', () {
+      late StreamController<List<StripThumbnail>> streamController;
+      late int pauses;
+      late int resumes;
+      late ClipThumbnailManager fakeStreamManager;
+
+      const firstBatch = [
+        StripThumbnail(path: '/t/a0.jpg', timestamp: Duration.zero),
+      ];
+      const secondBatch = [
+        StripThumbnail(path: '/t/a0.jpg', timestamp: Duration.zero),
+        StripThumbnail(path: '/t/a1.jpg', timestamp: Duration(seconds: 1)),
+      ];
+
+      setUp(() {
+        pauses = 0;
+        resumes = 0;
+        streamController = StreamController<List<StripThumbnail>>(
+          onPause: () => pauses++,
+          onResume: () => resumes++,
+        );
+        fakeStreamManager = ClipThumbnailManager(
+          stripThumbnailStreamFactory:
+              ({
+                required String videoPath,
+                required String clipId,
+                required Duration duration,
+                required Size outputSize,
+                required int thumbsPerSecond,
+                List<Duration>? priorityTimestamps,
+              }) => streamController.stream,
+        );
+      });
+
+      tearDown(() {
+        fakeStreamManager.dispose();
+        // Not awaited: close() only completes once a listener receives the
+        // done event, and the idle test never attaches one.
+        unawaited(streamController.close());
+      });
+
+      void syncFileClip() {
+        fakeStreamManager.sync(
+          clips: [_createFileClip(id: 'a', videoPath: '/video/a.mp4')],
+          devicePixelRatio: 1,
+        );
+      }
+
+      test('are safe on an idle manager with no active subscriptions', () {
+        expect(manager.pauseAll, returnsNormally);
+        expect(manager.resumeAll, returnsNormally);
+      });
+
+      test(
+        'pauseAll holds thumbnail delivery and resumeAll releases it',
+        () async {
+          syncFileClip();
+          streamController.add(firstBatch);
+          await pumpEventQueue();
+          expect(fakeStreamManager['a'].value, hasLength(1));
+
+          fakeStreamManager.pauseAll();
+          await pumpEventQueue();
+          expect(pauses, equals(1));
+
+          streamController.add(secondBatch);
+          await pumpEventQueue();
+          // Buffered while paused — the notifier still shows the first batch.
+          expect(fakeStreamManager['a'].value, hasLength(1));
+
+          fakeStreamManager.resumeAll();
+          await pumpEventQueue();
+          expect(resumes, equals(1));
+          // The held batch arrives after resume — pausing is lossless.
+          expect(fakeStreamManager['a'].value, hasLength(2));
+        },
+      );
+
+      test('subscriptions created while paused start paused', () async {
+        fakeStreamManager.pauseAll();
+        syncFileClip();
+        await pumpEventQueue();
+        expect(pauses, equals(1));
+
+        streamController.add(firstBatch);
+        await pumpEventQueue();
+        expect(fakeStreamManager['a'].value, isEmpty);
+
+        fakeStreamManager.resumeAll();
+        await pumpEventQueue();
+        expect(fakeStreamManager['a'].value, hasLength(1));
       });
     });
 

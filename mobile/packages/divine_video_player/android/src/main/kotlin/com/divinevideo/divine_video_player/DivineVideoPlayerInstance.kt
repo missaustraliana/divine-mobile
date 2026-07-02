@@ -10,6 +10,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -123,6 +124,15 @@ internal class DivineVideoPlayerInstance(
     private var volume = 1.0
     private var speed = 1.0
     private var firstFrameRendered = false
+
+    /**
+     * Consecutive re-prepare attempts made after a transient decoder error,
+     * reset once a frame renders or a new clip list is loaded. Bounds
+     * [maybeRecoverFromDecoderError] so a genuinely undecodable clip can't
+     * spin in a prepare/error loop.
+     */
+    private var decoderRetryCount = 0
+    private var decoderRetryRunnable: Runnable? = null
     private var videoWidth = 0
     private var videoHeight = 0
     private var rotationDegrees = 0
@@ -267,7 +277,14 @@ internal class DivineVideoPlayerInstance(
     }
 
     private fun buildDefaultPlayer(): ExoPlayer {
-        val builder = ExoPlayer.Builder(context)
+        // Fall back to an alternate (e.g. software) decoder when the preferred
+        // hardware decoder fails to initialise. Turns a transient
+        // DECODER_INIT_FAILED — common when feed + editor + preview + thumbnail
+        // extraction contend for a small hardware decoder pool — into a
+        // successful (if slower) decode instead of a dead surface.
+        val renderersFactory =
+            DefaultRenderersFactory(context).setEnableDecoderFallback(true)
+        val builder = ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(
                     VideoCache.dataSourceFactory(context) { uri: Uri ->
@@ -444,6 +461,10 @@ internal class DivineVideoPlayerInstance(
         httpHeadersByUri = headersByUri
         httpHeadersByHash = headersByHash
         firstFrameRendered = false
+        // New media gets the full retry budget — exhaustion belonged to the
+        // previous clip list.
+        cancelDecoderRetry()
+        decoderRetryCount = 0
 
         // Resolve the optional global start position to (clipIndex, localMs)
         // so ExoPlayer begins buffering at the right point immediately.
@@ -981,6 +1002,10 @@ internal class DivineVideoPlayerInstance(
                     (error.message ?: "unknown"),
                 name = "DivineVideoPlayer.Playback",
             )
+            // A transient decoder failure may recover on a re-prepare; keep the
+            // pending setClips result open so a successful retry still resolves
+            // it (or the 10 s watchdog fires if every retry fails).
+            if (maybeRecoverFromDecoderError(error)) return
             // Unblock a pending setClips with an error so Dart can react
             // rather than waiting for the 10 s safety timeout.
             mainHandler.removeCallbacks(setClipsTimeoutRunnable)
@@ -995,6 +1020,10 @@ internal class DivineVideoPlayerInstance(
 
         override fun onRenderedFirstFrame() {
             firstFrameRendered = true
+            // A frame reached the surface, so whatever contention caused a
+            // prior decoder error has cleared — allow the full retry budget
+            // again for any future error.
+            decoderRetryCount = 0
             sendStateUpdate()
         }
 
@@ -1020,6 +1049,52 @@ internal class DivineVideoPlayerInstance(
             }
             sendStateUpdate()
         }
+    }
+
+    /**
+     * Re-prepares the player after a transient decoder error, bounded to
+     * [MAX_DECODER_RETRIES]. Returns `true` when a retry was scheduled so the
+     * caller leaves the pending setClips result open for a successful retry.
+     *
+     * `DECODER_INIT_FAILED` / `DECODING_FAILED` on an editing/preview surface
+     * is usually contention for a scarce hardware decoder (feed + editor +
+     * preview + thumbnail extraction competing) rather than a bad file — the
+     * same output often decodes on the next attempt once a competing codec
+     * releases. Feed players keep ExoPlayer's own recovery, so this is scoped
+     * to [BufferProfile.FULL].
+     */
+    private fun maybeRecoverFromDecoderError(error: PlaybackException): Boolean {
+        if (bufferProfile != BufferProfile.FULL) return false
+        val isDecoderError =
+            error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
+        if (!isDecoderError || decoderRetryCount >= MAX_DECODER_RETRIES) return false
+
+        val recoveringPlayer = player ?: return false
+        decoderRetryCount++
+        DivineVideoPlayerLog.warning(
+            "Player $playerId decoder error [${error.errorCodeName}] — " +
+                "retry $decoderRetryCount/$MAX_DECODER_RETRIES " +
+                "in ${DECODER_RETRY_DELAY_MS}ms",
+            name = "DivineVideoPlayer.Playback",
+        )
+        cancelDecoderRetry()
+        val retryRunnable = object : Runnable {
+            override fun run() {
+                if (decoderRetryRunnable === this) decoderRetryRunnable = null
+                // The player may have been released or replaced while waiting;
+                // only re-prepare the exact instance that errored.
+                if (player === recoveringPlayer) recoveringPlayer.prepare()
+            }
+        }
+        decoderRetryRunnable = retryRunnable
+        mainHandler.postDelayed(retryRunnable, DECODER_RETRY_DELAY_MS)
+        return true
+    }
+
+    private fun cancelDecoderRetry() {
+        decoderRetryRunnable?.let { mainHandler.removeCallbacks(it) }
+        decoderRetryRunnable = null
     }
 
     // -- lifecycle --
@@ -1079,10 +1154,16 @@ internal class DivineVideoPlayerInstance(
      * `ImageReaderSurfaceProducer`. The full [dispose] runs later, on
      * engine detach.
      *
+     * Cancels any pending decoder-retry re-prepare: the player is not nulled
+     * here (only [dispose] does that), so a scheduled retry's
+     * `player === recoveringPlayer` guard would still pass and call
+     * `prepare()` on the just-cleared surface after detach began.
+     *
      * Asymmetric with [onAppBackgrounded] by design: no resume is expected
      * after Activity detach, so [wasPlayingBeforePause] is not set.
      */
     fun stopForActivityDetach() {
+        cancelDecoderRetry()
         player?.let {
             it.stop()
             it.clearVideoSurface()
@@ -1102,6 +1183,7 @@ internal class DivineVideoPlayerInstance(
         mainHandler.removeCallbacks(seekTimeoutRunnable)
         mainHandler.removeCallbacks(setClipsTimeoutRunnable)
         mainHandler.removeCallbacks(bufferingWatchdogRunnable)
+        cancelDecoderRetry()
         seekCompletionResult?.success(null)
         seekCompletionResult = null
         pendingSetClipsResult?.success(null)
@@ -1146,5 +1228,19 @@ internal class DivineVideoPlayerInstance(
          * sensible lower bound the editor UI exposes.
          */
         private const val MIN_PLAYBACK_SPEED = 0.001f
+
+        /**
+         * How many times an editing/preview player re-prepares after a
+         * transient decoder error before giving up. Small: a couple of
+         * attempts covers momentary hardware-decoder contention without
+         * masking a genuinely undecodable clip.
+         */
+        private const val MAX_DECODER_RETRIES = 2
+
+        /**
+         * Delay before a decoder-error re-prepare, giving a competing codec
+         * time to release its hardware decoder before we ask for one again.
+         */
+        private const val DECODER_RETRY_DELAY_MS = 350L
     }
 }

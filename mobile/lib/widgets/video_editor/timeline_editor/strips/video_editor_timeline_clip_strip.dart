@@ -12,6 +12,7 @@ import 'package:openvine/blocs/video_editor/main_editor/video_editor_main_bloc.d
 import 'package:openvine/constants/video_editor_timeline_constants.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/models/divine_video_clip.dart';
+import 'package:openvine/router/app_router.dart';
 import 'package:openvine/services/video_editor/clip_thumbnail_manager.dart';
 import 'package:openvine/services/video_thumbnail_service.dart';
 import 'package:openvine/utils/mounted_post_frame.dart';
@@ -47,6 +48,7 @@ class VideoEditorTimelineClipStrip extends StatefulWidget {
     this.onTrimDragChanged,
     this.isMultiSelectMode = false,
     this.selectedClipIds = const {},
+    @visibleForTesting this.thumbnailManager,
     super.key,
   });
 
@@ -63,6 +65,11 @@ class VideoEditorTimelineClipStrip extends StatefulWidget {
 
   /// IDs of the clips currently selected in multi-select mode.
   final Set<String> selectedClipIds;
+
+  /// Test seam for asserting route-aware thumbnail pausing without invoking the
+  /// native thumbnail extractor.
+  @visibleForTesting
+  final ClipThumbnailManager? thumbnailManager;
 
   /// When `true` the user is scrolling or pinch-zooming — long press
   /// must not start a reorder drag.
@@ -87,7 +94,7 @@ class VideoEditorTimelineClipStrip extends StatefulWidget {
 
 class _VideoEditorTimelineClipStripState
     extends State<VideoEditorTimelineClipStrip>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, RouteAware {
   static const _animDuration = Duration(milliseconds: 250);
 
   /// Drives reorder shrink/grow timing so we can react to completion
@@ -121,7 +128,7 @@ class _VideoEditorTimelineClipStripState
   /// Thumbnail data keyed by clip ID — survives reordering.
   /// Each notifier is updated independently so only the affected
   /// clip tile rebuilds, not the entire strip.
-  final _thumbnails = ClipThumbnailManager();
+  late final ClipThumbnailManager _thumbnails;
 
   /// Identity of the last split event we already seeded thumbnails
   /// for. Used to ensure each split is processed exactly once.
@@ -149,6 +156,7 @@ class _VideoEditorTimelineClipStripState
   @override
   void initState() {
     super.initState();
+    _thumbnails = widget.thumbnailManager ?? ClipThumbnailManager();
     _reorderAnimController = AnimationController(
       vsync: this,
       duration: _animDuration,
@@ -159,6 +167,13 @@ class _VideoEditorTimelineClipStripState
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // Pause thumbnail extraction while the editor is obscured (e.g. after
+    // pushing the metadata/preview screen) so its MediaMetadataRetriever
+    // frames stop competing for hardware decoders with the render/preview.
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      routeObserver.subscribe(this, route);
+    }
     _maybeSeedSplit();
     _syncThumbnails();
   }
@@ -174,7 +189,14 @@ class _VideoEditorTimelineClipStripState
   }
 
   @override
+  void didPushNext() => _thumbnails.pauseAll();
+
+  @override
+  void didPopNext() => _thumbnails.resumeAll();
+
+  @override
   void dispose() {
+    routeObserver.unsubscribe(this);
     _stopAutoScroll();
     _volumeExitTimer?.cancel();
     _reorderAnimController.dispose();
@@ -212,9 +234,7 @@ class _VideoEditorTimelineClipStripState
     final startClipIdx = widget.clips.indexWhere(
       (c) => c.id == split.startClipId,
     );
-    final endClipIdx = widget.clips.indexWhere(
-      (c) => c.id == split.endClipId,
-    );
+    final endClipIdx = widget.clips.indexWhere((c) => c.id == split.endClipId);
     if (startClipIdx == -1 || endClipIdx == -1) return;
     final startClip = widget.clips[startClipIdx];
     final endClip = widget.clips[endClipIdx];

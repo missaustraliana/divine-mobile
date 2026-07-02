@@ -7,11 +7,32 @@ import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/services/video_thumbnail_service.dart';
 import 'package:path/path.dart' as p;
 
+/// Signature of [VideoThumbnailService.generateStripThumbnails], injectable
+/// so tests can assert pause/resume behaviour on the produced subscriptions
+/// without touching the native extractor.
+typedef StripThumbnailStreamFactory =
+    Stream<List<StripThumbnail>> Function({
+      required String videoPath,
+      required String clipId,
+      required Duration duration,
+      required Size outputSize,
+      required int thumbsPerSecond,
+      List<Duration>? priorityTimestamps,
+    });
+
 /// Manages thumbnail loading and cleanup for a set of clips.
 ///
 /// Each clip gets an independent [ValueNotifier] so only the affected
 /// tile rebuilds when new thumbnails arrive.
 class ClipThumbnailManager {
+  ClipThumbnailManager({
+    StripThumbnailStreamFactory? stripThumbnailStreamFactory,
+  }) : _generateStripThumbnails =
+           stripThumbnailStreamFactory ??
+           VideoThumbnailService.generateStripThumbnails;
+
+  final StripThumbnailStreamFactory _generateStripThumbnails;
+
   final Map<String, ValueNotifier<List<StripThumbnail>>> _notifiers = {};
   final Map<String, StreamSubscription<List<StripThumbnail>>> _subscriptions =
       {};
@@ -26,6 +47,10 @@ class ClipThumbnailManager {
   // be immediately overwritten by a fresh subscription against the
   // (still un-trimmed) source video.
   final Set<String> _seeded = {};
+
+  /// When true, newly started subscriptions begin paused and existing ones are
+  /// held. See [pauseAll].
+  bool _paused = false;
 
   /// Returns the thumbnail notifier for the given [clipId].
   ValueNotifier<List<StripThumbnail>> operator [](String clipId) =>
@@ -196,8 +221,8 @@ class ClipThumbnailManager {
                 TimelineConstants.thumbnailWidth)
             .ceil();
 
-    _subscriptions[clip.id] =
-        VideoThumbnailService.generateStripThumbnails(
+    final subscription =
+        _generateStripThumbnails(
           videoPath: videoPath,
           clipId: clip.id,
           duration: clip.duration,
@@ -207,6 +232,29 @@ class ClipThumbnailManager {
         ).listen((thumbnails) {
           _notifiers[clip.id]?.value = thumbnails;
         });
+    // If the owner paused while this clip was (re)synced, keep the new
+    // subscription paused too so it doesn't start extracting off-screen.
+    if (_paused) subscription.pause();
+    _subscriptions[clip.id] = subscription;
+  }
+
+  /// Pauses all in-flight thumbnail subscriptions — e.g. while the editor is
+  /// obscured by another route — so the native frame extraction stops
+  /// contending for hardware decoders and CPU. Lossless: the batch stream
+  /// generators suspend at the next batch boundary and continue on [resumeAll].
+  void pauseAll() {
+    _paused = true;
+    for (final sub in _subscriptions.values) {
+      if (!sub.isPaused) sub.pause();
+    }
+  }
+
+  /// Resumes thumbnail extraction paused by [pauseAll].
+  void resumeAll() {
+    _paused = false;
+    for (final sub in _subscriptions.values) {
+      if (sub.isPaused) sub.resume();
+    }
   }
 
   static void _deleteFiles(List<StripThumbnail> thumbnails) {

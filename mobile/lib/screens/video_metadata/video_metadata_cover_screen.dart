@@ -66,6 +66,11 @@ class _VideoMetadataCoverScreenState
 
   bool _playerReady = false;
 
+  /// True when the preview player conclusively failed to load the video
+  /// (e.g. a decoder init that never recovered). The strip picker keeps
+  /// working without a live preview in that case.
+  bool _playerInitFailed = false;
+
   bool _isConfirming = false;
 
   bool _isSeeking = false;
@@ -90,25 +95,45 @@ class _VideoMetadataCoverScreenState
     );
     if (!mounted) return;
     _videoDuration = metadata.duration;
-    _startStripGeneration(localPath);
 
     final controller = DivineVideoPlayerController(useTexture: true);
-    await controller.initialize();
-    if (!mounted) {
-      await controller.dispose();
-      return;
+    try {
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      await controller.setSource(VideoClip.file(localPath));
+      if (mounted) await controller.seekTo(_selectedPosition);
+      if (mounted) {
+        setState(() {
+          _controller = controller;
+          _playerReady = true;
+          _seekEpoch++;
+          _isSeeking = false;
+          _pendingSeekPosition = null;
+        });
+      }
+    } catch (e, stackTrace) {
+      // A dead preview must not take the cover picker down with it — the
+      // strip below still lets the user scrub and confirm a frame.
+      Log.error(
+        'Cover preview player failed to load the video',
+        name: 'VideoMetadataCoverScreen',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      unawaited(controller.dispose());
+      if (!mounted) return;
+      setState(() => _playerInitFailed = true);
     }
-    await controller.setSource(VideoClip.file(localPath));
-    if (mounted) await controller.seekTo(_selectedPosition);
-    if (mounted) {
-      setState(() {
-        _controller = controller;
-        _playerReady = true;
-        _seekEpoch++;
-        _isSeeking = false;
-        _pendingSeekPosition = null;
-      });
-    }
+
+    // Start strip extraction only after the player has acquired its decoder
+    // (or conclusively failed to). Both read the same file; the
+    // MediaMetadataRetriever strip frames would otherwise contend with the
+    // player's decoder init and can leave the preview stuck on
+    // DECODER_INIT_FAILED (a scarce hardware-decoder pool).
+    if (mounted) _startStripGeneration(localPath);
   }
 
   Future<void> _startStripGeneration(String videoPath) async {
@@ -167,9 +192,12 @@ class _VideoMetadataCoverScreenState
   }
 
   Future<void> _seekTo(Duration position) async {
-    if (!_playerReady) return;
+    // With a failed player the strip still drives frame selection — move
+    // the cursor without a live preview so the user can pick a cover.
+    if (!_playerReady && !_playerInitFailed) return;
     _selectedPosition = position;
     if (mounted) setState(() {});
+    if (!_playerReady) return;
 
     if (_isSeeking) {
       _pendingSeekPosition = position;
@@ -313,7 +341,9 @@ class _VideoMetadataCoverScreenState
                           ),
                         ),
 
-                        if (_controller == null || !_controller!.isInitialized)
+                        if (!_playerInitFailed &&
+                            (_controller == null ||
+                                !_controller!.isInitialized))
                           const Center(child: BrandedLoadingIndicator()),
                       ],
                     ),
@@ -604,9 +634,7 @@ class _ThumbnailStripState extends State<_ThumbnailStrip> {
 
   Duration _clampPosition(Duration position) {
     final maxMs = widget.clipDuration.inMilliseconds;
-    return Duration(
-      milliseconds: position.inMilliseconds.clamp(0, maxMs),
-    );
+    return Duration(milliseconds: position.inMilliseconds.clamp(0, maxMs));
   }
 
   void _seekBySemanticsDelta(Duration delta) {
@@ -673,19 +701,14 @@ class _ThumbnailStripState extends State<_ThumbnailStrip> {
           final count = (stripWidth / _stripThumbWidth).ceil().clamp(1, 500);
           _updateSlotCache(count);
           final slotWidth = stripWidth / count;
-          final cursorDx = _dxFromPosition(
-            widget.selectedPosition,
-            stripWidth,
-          );
+          final cursorDx = _dxFromPosition(widget.selectedPosition, stripWidth);
 
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTapDown: (d) => widget.onSeek(
-              _positionFromDx(d.localPosition.dx, stripWidth),
-            ),
-            onHorizontalDragUpdate: (d) => widget.onSeek(
-              _positionFromDx(d.localPosition.dx, stripWidth),
-            ),
+            onTapDown: (d) =>
+                widget.onSeek(_positionFromDx(d.localPosition.dx, stripWidth)),
+            onHorizontalDragUpdate: (d) =>
+                widget.onSeek(_positionFromDx(d.localPosition.dx, stripWidth)),
             child: SizedBox(
               width: stripWidth,
               height: _stripHeight,
@@ -752,23 +775,15 @@ class _SlotImage extends StatelessWidget {
         ? ExcludeSemantics(
             child: VineCachedImage(
               imageUrl: thumbnail!.networkUrl!,
-              placeholder: (_, _) => const ColoredBox(
-                color: VineTheme.surfaceContainerHigh,
-              ),
-              errorWidget: (_, _, _) => const ColoredBox(
-                color: VineTheme.surfaceContainerHigh,
-              ),
+              placeholder: (_, _) =>
+                  const ColoredBox(color: VineTheme.surfaceContainerHigh),
+              errorWidget: (_, _, _) =>
+                  const ColoredBox(color: VineTheme.surfaceContainerHigh),
             ),
           )
         : thumbnail?.file != null
-        ? Image.file(
-            thumbnail!.file!,
-            fit: .cover,
-            excludeFromSemantics: true,
-          )
-        : const ColoredBox(
-            color: VineTheme.surfaceContainerHigh,
-          );
+        ? Image.file(thumbnail!.file!, fit: .cover, excludeFromSemantics: true)
+        : const ColoredBox(color: VineTheme.surfaceContainerHigh);
 
     if (stripThumbnailPath == null) return fallback;
 
