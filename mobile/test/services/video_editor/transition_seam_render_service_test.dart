@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:models/models.dart' as model;
 import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/models/video_editor/transition_geometry.dart';
+import 'package:openvine/services/video_editor/clip_speed_render_service.dart';
 import 'package:openvine/services/video_editor/transition_seam_render_service.dart';
 import 'package:pro_video_editor/pro_video_editor.dart' as editor;
 
@@ -79,6 +80,111 @@ void main() {
       expect(result[2].uri, equals('/tmp/b.mp4'));
       expect(result[2].start, equals(const Duration(milliseconds: 500)));
       expect(result[2].end, equals(const Duration(seconds: 3)));
+    });
+
+    test('plays the pre-rendered normal-rate file at 1× when a speed render '
+        'is cached', () {
+      final clipA = DivineVideoClip(
+        id: 'a',
+        video: editor.EditorVideo.file(File('/tmp/a.mp4')),
+        duration: const Duration(seconds: 3),
+        recordedAt: DateTime(2024),
+        targetAspectRatio: model.AspectRatio.square,
+        originalAspectRatio: 1,
+        playbackSpeed: 2,
+        volume: 0.5,
+      );
+      final speeds = ClipSpeedRenderService()
+        ..cacheForTest(
+          clipA,
+          const RenderedSpeedClip(
+            path: '/tmp/a_speed.mp4',
+            duration: Duration(milliseconds: 1500),
+          ),
+        );
+
+      final result = buildSeamAwarePlayerClips(
+        [clipA],
+        TransitionSeamRenderService(),
+        speedRenders: speeds,
+      );
+
+      expect(result, hasLength(1));
+      // The rendered file plays at 1× (speed already baked in) …
+      expect(result[0].uri, equals('/tmp/a_speed.mp4'));
+      expect(result[0].playbackSpeed, equals(1.0));
+      // … but volume is still applied live, so a mute never re-renders.
+      expect(result[0].volume, equals(0.5));
+    });
+
+    test('falls back to live retiming when no speed render is cached', () {
+      final clipA = DivineVideoClip(
+        id: 'a',
+        video: editor.EditorVideo.file(File('/tmp/a.mp4')),
+        duration: const Duration(seconds: 3),
+        recordedAt: DateTime(2024),
+        targetAspectRatio: model.AspectRatio.square,
+        originalAspectRatio: 1,
+        playbackSpeed: 2,
+      );
+
+      final result = buildSeamAwarePlayerClips(
+        [clipA],
+        TransitionSeamRenderService(),
+        speedRenders: ClipSpeedRenderService(),
+      );
+
+      expect(result, hasLength(1));
+      // Source file retimed live by the player until the render lands.
+      expect(result[0].uri, equals('/tmp/a.mp4'));
+      expect(result[0].playbackSpeed, equals(2.0));
+    });
+
+    test('keeps a seam-consumed clip on live retiming even when a speed '
+        'render is cached', () {
+      final clipA = DivineVideoClip(
+        id: 'a',
+        video: editor.EditorVideo.file(File('/tmp/a.mp4')),
+        duration: const Duration(seconds: 3),
+        recordedAt: DateTime(2024),
+        targetAspectRatio: model.AspectRatio.square,
+        originalAspectRatio: 1,
+        playbackSpeed: 2,
+        transition: dissolve,
+      );
+      final clipB = clip('b');
+      final seams = TransitionSeamRenderService()
+        ..cacheSeamForTest(
+          clipA,
+          clipB,
+          dissolve,
+          const TransitionSeam(
+            path: '/tmp/seam.mp4',
+            duration: Duration(milliseconds: 500),
+            tailConsumed: Duration(milliseconds: 500),
+            headConsumed: Duration(milliseconds: 500),
+          ),
+        );
+      final speeds = ClipSpeedRenderService()
+        ..cacheForTest(
+          clipA,
+          const RenderedSpeedClip(
+            path: '/tmp/a_speed.mp4',
+            duration: Duration(milliseconds: 1250),
+          ),
+        );
+
+      final result = buildSeamAwarePlayerClips(
+        [clipA, clipB],
+        seams,
+        speedRenders: speeds,
+      );
+
+      // Clip A's tail feeds the seam, so its body can't use the whole-body
+      // rendered file — it stays live-retimed (source file at 2×).
+      expect(result[0].uri, equals('/tmp/a.mp4'));
+      expect(result[0].playbackSpeed, equals(2.0));
+      expect(result[1].uri, equals('/tmp/seam.mp4'));
     });
   });
 
@@ -279,6 +385,79 @@ void main() {
       expect(
         timeline.compositeToTimeline(const Duration(milliseconds: 2500)),
         equals(const Duration(milliseconds: 2500)),
+      );
+    });
+
+    test('maps a spliced speed body by its real rendered duration, not '
+        'playbackDuration', () {
+      // 3s clip at 2× → playbackDuration 1500ms, but the re-encoded file lands
+      // at 1400ms (frame-rounding). The composite span must follow the real
+      // file, else the playhead drifts by the 100ms delta.
+      final clipA = DivineVideoClip(
+        id: 'a',
+        video: editor.EditorVideo.file(File('/tmp/a.mp4')),
+        duration: const Duration(seconds: 3),
+        recordedAt: DateTime(2024),
+        targetAspectRatio: model.AspectRatio.square,
+        originalAspectRatio: 1,
+        playbackSpeed: 2,
+      );
+      final speeds = ClipSpeedRenderService()
+        ..cacheForTest(
+          clipA,
+          const RenderedSpeedClip(
+            path: '/tmp/a_speed.mp4',
+            duration: Duration(milliseconds: 1400),
+          ),
+        );
+      final timeline = SeamTimeline(
+        [clipA],
+        TransitionSeamRenderService(),
+        speedRenders: speeds,
+      );
+
+      // Composite (real file) span 1400ms ≠ editor (playbackDuration) span
+      // 1500ms, so the axes are no longer the identity.
+      expect(timeline.hasSeams, isTrue);
+      // Composite end (1400ms, where the file actually ends) → editor end
+      // (1500ms, the clip's full drawn length).
+      expect(
+        timeline.compositeToTimeline(const Duration(milliseconds: 1400)),
+        equals(const Duration(milliseconds: 1500)),
+      );
+      // Half the composite maps to half the editor body.
+      expect(
+        timeline.compositeToTimeline(const Duration(milliseconds: 700)),
+        equals(const Duration(milliseconds: 750)),
+      );
+      // Round-trips: editor end → composite end.
+      expect(
+        timeline.timelineToComposite(const Duration(milliseconds: 1500)),
+        equals(const Duration(milliseconds: 1400)),
+      );
+    });
+
+    test('leaves a speed body 1:1 when no render is cached yet', () {
+      final clipA = DivineVideoClip(
+        id: 'a',
+        video: editor.EditorVideo.file(File('/tmp/a.mp4')),
+        duration: const Duration(seconds: 3),
+        recordedAt: DateTime(2024),
+        targetAspectRatio: model.AspectRatio.square,
+        originalAspectRatio: 1,
+        playbackSpeed: 2,
+      );
+      final timeline = SeamTimeline(
+        [clipA],
+        TransitionSeamRenderService(),
+        speedRenders: ClipSpeedRenderService(),
+      );
+
+      // No rendered file → live retiming, composite span == playbackDuration.
+      expect(timeline.hasSeams, isFalse);
+      expect(
+        timeline.compositeToTimeline(const Duration(milliseconds: 750)),
+        equals(const Duration(milliseconds: 750)),
       );
     });
 
