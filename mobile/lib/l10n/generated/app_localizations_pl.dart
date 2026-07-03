@@ -1503,6 +1503,19 @@ class AppLocalizationsPl extends AppLocalizations {
   }
 
   @override
+  String sharePostSharedWithCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Post udostępniony z $count osobami',
+      many: 'Post udostępniony z $count osobami',
+      few: 'Post udostępniony z $count osobami',
+      one: 'Post udostępniony z $count osobą',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get shareFailedToSend => 'Nie udało się wysłać filmu';
 
   @override
@@ -1539,8 +1552,8 @@ class AppLocalizationsPl extends AppLocalizations {
   String get shareUserFallback => 'Użytkownik';
 
   @override
-  String shareSendingTo(String name) {
-    return 'Wysyłanie do $name';
+  String shareSelectedRecipientAnnouncement(String name) {
+    return 'Wybrano $name';
   }
 
   @override

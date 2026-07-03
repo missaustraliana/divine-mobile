@@ -596,6 +596,7 @@
     "listAttributionFallback": "Liste",
     "shareVideoLabel": "Videoyu paylaş",
     "sharePostSharedWith": "Gönderi {recipientName} ile paylaşıldı",
+    "sharePostSharedWithCount": "{count, plural, one{Gönderi {count} kişiyle paylaşıldı} other{Gönderi {count} kişiyle paylaşıldı}}",
     "@sharePostSharedWith": {
         "placeholders": {
             "recipientName": {
@@ -615,8 +616,9 @@
     "shareSent": "Gönderildi",
     "shareContactFallback": "Kişi",
     "shareUserFallback": "Kullanıcı",
-    "shareSendingTo": "{name} kişisine gönderiliyor",
-    "@shareSendingTo": {
+    "shareSelectedRecipientAnnouncement": "{name} seçildi",
+    "@shareSelectedRecipientAnnouncement": {
+        "description": "Screen reader announcement when a person is selected in the share sheet. Selection opens the optional message composer but does not send the video.",
         "placeholders": {
             "name": {
                 "type": "String"

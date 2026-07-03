@@ -370,6 +370,7 @@
     "listAttributionFallback": "리스트",
     "shareVideoLabel": "영상 공유",
     "sharePostSharedWith": "{recipientName}님과 게시물을 공유했어요",
+    "sharePostSharedWithCount": "{count, plural, other{{count}명과 게시물을 공유했어요}}",
     "shareFailedToSend": "영상을 보내지 못했어요",
     "shareAddedToBookmarks": "북마크에 추가했어요",
     "shareRemovedFromBookmarks": "북마크에서 뺐어요",
@@ -382,7 +383,15 @@
     "shareSent": "보냄",
     "shareContactFallback": "연락처",
     "shareUserFallback": "사용자",
-    "shareSendingTo": "{name}님에게 보내는 중",
+    "shareSelectedRecipientAnnouncement": "{name}님 선택됨",
+    "@shareSelectedRecipientAnnouncement": {
+        "description": "Screen reader announcement when a person is selected in the share sheet. Selection opens the optional message composer but does not send the video.",
+        "placeholders": {
+            "name": {
+                "type": "String"
+            }
+        }
+    },
     "shareMessageHint": "메시지 추가 (선택)...",
     "videoActionUnlike": "좋아요 취소",
     "videoActionLike": "좋아요",

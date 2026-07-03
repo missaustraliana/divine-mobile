@@ -596,6 +596,7 @@
     "listAttributionFallback": "قائمة",
     "shareVideoLabel": "مشاركة الفيديو",
     "sharePostSharedWith": "تمت مشاركة المنشور مع {recipientName}",
+    "sharePostSharedWithCount": "{count, plural, one{تمت مشاركة المنشور مع شخص واحد} two{تمت مشاركة المنشور مع شخصين} few{تمت مشاركة المنشور مع {count} أشخاص} many{تمت مشاركة المنشور مع {count} شخصًا} other{تمت مشاركة المنشور مع {count} شخص}}",
     "@sharePostSharedWith": {
         "placeholders": {
             "recipientName": {
@@ -615,8 +616,9 @@
     "shareSent": "تم الإرسال",
     "shareContactFallback": "جهة اتصال",
     "shareUserFallback": "مستخدم",
-    "shareSendingTo": "جاري الإرسال إلى {name}",
-    "@shareSendingTo": {
+    "shareSelectedRecipientAnnouncement": "تم تحديد {name}",
+    "@shareSelectedRecipientAnnouncement": {
+        "description": "Screen reader announcement when a person is selected in the share sheet. Selection opens the optional message composer but does not send the video.",
         "placeholders": {
             "name": {
                 "type": "String"

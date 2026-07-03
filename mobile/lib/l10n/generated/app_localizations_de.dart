@@ -1496,6 +1496,17 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String sharePostSharedWithCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Beitrag mit $count Personen geteilt',
+      one: 'Beitrag mit $count Person geteilt',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get shareFailedToSend => 'Video konnte nicht gesendet werden';
 
   @override
@@ -1534,8 +1545,8 @@ class AppLocalizationsDe extends AppLocalizations {
   String get shareUserFallback => 'Nutzer';
 
   @override
-  String shareSendingTo(String name) {
-    return 'Wird an $name gesendet';
+  String shareSelectedRecipientAnnouncement(String name) {
+    return '$name ausgewählt';
   }
 
   @override

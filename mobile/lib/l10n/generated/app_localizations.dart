@@ -2620,6 +2620,12 @@ abstract class AppLocalizations {
   /// **'Post shared with {recipientName}'**
   String sharePostSharedWith(String recipientName);
 
+  /// Snackbar after sharing a video to two or more people at once. Only used for count >= 2.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{Post shared with {count} person} other{Post shared with {count} people}}'**
+  String sharePostSharedWithCount(int count);
+
   /// No description provided for @shareFailedToSend.
   ///
   /// In en, this message translates to:
@@ -2692,11 +2698,11 @@ abstract class AppLocalizations {
   /// **'User'**
   String get shareUserFallback;
 
-  /// No description provided for @shareSendingTo.
+  /// Screen reader announcement when a person is selected in the share sheet. Selection opens the optional message composer but does not send the video.
   ///
   /// In en, this message translates to:
-  /// **'Sending to {name}'**
-  String shareSendingTo(String name);
+  /// **'Selected {name}'**
+  String shareSelectedRecipientAnnouncement(String name);
 
   /// No description provided for @shareMessageHint.
   ///

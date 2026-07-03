@@ -678,6 +678,7 @@
     "listAttributionFallback": "ዝርዝር",
     "shareVideoLabel": "ቪዲዮ አጋራ",
     "sharePostSharedWith": "ልጥፍ ለ{recipientName} ተጋርቷል።",
+    "sharePostSharedWithCount": "{count, plural, one{ልጥፍ ለ{count} ሰው ተጋርቷል።} other{ልጥፍ ለ{count} ሰዎች ተጋርቷል።}}",
     "@sharePostSharedWith": {
         "placeholders": {
             "recipientName": {
@@ -703,8 +704,9 @@
     "shareSent": "ተልኳል።",
     "shareContactFallback": "ተገናኝ",
     "shareUserFallback": "ተጠቃሚ",
-    "shareSendingTo": "ወደ {name} በመላክ ላይ",
-    "@shareSendingTo": {
+    "shareSelectedRecipientAnnouncement": "{name} ተመርጧል",
+    "@shareSelectedRecipientAnnouncement": {
+        "description": "Screen reader announcement when a person is selected in the share sheet. Selection opens the optional message composer but does not send the video.",
         "placeholders": {
             "name": {
                 "type": "String"

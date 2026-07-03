@@ -1500,6 +1500,17 @@ class AppLocalizationsBg extends AppLocalizations {
   }
 
   @override
+  String sharePostSharedWithCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Публикация, споделена с $count души',
+      one: 'Публикация, споделена с $count човек',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get shareFailedToSend => 'Не успяхме да изпратим видеото';
 
   @override
@@ -1536,8 +1547,8 @@ class AppLocalizationsBg extends AppLocalizations {
   String get shareUserFallback => 'Потребител';
 
   @override
-  String shareSendingTo(String name) {
-    return 'Изпращане до $name';
+  String shareSelectedRecipientAnnouncement(String name) {
+    return 'Избран е $name';
   }
 
   @override

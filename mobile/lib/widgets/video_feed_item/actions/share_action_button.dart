@@ -1,10 +1,11 @@
 // ABOUTME: Share action button for video feed overlay.
-// ABOUTME: Opens unified share sheet with horizontal contacts row, message
-// ABOUTME: input, and more actions (save, copy, share via, report, etc.).
+// ABOUTME: Opens unified share sheet: tap a contact to select it (never an
+// ABOUTME: instant send), compose an optional message, send explicitly.
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +20,7 @@ import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/environment_provider.dart';
 import 'package:openvine/providers/user_profile_providers.dart';
 import 'package:openvine/providers/video_clip_import_provider.dart';
+import 'package:openvine/screens/inbox/conversation/conversation_page.dart';
 import 'package:openvine/screens/video_metadata/video_metadata_edit_screen.dart';
 import 'package:openvine/services/video_clip_import_service.dart';
 import 'package:openvine/services/video_sharing_service.dart';
@@ -50,10 +52,14 @@ part 'share_with_section.dart';
 ///
 /// Shows a share icon that opens a unified share bottom sheet with:
 /// - Video context/preview header
-/// - "Share with" horizontal contact row with "Find people" search
-/// - Optional message input when a recipient is selected
+/// - "Share with" horizontal contact row with "Find people" search.
+///   Tapping contacts toggles their selection (tick on the avatar) —
+///   nothing is sent until the explicit send button, which fans the
+///   video out to every selected person as separate DMs.
+/// - Message composer shown while any recipient is selected (replaces
+///   the actions row)
 /// - "More actions" horizontal row (Save, download, Add to List, Copy,
-///   Share via, Report, debug tools)
+///   Share via, debug tools)
 class ShareActionButton extends StatelessWidget {
   const ShareActionButton({required this.video, this.onInteracted, super.key});
 
@@ -181,10 +187,31 @@ class _UnifiedShareSheetState extends ConsumerState<_UnifiedShareSheet> {
 
     return BlocProvider.value(
       value: _shareSheetBloc,
-      child: BlocListener<ShareSheetBloc, ShareSheetState>(
-        listenWhen: (prev, curr) =>
-            curr.actionResult != null && prev.actionResult != curr.actionResult,
-        listener: _handleActionResult,
+      child: MultiBlocListener(
+        listeners: [
+          BlocListener<ShareSheetBloc, ShareSheetState>(
+            listenWhen: (prev, curr) =>
+                curr.actionResult != null &&
+                prev.actionResult != curr.actionResult,
+            listener: _handleActionResult,
+          ),
+          // Screen readers get no signal from the tick/composer swap when a
+          // recipient is added — announce it.
+          BlocListener<ShareSheetBloc, ShareSheetState>(
+            listenWhen: (prev, curr) =>
+                curr.selectedRecipients.length > prev.selectedRecipients.length,
+            listener: (context, state) {
+              SemanticsService.sendAnnouncement(
+                View.of(context),
+                context.l10n.shareSelectedRecipientAnnouncement(
+                  state.selectedRecipients.last.displayName ??
+                      context.l10n.shareUserFallback,
+                ),
+                Directionality.of(context),
+              );
+            },
+          ),
+        ],
         child: _UnifiedShareSheetView(
           video: widget.video,
           messageController: _messageController,
@@ -208,16 +235,40 @@ class _UnifiedShareSheetState extends ConsumerState<_UnifiedShareSheet> {
     final messenger = ScaffoldMessenger.of(context);
 
     switch (result) {
-      case ShareSheetSendSuccess(:final recipientName, :final shouldDismiss):
-        if (shouldDismiss) _safePop(context);
+      case ShareSheetSendSuccess(
+        :final recipientNames,
+        :final recipientPubkey,
+        :final conversationId,
+      ):
+        final sharedWithText = recipientNames.length == 1
+            ? context.l10n.sharePostSharedWith(recipientNames.single)
+            : context.l10n.sharePostSharedWithCount(recipientNames.length);
+        final viewChatLabel = context.l10n.dmReelReplyViewChat;
+        // "View chat" only when there is a single thread to open.
+        final showViewChat = conversationId != null && recipientPubkey != null;
+        // The snackbar action outlives the sheet, so capture a context that
+        // survives the pop for the conversation push.
+        final hostContext = Navigator.of(context, rootNavigator: true).context;
+        _safePop(context);
         messenger.showSnackBar(
           DivineSnackbarContainer.snackBar(
-            context.l10n.sharePostSharedWith(recipientName),
+            sharedWithText,
+            actionLabel: showViewChat ? viewChatLabel : null,
+            onActionPressed: showViewChat
+                ? () {
+                    if (!hostContext.mounted) return;
+                    hostContext.push(
+                      ConversationPage.pathForId(conversationId),
+                      extra: [recipientPubkey],
+                    );
+                  }
+                : null,
           ),
         );
       case ShareSheetSendFailure():
-        // Replace the optimistic "shared with" toast with the failure so the
-        // two don't stack when a quick-send is rolled back.
+        // Dismiss too: the send is durably queued and retried in the
+        // background, so there is no in-sheet manual retry to keep open for.
+        _safePop(context);
         messenger
           ..hideCurrentSnackBar()
           ..showSnackBar(
@@ -323,7 +374,7 @@ class _UnifiedShareSheetState extends ConsumerState<_UnifiedShareSheet> {
       contacts: _shareSheetBloc.state.contacts,
     );
     if (selectedUser != null && mounted) {
-      _shareSheetBloc.add(ShareSheetRecipientSelected(selectedUser));
+      _shareSheetBloc.add(ShareSheetRecipientToggled(selectedUser));
     }
   }
 
@@ -617,16 +668,26 @@ class _UnifiedShareSheetView extends StatelessWidget {
                     _ShareWithSection(
                       contacts: state.contacts,
                       contactsLoaded: state.contactsLoaded,
-                      selectedRecipient: state.selectedRecipient,
-                      sentPubkeys: state.sentPubkeys,
+                      selectedPubkeys: {
+                        for (final r in state.selectedRecipients) r.pubkey,
+                      },
                       onFindPeople: onFindPeople,
-                      onContactTapped: (user) =>
-                          bloc.add(ShareSheetQuickSendRequested(user)),
+                      // Select-then-send, multi-select: each tap toggles a
+                      // recipient's tick. Nothing sends until the explicit
+                      // send button. The draft survives selection changes
+                      // and is dropped only when the last recipient is
+                      // deselected.
+                      onContactTapped: (user) {
+                        final deselectingLast =
+                            state.selectedRecipients.length == 1 &&
+                            state.isSelected(user);
+                        if (deselectingLast) messageController.clear();
+                        bloc.add(ShareSheetRecipientToggled(user));
+                      },
                     ),
-                    if (state.selectedRecipient != null)
+                    if (state.selectedRecipients.isNotEmpty)
                       _MessageInput(
                         controller: messageController,
-                        recipient: state.selectedRecipient!,
                         isSending: state.isSending,
                         onSend: () => bloc.add(
                           ShareSheetSendRequested(
@@ -634,7 +695,7 @@ class _UnifiedShareSheetView extends StatelessWidget {
                           ),
                         ),
                       ),
-                    if (state.selectedRecipient == null) ...[
+                    if (state.selectedRecipients.isEmpty) ...[
                       const Divider(color: VineTheme.cardBackground, height: 1),
                       _MoreActionsSection(
                         video: video,

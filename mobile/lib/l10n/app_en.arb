@@ -760,6 +760,15 @@
   "listAttributionFallback": "List",
   "shareVideoLabel": "Share video",
   "sharePostSharedWith": "Post shared with {recipientName}",
+  "sharePostSharedWithCount": "{count, plural, one{Post shared with {count} person} other{Post shared with {count} people}}",
+  "@sharePostSharedWithCount": {
+    "description": "Snackbar after sharing a video to two or more people at once. Only used for count >= 2.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "@sharePostSharedWith": {
     "placeholders": {
       "recipientName": {
@@ -785,8 +794,9 @@
   "shareSent": "Sent",
   "shareContactFallback": "Contact",
   "shareUserFallback": "User",
-  "shareSendingTo": "Sending to {name}",
-  "@shareSendingTo": {
+  "shareSelectedRecipientAnnouncement": "Selected {name}",
+  "@shareSelectedRecipientAnnouncement": {
+    "description": "Screen reader announcement when a person is selected in the share sheet. Selection opens the optional message composer but does not send the video.",
     "placeholders": {
       "name": {
         "type": "String"

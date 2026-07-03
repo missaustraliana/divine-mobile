@@ -16,16 +16,14 @@ class _ShareWithSection extends StatelessWidget {
   const _ShareWithSection({
     required this.contacts,
     required this.contactsLoaded,
-    required this.selectedRecipient,
-    required this.sentPubkeys,
+    required this.selectedPubkeys,
     required this.onFindPeople,
     required this.onContactTapped,
   });
 
   final List<ShareableUser> contacts;
   final bool contactsLoaded;
-  final ShareableUser? selectedRecipient;
-  final Set<String> sentPubkeys;
+  final Set<String> selectedPubkeys;
   final VoidCallback onFindPeople;
   final ValueChanged<ShareableUser> onContactTapped;
 
@@ -84,20 +82,14 @@ class _ShareWithSection extends StatelessWidget {
                       child: _ContactItem(
                         user: contact,
                         isSelected: false,
-                        isSent: false,
                         onTap: () {},
                       ),
                     );
                   }
 
-                  final isSelected =
-                      selectedRecipient?.pubkey == contact.pubkey;
-                  final isSent = sentPubkeys.contains(contact.pubkey);
-
                   return _ContactItem(
                     user: contact,
-                    isSelected: isSelected,
-                    isSent: isSent,
+                    isSelected: selectedPubkeys.contains(contact.pubkey),
                     onTap: () => onContactTapped(contact),
                   );
                 },
@@ -167,23 +159,22 @@ class _ContactItem extends StatelessWidget {
   const _ContactItem({
     required this.user,
     required this.isSelected,
-    required this.isSent,
     required this.onTap,
   });
 
   final ShareableUser user;
   final bool isSelected;
-  final bool isSent;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
+      selected: isSelected,
       label: user.displayName ?? context.l10n.shareContactFallback,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: isSent ? null : onTap,
+        onTap: onTap,
         child: SizedBox(
           width: _ShareWithSection._itemWidth,
           child: Column(
@@ -192,15 +183,12 @@ class _ContactItem extends StatelessWidget {
             children: [
               Stack(
                 children: [
-                  Opacity(
-                    opacity: isSent ? 0.5 : 1.0,
-                    child: UserAvatar(
-                      imageUrl: user.picture,
-                      name: user.displayName,
-                      size: _ShareWithSection._avatarSize,
-                    ),
+                  UserAvatar(
+                    imageUrl: user.picture,
+                    name: user.displayName,
+                    size: _ShareWithSection._avatarSize,
                   ),
-                  if (isSelected || isSent)
+                  if (isSelected)
                     Positioned(
                       right: 0,
                       bottom: 0,
@@ -221,11 +209,9 @@ class _ContactItem extends StatelessWidget {
                 ],
               ),
               Text(
-                isSent
-                    ? context.l10n.shareSent
-                    : (user.displayName ?? context.l10n.shareUserFallback),
+                user.displayName ?? context.l10n.shareUserFallback,
                 style: TextStyle(
-                  color: (isSelected || isSent)
+                  color: isSelected
                       ? VineTheme.vineGreen
                       : VineTheme.secondaryText,
                   fontSize: 11,

@@ -596,6 +596,7 @@
     "listAttributionFallback": "Daftar",
     "shareVideoLabel": "Bagikan video",
     "sharePostSharedWith": "Postingan dibagikan dengan {recipientName}",
+    "sharePostSharedWithCount": "{count, plural, other{Postingan dibagikan dengan {count} orang}}",
     "@sharePostSharedWith": {
         "placeholders": {
             "recipientName": {
@@ -615,8 +616,9 @@
     "shareSent": "Terkirim",
     "shareContactFallback": "Kontak",
     "shareUserFallback": "Pengguna",
-    "shareSendingTo": "Mengirim ke {name}",
-    "@shareSendingTo": {
+    "shareSelectedRecipientAnnouncement": "{name} dipilih",
+    "@shareSelectedRecipientAnnouncement": {
+        "description": "Screen reader announcement when a person is selected in the share sheet. Selection opens the optional message composer but does not send the video.",
         "placeholders": {
             "name": {
                 "type": "String"

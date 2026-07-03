@@ -596,6 +596,7 @@
     "listAttributionFallback": "Lista",
     "shareVideoLabel": "Udostępnij film",
     "sharePostSharedWith": "Post udostępniony z {recipientName}",
+    "sharePostSharedWithCount": "{count, plural, one{Post udostępniony z {count} osobą} few{Post udostępniony z {count} osobami} many{Post udostępniony z {count} osobami} other{Post udostępniony z {count} osobami}}",
     "@sharePostSharedWith": {
         "placeholders": {
             "recipientName": {
@@ -615,8 +616,9 @@
     "shareSent": "Wysłano",
     "shareContactFallback": "Kontakt",
     "shareUserFallback": "Użytkownik",
-    "shareSendingTo": "Wysyłanie do {name}",
-    "@shareSendingTo": {
+    "shareSelectedRecipientAnnouncement": "Wybrano {name}",
+    "@shareSelectedRecipientAnnouncement": {
+        "description": "Screen reader announcement when a person is selected in the share sheet. Selection opens the optional message composer but does not send the video.",
         "placeholders": {
             "name": {
                 "type": "String"

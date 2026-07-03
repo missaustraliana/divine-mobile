@@ -1395,6 +1395,16 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
+  String sharePostSharedWithCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count명과 게시물을 공유했어요',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get shareFailedToSend => '영상을 보내지 못했어요';
 
   @override
@@ -1431,8 +1441,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get shareUserFallback => '사용자';
 
   @override
-  String shareSendingTo(String name) {
-    return '$name님에게 보내는 중';
+  String shareSelectedRecipientAnnouncement(String name) {
+    return '$name님 선택됨';
   }
 
   @override

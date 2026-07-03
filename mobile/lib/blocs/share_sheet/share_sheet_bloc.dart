@@ -27,8 +27,8 @@ part 'share_sheet_state.dart';
 ///
 /// Manages:
 /// - Contact loading (recent + followed users)
-/// - Recipient selection
-/// - Quick-send and send-with-message flows
+/// - Recipient selection (select-then-send: tapping a contact only selects;
+///   the DM goes out on an explicit [ShareSheetSendRequested])
 /// - One-shot actions (save, copy link, copy JSON, copy event ID, share via)
 ///
 /// Emits [ShareSheetActionResult] as one-shot side effects for the UI
@@ -53,16 +53,7 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
        _videoClipImportService = videoClipImportService,
        super(const ShareSheetState()) {
     on<ShareSheetContactsLoadRequested>(_onContactsLoadRequested);
-    on<ShareSheetQuickSendRequested>(
-      _onQuickSendRequested,
-      // Concurrent (not droppable): each tap gives instant optimistic feedback
-      // and its send runs in the background, so tapping several people in a row
-      // confirms each immediately instead of dropping taps during an in-flight
-      // send. See #5391.
-      transformer: concurrent(),
-    );
-    on<ShareSheetRecipientSelected>(_onRecipientSelected);
-    on<ShareSheetRecipientCleared>(_onRecipientCleared);
+    on<ShareSheetRecipientToggled>(_onRecipientToggled);
     on<ShareSheetSendRequested>(_onSendRequested, transformer: droppable());
     on<ShareSheetSaveRequested>(_onSaveRequested, transformer: droppable());
     on<ShareSheetAddVideoToClipsRequested>(
@@ -170,90 +161,36 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
   // Recipient selection
   // --------------------------------------------------------------------------
 
-  void _onRecipientSelected(
-    ShareSheetRecipientSelected event,
+  void _onRecipientToggled(
+    ShareSheetRecipientToggled event,
     Emitter<ShareSheetState> emit,
   ) {
-    final updatedContacts = List<ShareableUser>.from(state.contacts)
-      ..removeWhere((c) => c.pubkey == event.recipient.pubkey)
-      ..insert(0, event.recipient);
+    final recipient = event.recipient;
+    final updatedSelection = state.isSelected(recipient)
+        ? [
+            for (final r in state.selectedRecipients)
+              if (r.pubkey != recipient.pubkey) r,
+          ]
+        : [...state.selectedRecipients, recipient];
+
+    // Find People can pick someone who isn't in the contacts row yet —
+    // surface them at the front so their selection tick is visible.
+    // Existing contacts stay in place: reordering under the user's
+    // finger while multi-selecting is disorienting.
+    final inContacts = state.contacts.any(
+      (c) => c.pubkey == recipient.pubkey,
+    );
+    final updatedContacts = inContacts
+        ? state.contacts
+        : [recipient, ...state.contacts];
 
     emit(
       state.copyWith(
-        selectedRecipient: event.recipient,
+        selectedRecipients: updatedSelection,
         contacts: updatedContacts,
         clearActionResult: true,
       ),
     );
-  }
-
-  void _onRecipientCleared(
-    ShareSheetRecipientCleared event,
-    Emitter<ShareSheetState> emit,
-  ) {
-    emit(state.copyWith(clearRecipient: true, clearActionResult: true));
-  }
-
-  // --------------------------------------------------------------------------
-  // Quick-send (tap contact → send immediately, no message)
-  // --------------------------------------------------------------------------
-
-  Future<void> _onQuickSendRequested(
-    ShareSheetQuickSendRequested event,
-    Emitter<ShareSheetState> emit,
-  ) async {
-    final user = event.recipient;
-    if (state.sentPubkeys.contains(user.pubkey)) return;
-
-    final recipientName = user.displayName ?? 'user';
-
-    // Optimistic: confirm instantly (checkmark + toast) and clear any selected
-    // recipient so More Actions stays visible. The actual NIP-17 send (crypto +
-    // relay publish) runs in the background below — the rumor is enqueued
-    // durably before publishing, so the send survives a crash and is retried.
-    // This is what removes the felt wait-for-network lag. See #5391.
-    emit(
-      state.copyWith(
-        sentPubkeys: {...state.sentPubkeys, user.pubkey},
-        clearRecipient: true,
-        actionResult: ShareSheetSendSuccess(recipientName),
-      ),
-    );
-
-    try {
-      final result = await _videoSharingService.shareVideoWithUser(
-        video: _video,
-        recipientPubkey: user.pubkey,
-      );
-      // Success was already shown optimistically; nothing more to emit. If the
-      // sheet was dismissed mid-send, the bloc is closed — don't emit.
-      if (result.success || isClosed) return;
-      // Roll back the optimistic checkmark and surface the failure.
-      emit(
-        state.copyWith(
-          sentPubkeys: {...state.sentPubkeys}..remove(user.pubkey),
-          actionResult: ShareSheetSendFailure(),
-        ),
-      );
-    } catch (e, stackTrace) {
-      _addUnexpectedError(
-        e,
-        stackTrace,
-        ShareSheetBlocReportableSites.onQuickSendRequested,
-      );
-      Log.error(
-        'Failed to quick-send video: $e',
-        name: 'ShareSheetBloc',
-        category: LogCategory.ui,
-      );
-      if (isClosed) return;
-      emit(
-        state.copyWith(
-          sentPubkeys: {...state.sentPubkeys}..remove(user.pubkey),
-          actionResult: ShareSheetSendFailure(),
-        ),
-      );
-    }
   }
 
   // --------------------------------------------------------------------------
@@ -264,31 +201,63 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
     ShareSheetSendRequested event,
     Emitter<ShareSheetState> emit,
   ) async {
-    if (state.selectedRecipient == null || state.isSending) return;
+    if (state.selectedRecipients.isEmpty || state.isSending) return;
 
-    // Send-with-message is a deliberate compose-then-send: it keeps the
-    // awaited flow with a visible "sending" spinner (isSending) and surfaces
-    // failures in-sheet. Only the no-feedback quick-send tap is optimistic.
+    // Deliberate compose-then-send: the awaited flow keeps a visible
+    // "sending" spinner (isSending) and reports the outcome in-sheet.
     emit(state.copyWith(isSending: true, clearActionResult: true));
 
     try {
-      final recipient = state.selectedRecipient!;
+      final recipients = state.selectedRecipients;
       final message = event.message?.trim();
 
-      final result = await _videoSharingService.shareVideoWithUser(
+      // Fans out one DM per recipient (each gets its own gift wrap).
+      final results = await _videoSharingService.shareVideoWithMultipleUsers(
         video: _video,
-        recipientPubkey: recipient.pubkey,
+        recipientPubkeys: [for (final r in recipients) r.pubkey],
         personalMessage: message?.isEmpty == true ? null : message,
       );
 
-      final recipientName = recipient.displayName ?? 'user';
-      if (result.success) {
+      if (isClosed) return;
+
+      final delivered = [
+        for (final r in recipients)
+          if (results[r.pubkey]?.success ?? false) r,
+      ];
+      final failedCount = recipients.length - delivered.length;
+
+      // The send is dismiss-and-forget: a recipient publish that fails is
+      // already durably enqueued (VideoSharingService -> DmRepository.
+      // sendMessage enqueues before publish) and OutgoingDmRetryService
+      // replays the SAME rumor id on the next app-foreground. Re-sending from
+      // the sheet would mint a NEW rumor id the receiver can't dedup against
+      // that replay, double-delivering — so we never keep recipients selected
+      // for a manual retry. We report what was delivered and let the queue
+      // finish the rest.
+      if (delivered.isNotEmpty) {
+        if (failedCount > 0) {
+          Log.warning(
+            'Partial share: ${delivered.length} delivered, $failedCount '
+            'queued for background retry',
+            name: 'ShareSheetBloc',
+            category: LogCategory.ui,
+          );
+        }
+        final single = delivered.length == 1 && recipients.length == 1
+            ? delivered.single
+            : null;
         emit(
           state.copyWith(
             isSending: false,
+            selectedRecipients: const [],
             actionResult: ShareSheetSendSuccess(
-              recipientName,
-              shouldDismiss: true,
+              recipientNames: [
+                for (final r in delivered) r.displayName ?? 'user',
+              ],
+              recipientPubkey: single?.pubkey,
+              conversationId: single == null
+                  ? null
+                  : results[single.pubkey]?.conversationId,
             ),
           ),
         );
@@ -296,6 +265,7 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
         emit(
           state.copyWith(
             isSending: false,
+            selectedRecipients: const [],
             actionResult: ShareSheetSendFailure(),
           ),
         );
@@ -311,8 +281,13 @@ class ShareSheetBloc extends Bloc<ShareSheetEvent, ShareSheetState> {
         name: 'ShareSheetBloc',
         category: LogCategory.ui,
       );
+      if (isClosed) return;
       emit(
-        state.copyWith(isSending: false, actionResult: ShareSheetSendFailure()),
+        state.copyWith(
+          isSending: false,
+          selectedRecipients: const [],
+          actionResult: ShareSheetSendFailure(),
+        ),
       );
     }
   }

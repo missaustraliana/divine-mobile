@@ -596,6 +596,7 @@
     "listAttributionFallback": "Lista",
     "shareVideoLabel": "Dela video",
     "sharePostSharedWith": "Inlägg delat med {recipientName}",
+    "sharePostSharedWithCount": "{count, plural, one{Inlägg delat med {count} person} other{Inlägg delat med {count} personer}}",
     "@sharePostSharedWith": {
         "placeholders": {
             "recipientName": {
@@ -615,8 +616,9 @@
     "shareSent": "Skickat",
     "shareContactFallback": "Kontakt",
     "shareUserFallback": "Användare",
-    "shareSendingTo": "Skickar till {name}",
-    "@shareSendingTo": {
+    "shareSelectedRecipientAnnouncement": "{name} vald",
+    "@shareSelectedRecipientAnnouncement": {
+        "description": "Screen reader announcement when a person is selected in the share sheet. Selection opens the optional message composer but does not send the video.",
         "placeholders": {
             "name": {
                 "type": "String"

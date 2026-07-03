@@ -18,9 +18,13 @@ class ShareSheetContactsLoadRequested extends ShareSheetEvent {
   const ShareSheetContactsLoadRequested();
 }
 
-/// A contact was tapped for quick-send (no message).
-class ShareSheetQuickSendRequested extends ShareSheetEvent {
-  const ShareSheetQuickSendRequested(this.recipient);
+/// A recipient was toggled (contact-row tap or Find People pick).
+///
+/// Adds the user to the selection, or removes them when already
+/// selected. Selection never sends — it reveals the message composer;
+/// the send happens only on an explicit [ShareSheetSendRequested].
+class ShareSheetRecipientToggled extends ShareSheetEvent {
+  const ShareSheetRecipientToggled(this.recipient);
 
   final ShareableUser recipient;
 
@@ -28,22 +32,7 @@ class ShareSheetQuickSendRequested extends ShareSheetEvent {
   List<Object?> get props => [recipient.pubkey];
 }
 
-/// A recipient was selected (from Find People or contact tap for message).
-class ShareSheetRecipientSelected extends ShareSheetEvent {
-  const ShareSheetRecipientSelected(this.recipient);
-
-  final ShareableUser recipient;
-
-  @override
-  List<Object?> get props => [recipient.pubkey];
-}
-
-/// Recipient selection was cleared.
-class ShareSheetRecipientCleared extends ShareSheetEvent {
-  const ShareSheetRecipientCleared();
-}
-
-/// Send video with an optional message to the selected recipient.
+/// Send video with an optional message to all selected recipients.
 class ShareSheetSendRequested extends ShareSheetEvent {
   const ShareSheetSendRequested({this.message});
 
