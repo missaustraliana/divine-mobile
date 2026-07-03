@@ -86,6 +86,7 @@ class MessageBubble extends StatelessWidget {
     this.isFirstInGroup = true,
     this.isLastInGroup = true,
     this.onLongPress,
+    this.onDoubleTap,
     this.deliveryStatus = DmDeliveryStatus.delivered,
     this.dmReplyContext,
     this.sharedVideoRef,
@@ -107,6 +108,16 @@ class MessageBubble extends StatelessWidget {
 
   /// Called when the user long-presses the bubble.
   final VoidCallback? onLongPress;
+
+  /// Called when the user double-taps the bubble. Wired to double-tap-to-like,
+  /// which adds a ❤️ reaction to the message. Null disables double-tap on the
+  /// bubble (e.g. failed own sends). It is also suppressed internally on
+  /// bubbles whose dominant content is itself a tap target (shared-video card,
+  /// quoted-video reply) so the ancestor double-tap recognizer can't delay
+  /// tap-to-open — see the wiring below. Screen readers never reach this —
+  /// double-tap is the AT activation gesture — so the long-press picker stays
+  /// the a11y path.
+  final VoidCallback? onDoubleTap;
 
   /// Per-bubble delivery state. Only rendered for sent messages; received
   /// bubbles ignore it. Defaults to [DmDeliveryStatus.delivered] so test
@@ -238,6 +249,14 @@ class MessageBubble extends StatelessWidget {
               : null,
           child: GestureDetector(
             onLongPress: onLongPress,
+            // Suppress double-tap-to-like on bubbles whose dominant content is
+            // itself a tap target — the shared-video card and the quoted-video
+            // reply both open the reel on tap. An ancestor onDoubleTap makes
+            // its DoubleTapGestureRecognizer hold the gesture arena for
+            // ~kDoubleTapTimeout after the first tap, so the inner onTap only
+            // fires once that window elapses (~300 ms delay to tap-to-open).
+            // Text bubbles keep double-tap-to-like.
+            onDoubleTap: hasVideo || hasQuotedVideo ? null : onDoubleTap,
             child: Container(
               // Video bubbles cap their max width at the thumbnail's
               // own width (248) plus the symmetric 16 px padding so the

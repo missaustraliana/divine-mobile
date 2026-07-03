@@ -19,7 +19,7 @@ import 'package:openvine/widgets/user_avatar.dart';
 /// [ConversationReactionsCubit] via `BlocBuilder` with a per-message
 /// `buildWhen` so only this row rebuilds when its reactions (or in-flight
 /// pending state) change.
-class ReactionsRow extends StatelessWidget {
+class ReactionsRow extends StatefulWidget {
   /// Construct a reactions row.
   const ReactionsRow({
     required this.conversationId,
@@ -50,6 +50,33 @@ class ReactionsRow extends StatelessWidget {
   final Set<String> blockedPubkeys;
 
   @override
+  State<ReactionsRow> createState() => _ReactionsRowState();
+}
+
+class _ReactionsRowState extends State<ReactionsRow> {
+  /// Emojis already on the message when this row first built — a conversation
+  /// opening, or a reacted row scrolling back into view. A glyph whose emoji is
+  /// absent here is a post-mount addition (a live incoming reaction, or the
+  /// user's own double-tap ❤️) and grows in via [_PoppingEmoji]; emojis in the
+  /// baseline render settled. Captured on the first build even when the message
+  /// starts with zero reactions, so the first like on a never-reacted message —
+  /// which mounts the pill for the first time — still pops. This lives on the
+  /// row (always mounted for a visible message) rather than the pill (absent
+  /// until the first reaction), so the empty → first-reaction transition reads
+  /// as an addition, not an initial mount.
+  Set<String>? _baselineEmojis;
+
+  @override
+  void didUpdateWidget(ReactionsRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A ListView can rebind this element to a different message; drop the
+    // baseline so it recaptures for the new message on the next build.
+    if (oldWidget.messageId != widget.messageId) {
+      _baselineEmojis = null;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     // Rebuild when EITHER the persisted reactions for this message change OR
     // the in-flight pending entries for this message change — so the own
@@ -57,24 +84,31 @@ class ReactionsRow extends StatelessWidget {
     return BlocBuilder<ConversationReactionsCubit, ConversationReactionsState>(
       buildWhen: (prev, curr) {
         if (!_listEquals(
-          prev.reactionsFor(messageId),
-          curr.reactionsFor(messageId),
+          prev.reactionsFor(widget.messageId),
+          curr.reactionsFor(widget.messageId),
         )) {
           return true;
         }
-        return !_pendingForMessageEquals(prev.pending, curr.pending, messageId);
+        return !_pendingForMessageEquals(
+          prev.pending,
+          curr.pending,
+          widget.messageId,
+        );
       },
       builder: (context, state) {
         final reactions = state
-            .reactionsFor(messageId)
-            .where((r) => !blockedPubkeys.contains(r.reactorPubkey))
+            .reactionsFor(widget.messageId)
+            .where((r) => !widget.blockedPubkeys.contains(r.reactorPubkey))
             .toList(growable: false);
+        // Capture the baseline on the first build (even when empty) so the very
+        // first reaction added afterwards — the double-tap ❤️ — reads as new.
+        _baselineEmojis ??= reactions.map((r) => r.emoji).toSet();
         if (reactions.isEmpty) return const SizedBox.shrink();
 
         return Padding(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
           child: Align(
-            alignment: isSentByMe
+            alignment: widget.isSentByMe
                 ? Alignment.centerRight
                 : Alignment.centerLeft,
             // Pull the pill up ~14 px so it overlaps the bubble's bottom edge,
@@ -83,15 +117,16 @@ class ReactionsRow extends StatelessWidget {
               offset: const Offset(0, -14),
               child: _ReactionPill(
                 reactions: reactions,
-                ownerPubkey: ownerPubkey,
+                ownerPubkey: widget.ownerPubkey,
+                baselineEmojis: _baselineEmojis!,
                 onTap: () => ReactionsDetailSheet.show(
                   context: context,
                   cubit: context.read<ConversationReactionsCubit>(),
-                  conversationId: conversationId,
-                  messageId: messageId,
-                  messageAuthorPubkey: messageAuthorPubkey,
-                  ownerPubkey: ownerPubkey,
-                  blockedPubkeys: blockedPubkeys,
+                  conversationId: widget.conversationId,
+                  messageId: widget.messageId,
+                  messageAuthorPubkey: widget.messageAuthorPubkey,
+                  ownerPubkey: widget.ownerPubkey,
+                  blockedPubkeys: widget.blockedPubkeys,
                 ),
               ),
             ),
@@ -107,12 +142,18 @@ class _ReactionPill extends StatelessWidget {
   const _ReactionPill({
     required this.reactions,
     required this.ownerPubkey,
+    required this.baselineEmojis,
     required this.onTap,
   });
 
   /// Live reactions for the message (blocklist-filtered, ascending createdAt).
   final List<DmReaction> reactions;
   final String ownerPubkey;
+
+  /// Emojis already present when the enclosing row first built. A shown glyph
+  /// whose emoji is absent here is a post-mount addition and grows in; emojis
+  /// in the baseline render settled (see [_PoppingEmoji.animateIn]).
+  final Set<String> baselineEmojis;
   final VoidCallback onTap;
 
   static const int _maxEmojis = 3;
@@ -158,10 +199,6 @@ class _ReactionPill extends StatelessWidget {
         : VineTheme.outlineVariant;
     final borderRadius = BorderRadius.circular(_height / 2);
 
-    // 🔥 is painted by the platform colour-emoji font (Inter ships no emoji),
-    // so a forced line-height drops the glyph low on Android. Natural leading
-    // lets the Row centre the glyph box — mirrors reaction_picker_overlay.
-    const emojiStyle = TextStyle(fontSize: 15);
     final overflowStyle = VineTheme.labelSmallFont(
       color: VineTheme.onSurface,
     ).copyWith(fontSize: 11, height: 1);
@@ -169,7 +206,16 @@ class _ReactionPill extends StatelessWidget {
     final rowChildren = <Widget>[
       for (var i = 0; i < shownEmojis.length; i++) ...[
         if (i > 0) const SizedBox(width: 1),
-        Text(shownEmojis[i], style: emojiStyle),
+        // Keyed by emoji so a newly-added glyph (e.g. a double-tap ❤️) spins up
+        // a fresh element that grows in, while existing glyphs keep their
+        // element — and settled scale — across rebuilds. animateIn gates the
+        // pop to emojis absent from the row's mount-time baseline, so the
+        // initial set (open / scroll-in) settles silently.
+        _PoppingEmoji(
+          shownEmojis[i],
+          key: ValueKey(shownEmojis[i]),
+          animateIn: !baselineEmojis.contains(shownEmojis[i]),
+        ),
       ],
       if (extraEmojis > 0) ...[
         const SizedBox(width: 2),
@@ -219,6 +265,73 @@ class _ReactionPill extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Text style for a reaction glyph.
+///
+/// 🔥 is painted by the platform colour-emoji font (Inter ships no emoji), so a
+/// forced line-height drops the glyph low on Android. Natural leading lets the
+/// Row centre the glyph box — mirrors reaction_picker_overlay.
+const _emojiTextStyle = TextStyle(fontSize: 15);
+
+/// Duration of the reaction glyph grow-in.
+const _emojiPopDuration = Duration(milliseconds: 180);
+
+/// A reaction emoji glyph that gently grows in (no bounce) when [animateIn] is
+/// set, otherwise mounts already at its settled scale. [_ReactionPill] keys
+/// each glyph by its emoji and only passes `animateIn: true` for a glyph added
+/// *after* the row mounted (a live incoming reaction or the user's own
+/// double-tap ❤️) — so the initial set (conversation open, scroll-in) settles
+/// silently and existing glyphs never re-pop. Scale-only (paint transform), so
+/// it never reflows the fixed-height pill.
+class _PoppingEmoji extends StatefulWidget {
+  const _PoppingEmoji(this.emoji, {required this.animateIn, super.key});
+
+  final String emoji;
+
+  /// Whether this glyph grows in on mount. False for glyphs already present at
+  /// the row's first build; true for a glyph that appears once mounted.
+  final bool animateIn;
+
+  @override
+  State<_PoppingEmoji> createState() => _PoppingEmojiState();
+}
+
+class _PoppingEmojiState extends State<_PoppingEmoji>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: _emojiPopDuration,
+  );
+
+  late final Animation<double> _scale = Tween<double>(begin: 0.6, end: 1)
+      .animate(
+        CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+      );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animateIn) {
+      _controller.forward();
+    } else {
+      _controller.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: _scale,
+      child: Text(widget.emoji, style: _emojiTextStyle),
     );
   }
 }

@@ -4,6 +4,7 @@
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show SemanticsService;
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -393,6 +394,12 @@ DmSharedVideoRef? resolveQuotedVideoRef(
 DmSharedVideoRef? resolveOwnShareVideoRef(DmMessage message) =>
     message.replyToId == null ? message.sharedVideoRef : null;
 
+/// The emoji a double-tap-to-like publishes: the ❤️ that heads the DM quick
+/// reaction row ([kDefaultDmReactionEmojis]), reused verbatim so a double-tap
+/// and a picker ❤️ collapse to one reaction instead of two distinct rows
+/// (there is no emoji normalization on the reaction path).
+final String _doubleTapLikeEmoji = kDefaultDmReactionEmojis.first;
+
 class _MessageList extends StatelessWidget {
   const _MessageList({
     required this.messages,
@@ -468,6 +475,25 @@ class _MessageList extends StatelessWidget {
         messageId: message.id,
         messageAuthorPubkey: message.senderPubkey,
         emoji: emoji,
+      ),
+    );
+  }
+
+  /// Double-tap-to-like (Instagram-style). Fires a light haptic and adds a ❤️
+  /// via [ConversationReactionSet] (add-only: a repeat double-tap never
+  /// un-likes — removal stays on the long-press picker). The chip itself
+  /// animates in via [ReactionsRow]. Dedup lives in the cubit's
+  /// [ConversationReactionSet] handler — including the pre-persist optimistic
+  /// window — so a rapid double-tap burst can't fan out duplicate gift-wrapped
+  /// reactions; the UI just dispatches.
+  void _likeOnDoubleTap(BuildContext context, DmMessage message) {
+    HapticFeedback.lightImpact();
+    context.read<ConversationReactionsCubit>().add(
+      ConversationReactionSet(
+        conversationId: message.conversationId,
+        messageId: message.id,
+        messageAuthorPubkey: message.senderPubkey,
+        emoji: _doubleTapLikeEmoji,
       ),
     );
   }
@@ -554,6 +580,12 @@ class _MessageList extends StatelessWidget {
             isLastInGroup: isLastInGroup,
             onLongPress: () =>
                 _onMessageLongPress(context, message, isSent, status),
+            // Double-tap-to-like, hidden on failed own sends to mirror the
+            // long-press picker guard (reacting to a message the recipient
+            // never received is meaningless).
+            onDoubleTap: isSent && status == DmDeliveryStatus.failed
+                ? null
+                : () => _likeOnDoubleTap(context, message),
             deliveryStatus: status,
             dmReplyContext: dmReplyContext,
             sharedVideoRef: ownShareVideoRef,

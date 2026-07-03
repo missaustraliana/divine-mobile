@@ -260,6 +260,62 @@ void main() {
     );
 
     blocTest<ConversationReactionsCubit, ConversationReactionsState>(
+      'rapid double-tap set is a no-op during the pre-persist optimistic '
+      'window (publishes once)',
+      build: () {
+        when(
+          () => repo.publish(
+            conversationId: any(named: 'conversationId'),
+            targetMessageId: any(named: 'targetMessageId'),
+            targetMessageAuthor: any(named: 'targetMessageAuthor'),
+            emoji: any(named: 'emoji'),
+          ),
+        ).thenAnswer(
+          (_) async =>
+              const DmReactionPublishResult(success: true, rumorId: 'r-set'),
+        );
+        return ConversationReactionsCubit(
+          reactionsRepository: repo,
+          ownerPubkey: _owner,
+        );
+      },
+      act: (cubit) async {
+        // Two sets in a burst, before any persisted row (or stream tick) lands.
+        // The first paints the optimistic ❤️; the second must see it via the
+        // optimistic-inclusive guard and no-op — so only one gift-wrap is sent
+        // and the pre-persist window can't fan out duplicates.
+        cubit
+          ..add(
+            const ConversationReactionSet(
+              conversationId: _convo,
+              messageId: _msgId,
+              messageAuthorPubkey: _peer,
+              emoji: '❤️',
+            ),
+          )
+          ..add(
+            const ConversationReactionSet(
+              conversationId: _convo,
+              messageId: _msgId,
+              messageAuthorPubkey: _peer,
+              emoji: '❤️',
+            ),
+          );
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      },
+      verify: (_) {
+        verify(
+          () => repo.publish(
+            conversationId: _convo,
+            targetMessageId: _msgId,
+            targetMessageAuthor: _peer,
+            emoji: '❤️',
+          ),
+        ).called(1);
+      },
+    );
+
+    blocTest<ConversationReactionsCubit, ConversationReactionsState>(
       'set with a different emoji publishes (supersede handled by repo)',
       build: () {
         when(
@@ -573,6 +629,127 @@ void main() {
             ReactionPublishLocalStatus.failed,
           );
         },
+      );
+    });
+  });
+
+  group('ConversationReactionsState.ownReactionPendingOrLive', () {
+    const heart = '❤️';
+
+    DmReaction reaction({
+      required String id,
+      required String reactor,
+      required String emoji,
+      DmReactionPublishStatus status = DmReactionPublishStatus.sent,
+    }) => DmReaction(
+      id: id,
+      conversationId: _convo,
+      targetMessageId: _msgId,
+      targetMessageAuthor: _peer,
+      reactorPubkey: reactor,
+      emoji: emoji,
+      createdAt: 1700000000,
+      ownerPubkey: _owner,
+      publishStatus: status,
+    );
+
+    test('true when the owner has a persisted matching reaction', () {
+      final state = ConversationReactionsState(
+        reactionsByMessageId: {
+          _msgId: [reaction(id: 'own', reactor: _owner, emoji: heart)],
+        },
+      );
+      expect(
+        state.ownReactionPendingOrLive(
+          messageId: _msgId,
+          emoji: heart,
+          ownerPubkey: _owner,
+        ),
+        isTrue,
+      );
+    });
+
+    test('false when the message has no reactions', () {
+      const state = ConversationReactionsState();
+      expect(
+        state.ownReactionPendingOrLive(
+          messageId: _msgId,
+          emoji: heart,
+          ownerPubkey: _owner,
+        ),
+        isFalse,
+      );
+    });
+
+    test('false when only another reactor has the emoji', () {
+      final state = ConversationReactionsState(
+        reactionsByMessageId: {
+          _msgId: [reaction(id: 'peer', reactor: _peer, emoji: heart)],
+        },
+      );
+      expect(
+        state.ownReactionPendingOrLive(
+          messageId: _msgId,
+          emoji: heart,
+          ownerPubkey: _owner,
+        ),
+        isFalse,
+      );
+    });
+
+    test('true from an optimistic add before the row persists', () {
+      final state = ConversationReactionsState(
+        optimistic: {
+          const ReactionPublishKey(
+            messageId: _msgId,
+            emoji: heart,
+          ): OptimisticReactionAdded(
+            reaction(
+              id: 'optimistic:$_msgId:$heart',
+              reactor: _owner,
+              emoji: heart,
+              status: DmReactionPublishStatus.pending,
+            ),
+          ),
+        },
+      );
+      expect(
+        state.ownReactionPendingOrLive(
+          messageId: _msgId,
+          emoji: heart,
+          ownerPubkey: _owner,
+        ),
+        isTrue,
+      );
+      // The persisted-only getter does NOT see the optimistic overlay — this
+      // is exactly the pre-persist window the double-tap guard must cover.
+      expect(
+        state.ownReactionMatches(
+          messageId: _msgId,
+          emoji: heart,
+          ownerPubkey: _owner,
+        ),
+        isFalse,
+      );
+    });
+
+    test('false when an optimistic remove hides the persisted reaction', () {
+      final state = ConversationReactionsState(
+        reactionsByMessageId: {
+          _msgId: [reaction(id: 'own', reactor: _owner, emoji: heart)],
+        },
+        optimistic: {
+          const ReactionPublishKey(messageId: _msgId, emoji: heart):
+              const OptimisticReactionRemoved(),
+        },
+      );
+      expect(
+        state.ownReactionPendingOrLive(
+          messageId: _msgId,
+          emoji: heart,
+          ownerPubkey: _owner,
+        ),
+        isFalse,
       );
     });
   });
