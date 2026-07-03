@@ -48,6 +48,14 @@ class ContentFilterService extends ChangeNotifier {
     ContentLabel.porn,
   };
 
+  /// Adult categories the user can actually opt into for generic protected
+  /// media playback. [ContentLabel.porn] stays in [adultCategories] so label
+  /// filtering always hides it, but it is not a settings toggle.
+  static const Set<ContentLabel> configurableAdultCategories = {
+    ContentLabel.nudity,
+    ContentLabel.sexual,
+  };
+
   /// Visible categories locked to hide unless the user is age-verified.
   static const Set<ContentLabel> ageRestrictedCategories = {
     ...adultCategories,
@@ -74,9 +82,10 @@ class ContentFilterService extends ChangeNotifier {
 
   /// Default preferences for each category.
   static const Map<ContentLabel, ContentFilterPreference> _defaults = {
-    // Visible adult content starts at warn when the age gate is unlocked.
-    ContentLabel.nudity: ContentFilterPreference.warn,
-    ContentLabel.sexual: ContentFilterPreference.warn,
+    // Adult content stays hidden even after age verification; the user must
+    // opt in per category via Content Filters.
+    ContentLabel.nudity: ContentFilterPreference.hide,
+    ContentLabel.sexual: ContentFilterPreference.hide,
     // Always-filtered categories are not user-configurable.
     ContentLabel.graphicMedia: ContentFilterPreference.hide,
     ContentLabel.violence: ContentFilterPreference.hide,
@@ -255,13 +264,17 @@ class ContentFilterService extends ChangeNotifier {
   /// preference override the current settings UI, derive a single playback
   /// policy from the new per-category source of truth:
   ///
-  /// - all `hide` -> verified users should be blocked
-  /// - all `show` -> verified users can auto-allow
-  /// - any mixed state -> require an explicit retry/confirmation path
+  /// - any configurable adult category at `hide` -> verified users are blocked
+  /// - all configurable adult categories at `show` -> verified users can
+  ///   auto-allow
+  /// - any remaining mixed state -> require an explicit retry/confirmation path
   ContentFilterPreference get adultPlaybackPreference {
-    final preferences = adultCategories.map(getPreference).toSet();
-    if (preferences.length == 1) {
-      return preferences.single;
+    final preferences = configurableAdultCategories.map(getPreference).toSet();
+    if (preferences.contains(ContentFilterPreference.hide)) {
+      return ContentFilterPreference.hide;
+    }
+    if (preferences.every((pref) => pref == ContentFilterPreference.show)) {
+      return ContentFilterPreference.show;
     }
     return ContentFilterPreference.warn;
   }
@@ -277,19 +290,22 @@ class ContentFilterService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Unlock adult categories when the user enables age verification.
+  /// Unlock age-restricted categories when the user enables age verification.
   ///
-  /// Only promotes categories that are still at [ContentFilterPreference.hide]
-  /// to [ContentFilterPreference.warn]. Categories the user has already
+  /// Adult categories ([adultCategories]) are never promoted: age
+  /// verification only unlocks the *ability* to change them, and adult
+  /// content stays hidden until the user opts in per category via Content
+  /// Filters.
+  ///
+  /// Non-adult age-restricted categories (alcohol, tobacco, profanity,
+  /// gambling) still at [ContentFilterPreference.hide] are promoted to
+  /// [ContentFilterPreference.warn]. Categories the user has already
   /// explicitly changed to [warn] or [show] are left untouched, so this
   /// never overwrites a deliberate preference.
-  ///
-  /// Using [warn] as the unlock default means the user sees a confirmation
-  /// prompt the first time they play a given adult video — a safe default
-  /// that can be overridden per-category in Content Filters.
   Future<void> unlockAdultCategories() async {
     for (final label in ageRestrictedCategories) {
       if (alwaysFilteredCategories.contains(label)) continue;
+      if (adultCategories.contains(label)) continue;
       if ((_preferences[label] ?? _defaultFor(label)) ==
           ContentFilterPreference.hide) {
         _preferences[label] = ContentFilterPreference.warn;
