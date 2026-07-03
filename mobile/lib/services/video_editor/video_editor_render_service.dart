@@ -554,6 +554,7 @@ class VideoEditorRenderService {
       tempFilePaths = result.tempFilePaths;
 
       final outputPath = await _concatenateSegments(
+        clips: clips,
         segments: result.segments,
         taskId: taskId ?? clips.first.id,
         outputDir: outputDir,
@@ -906,6 +907,7 @@ class VideoEditorRenderService {
   /// If [globalTransform] is provided, applies it to all segments in a single
   /// pass.
   static Future<String> _concatenateSegments({
+    required List<DivineVideoClip> clips,
     required List<VideoSegment> segments,
     required String taskId,
     required Directory outputDir,
@@ -938,66 +940,35 @@ class VideoEditorRenderService {
       renderResolution = metadata.resolution;
     }
 
+    // Overlay/effect time windows are authored on the editor timeline (clips at
+    // full length). Overlap transitions (dissolve/slide/push/wipe) shorten the
+    // rendered output, so every time anchor is mapped onto the output axis;
+    // otherwise anything near the end — a layer's leave animation especially —
+    // lands past the real video end and is clipped ("animation missing at the
+    // end"). Identity when no overlap transition is present.
+    final timelineMap = TransitionTimelineMap.fromClips(clips);
+    final videoSize =
+        renderResolution ??
+        VideoEditorConstants.quality.resolutionForAspectRatio(aspectRatio);
+
     final task = VideoRenderData(
       id: taskId,
       videoSegments: volumeSegments,
       endTime: maxOutputDuration,
       shouldOptimizeForNetworkUse: true,
       audioTracks: audioTracks,
-      imageLayers: parameters?.capturedLayers.isNotEmpty == true
-          ? () {
-              final bodySize = parameters!.bodySize;
-              if (bodySize == null) return null;
-              final videoSize =
-                  renderResolution ??
-                  VideoEditorConstants.quality.resolutionForAspectRatio(
-                    aspectRatio,
-                  );
-              final scale = videoSize.width / bodySize.width;
-              return [
-                for (final item in parameters.capturedLayers)
-                  ImageLayer(
-                    image: EditorLayerImage.memory(item.bytes),
-                    startTime: item.layer.startTime,
-                    endTime: item.layer.endTime,
-                    offset: Offset(
-                      (bodySize.width / 2 +
-                              item.layer.offset.dx -
-                              item.logicalSize.width / 2) *
-                          scale,
-                      (bodySize.height / 2 +
-                              item.layer.offset.dy -
-                              item.logicalSize.height / 2) *
-                          scale,
-                    ),
-                    size: Size(
-                      item.logicalSize.width * scale,
-                      item.logicalSize.height * scale,
-                    ),
-                    animations: item.layer.divineAnimations,
-                  ),
-              ];
-            }()
-          : null,
+      imageLayers: buildImageLayers(
+        capturedLayers: parameters?.capturedLayers ?? const [],
+        bodySize: parameters?.bodySize,
+        videoSize: videoSize,
+        timelineMap: timelineMap,
+      ),
       blur: parameters?.blur,
-      colorFilters: [
-        ...?parameters?.tuneAdjustments.map(
-          (t) => ColorFilter(
-            matrix: t.matrix,
-            startTime: t.startTime,
-            endTime: t.endTime,
-          ),
-        ),
-        ...?parameters?.filterStates.expand(
-          (f) => f.matrices.map(
-            (matrix) => ColorFilter(
-              matrix: matrix,
-              startTime: f.startTime,
-              endTime: f.endTime,
-            ),
-          ),
-        ),
-      ],
+      colorFilters: buildColorFilters(
+        tuneAdjustments: parameters?.tuneAdjustments ?? const [],
+        filterStates: parameters?.filterStates ?? const [],
+        timelineMap: timelineMap,
+      ),
       imageBytesWithCropping: true,
       qualityConfig: VideoQualityConfig.custom(
         bitrate: VideoEditorConstants.quality.bitrate,
@@ -1021,6 +992,79 @@ class VideoEditorRenderService {
     await _cancelAndRender(outputPath, task);
 
     return outputPath;
+  }
+
+  /// Builds the [ImageLayer]s composited over the exported video from the
+  /// captured overlay layers.
+  ///
+  /// Each layer is scaled from editor body space ([bodySize]) into the rendered
+  /// video's pixel space ([videoSize]), and its time window is mapped from the
+  /// editor timeline onto the output axis via [timelineMap] — so an overlap
+  /// transition can't push a layer (or its leave animation) past the real video
+  /// end. Returns `null` when there is nothing to overlay.
+  @visibleForTesting
+  static List<ImageLayer>? buildImageLayers({
+    required List<ExportedLayer> capturedLayers,
+    required Size? bodySize,
+    required Size videoSize,
+    required TransitionTimelineMap timelineMap,
+  }) {
+    if (capturedLayers.isEmpty || bodySize == null) return null;
+    final scale = videoSize.width / bodySize.width;
+    return [
+      for (final item in capturedLayers)
+        ImageLayer(
+          image: EditorLayerImage.memory(item.bytes),
+          startTime: timelineMap.editorToOutputOrNull(item.layer.startTime),
+          endTime: timelineMap.editorToOutputOrNull(item.layer.endTime),
+          offset: Offset(
+            (bodySize.width / 2 +
+                    item.layer.offset.dx -
+                    item.logicalSize.width / 2) *
+                scale,
+            (bodySize.height / 2 +
+                    item.layer.offset.dy -
+                    item.logicalSize.height / 2) *
+                scale,
+          ),
+          size: Size(
+            item.logicalSize.width * scale,
+            item.logicalSize.height * scale,
+          ),
+          animations: item.layer.divineAnimations,
+        ),
+    ];
+  }
+
+  /// Builds the [ColorFilter]s applied to the exported video from the tune
+  /// adjustments and filter states.
+  ///
+  /// Each filter's editor-timeline window is mapped onto the output axis via
+  /// [timelineMap] — the same mapping [buildImageLayers] applies — so an
+  /// overlap transition can't push a filter (or its leave animation) past the
+  /// real video end. A `null` start/end stays un-anchored (spans the whole
+  /// video). One [ColorFilter] is emitted per filter matrix.
+  @visibleForTesting
+  static List<ColorFilter> buildColorFilters({
+    required List<TuneAdjustmentMatrix> tuneAdjustments,
+    required List<FilterState> filterStates,
+    required TransitionTimelineMap timelineMap,
+  }) {
+    return [
+      for (final tune in tuneAdjustments)
+        ColorFilter(
+          matrix: tune.matrix,
+          startTime: timelineMap.editorToOutputOrNull(tune.startTime),
+          endTime: timelineMap.editorToOutputOrNull(tune.endTime),
+        ),
+      for (final filter in filterStates)
+        for (final matrix in filter.matrices)
+          ColorFilter(
+            matrix: matrix,
+            startTime: timelineMap.editorToOutputOrNull(filter.startTime),
+            endTime: timelineMap.editorToOutputOrNull(filter.endTime),
+          ),
+    ];
   }
 
   // ─────────────────────────────────────────────────────────────────────────
