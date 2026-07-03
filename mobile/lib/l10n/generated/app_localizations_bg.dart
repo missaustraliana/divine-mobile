@@ -1720,6 +1720,32 @@ class AppLocalizationsBg extends AppLocalizations {
   String get metadataRepostsLabel => 'Репостове';
 
   @override
+  String get metadataVineStatsLabel => 'Във Vine';
+
+  @override
+  String metadataVineStatsLine(
+    String loops,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$loops лупа · $likes харесвания · $comments коментари · $reposts репоста';
+  }
+
+  @override
+  String get metadataDivineStatsLabel => 'В Divine';
+
+  @override
+  String metadataDivineStatsLine(
+    String views,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$views гледания · $likes харесвания · $comments коментари · $reposts репоста';
+  }
+
+  @override
   String metadataPostedDateSemantics(String date) {
     return 'Публикувано на $date';
   }

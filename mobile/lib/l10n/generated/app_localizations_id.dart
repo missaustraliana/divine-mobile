@@ -1663,6 +1663,32 @@ class AppLocalizationsId extends AppLocalizations {
   String get metadataRepostsLabel => 'Repost';
 
   @override
+  String get metadataVineStatsLabel => 'Di Vine';
+
+  @override
+  String metadataVineStatsLine(
+    String loops,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$loops loop · $likes suka · $comments komentar · $reposts repost';
+  }
+
+  @override
+  String get metadataDivineStatsLabel => 'Di Divine';
+
+  @override
+  String metadataDivineStatsLine(
+    String views,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$views tayangan · $likes suka · $comments komentar · $reposts repost';
+  }
+
+  @override
   String metadataPostedDateSemantics(String date) {
     return 'Diposting pada $date';
   }

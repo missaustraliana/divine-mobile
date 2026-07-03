@@ -1655,6 +1655,32 @@ class AppLocalizationsAm extends AppLocalizations {
   String get metadataRepostsLabel => 'ድጋሚ ልጥፎች';
 
   @override
+  String get metadataVineStatsLabel => 'በVine';
+
+  @override
+  String metadataVineStatsLine(
+    String loops,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$loops ሉፖች · $likes መውደዶች · $comments አስተያየቶች · $reposts ድጋሚ ልጥፎች';
+  }
+
+  @override
+  String get metadataDivineStatsLabel => 'በDivine';
+
+  @override
+  String metadataDivineStatsLine(
+    String views,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$views እይታዎች · $likes መውደዶች · $comments አስተያየቶች · $reposts ድጋሚ ልጥፎች';
+  }
+
+  @override
   String metadataPostedDateSemantics(String date) {
     return 'የተለጠፈው $date ላይ ነው።';
   }

@@ -1684,6 +1684,32 @@ class AppLocalizationsSv extends AppLocalizations {
   String get metadataRepostsLabel => 'Återpubliceringar';
 
   @override
+  String get metadataVineStatsLabel => 'På Vine';
+
+  @override
+  String metadataVineStatsLine(
+    String loops,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$loops loopar · $likes gillamarkeringar · $comments kommentarer · $reposts återpubliceringar';
+  }
+
+  @override
+  String get metadataDivineStatsLabel => 'På Divine';
+
+  @override
+  String metadataDivineStatsLine(
+    String views,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$views visningar · $likes gillamarkeringar · $comments kommentarer · $reposts återpubliceringar';
+  }
+
+  @override
   String metadataPostedDateSemantics(String date) {
     return 'Publicerat den $date';
   }

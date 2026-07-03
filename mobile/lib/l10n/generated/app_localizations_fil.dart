@@ -1721,6 +1721,32 @@ class AppLocalizationsFil extends AppLocalizations {
   String get metadataRepostsLabel => 'Mga Repost';
 
   @override
+  String get metadataVineStatsLabel => 'Sa Vine';
+
+  @override
+  String metadataVineStatsLine(
+    String loops,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$loops loop · $likes like · $comments komento · $reposts repost';
+  }
+
+  @override
+  String get metadataDivineStatsLabel => 'Sa Divine';
+
+  @override
+  String metadataDivineStatsLine(
+    String views,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$views panonood · $likes like · $comments komento · $reposts repost';
+  }
+
+  @override
   String metadataPostedDateSemantics(String date) {
     return 'Na-post noong $date';
   }

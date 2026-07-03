@@ -1595,6 +1595,32 @@ class AppLocalizationsJa extends AppLocalizations {
   String get metadataRepostsLabel => 'リポスト';
 
   @override
+  String get metadataVineStatsLabel => 'Vineで';
+
+  @override
+  String metadataVineStatsLine(
+    String loops,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$loopsループ · $likes件のいいね · $comments件のコメント · $reposts件のリポスト';
+  }
+
+  @override
+  String get metadataDivineStatsLabel => 'Divineで';
+
+  @override
+  String metadataDivineStatsLine(
+    String views,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$views回再生 · $likes件のいいね · $comments件のコメント · $reposts件のリポスト';
+  }
+
+  @override
   String metadataPostedDateSemantics(String date) {
     return '$dateに投稿';
   }

@@ -1726,6 +1726,32 @@ class AppLocalizationsRo extends AppLocalizations {
   String get metadataRepostsLabel => 'Redistribuiri';
 
   @override
+  String get metadataVineStatsLabel => 'Pe Vine';
+
+  @override
+  String metadataVineStatsLine(
+    String loops,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$loops bucle · $likes aprecieri · $comments comentarii · $reposts redistribuiri';
+  }
+
+  @override
+  String get metadataDivineStatsLabel => 'Pe Divine';
+
+  @override
+  String metadataDivineStatsLine(
+    String views,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$views vizualizări · $likes aprecieri · $comments comentarii · $reposts redistribuiri';
+  }
+
+  @override
   String metadataPostedDateSemantics(String date) {
     return 'Publicat pe $date';
   }

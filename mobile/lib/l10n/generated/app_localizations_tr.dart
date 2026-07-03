@@ -1670,6 +1670,32 @@ class AppLocalizationsTr extends AppLocalizations {
   String get metadataRepostsLabel => 'Yeniden Paylaşımlar';
 
   @override
+  String get metadataVineStatsLabel => 'Vine\'da';
+
+  @override
+  String metadataVineStatsLine(
+    String loops,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$loops döngü · $likes beğeni · $comments yorum · $reposts yeniden paylaşım';
+  }
+
+  @override
+  String get metadataDivineStatsLabel => 'Divine\'da';
+
+  @override
+  String metadataDivineStatsLine(
+    String views,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$views görüntüleme · $likes beğeni · $comments yorum · $reposts yeniden paylaşım';
+  }
+
+  @override
   String metadataPostedDateSemantics(String date) {
     return '$date tarihinde paylaşıldı';
   }

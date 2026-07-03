@@ -1713,6 +1713,32 @@ class AppLocalizationsPl extends AppLocalizations {
   String get metadataRepostsLabel => 'Reposty';
 
   @override
+  String get metadataVineStatsLabel => 'Na Vine';
+
+  @override
+  String metadataVineStatsLine(
+    String loops,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$loops pętli · $likes polubień · $comments komentarzy · $reposts repostów';
+  }
+
+  @override
+  String get metadataDivineStatsLabel => 'Na Divine';
+
+  @override
+  String metadataDivineStatsLine(
+    String views,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$views wyświetleń · $likes polubień · $comments komentarzy · $reposts repostów';
+  }
+
+  @override
   String metadataPostedDateSemantics(String date) {
     return 'Opublikowano $date';
   }

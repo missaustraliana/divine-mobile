@@ -1670,6 +1670,32 @@ class AppLocalizationsAr extends AppLocalizations {
   String get metadataRepostsLabel => 'إعادات النشر';
 
   @override
+  String get metadataVineStatsLabel => 'على Vine';
+
+  @override
+  String metadataVineStatsLine(
+    String loops,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$loops تكرارات · $likes إعجابات · $comments تعليقات · $reposts إعادات نشر';
+  }
+
+  @override
+  String get metadataDivineStatsLabel => 'على Divine';
+
+  @override
+  String metadataDivineStatsLine(
+    String views,
+    String likes,
+    String comments,
+    String reposts,
+  ) {
+    return '$views مشاهدات · $likes إعجابات · $comments تعليقات · $reposts إعادات نشر';
+  }
+
+  @override
   String metadataPostedDateSemantics(String date) {
     return 'نُشر في $date';
   }
