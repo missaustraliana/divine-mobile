@@ -1,5 +1,5 @@
-# ABOUTME: ProGuard/R8 keep rules to prevent release APK loading screen hang caused by bytecode stripping
-# ABOUTME: Preserves Flutter engine, platform channels, SharedPreferences, and reflection-based Android classes
+# ABOUTME: ProGuard/R8 keep rules for release APK code shrinking.
+# ABOUTME: Preserves Flutter engine, platform channels, SharedPreferences, and reflection-based Android classes.
 
 # Allow duplicate classes from java-opentimestamps fat JAR
 # This library bundles Guava, Protobuf, JSR305, and Okio internally
@@ -14,6 +14,11 @@
 # Keep ProofMode classes (cryptographic proof generation library)
 -keep class org.witness.proofmode.** { *; }
 -keep class com.eternitywall.** { *; }
+
+# BouncyCastle JCA provider (ProofMode PGP signing, CSR/cert generation) loads algorithm
+# classes by name via reflection; without this R8 strips them -> runtime crypto failures.
+-keep class org.bouncycastle.** { *; }
+-dontwarn org.bouncycastle.**
 
 # Keep Kotlin metadata and reflection (required for platform channels)
 -keep class kotlin.Metadata { *; }
@@ -50,11 +55,11 @@
 -keep class io.flutter.plugins.** { *; }
 
 # GeneratedPluginRegistrant (auto-registration of Flutter plugins)
-# R8 was stripping this class, preventing plugins from being registered
+# Keep: R8 previously stripped this, breaking plugin registration in release builds.
 -keep class io.flutter.plugins.GeneratedPluginRegistrant { *; }
 
 # SharedPreferences (used in router redirect for TOS check on app startup)
-# R8 was stripping this, causing router redirect to hang forever waiting for response
+# Keep: R8 previously stripped this, hanging the startup router redirect forever.
 -keepclassmembers class * implements android.content.SharedPreferences {
     *;
 }
