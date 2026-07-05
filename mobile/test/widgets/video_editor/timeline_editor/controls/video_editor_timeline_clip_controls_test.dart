@@ -10,18 +10,30 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:models/models.dart' as model;
 import 'package:openvine/blocs/video_editor/clip_editor/clip_editor_bloc.dart';
+import 'package:openvine/blocs/video_editor/timeline_overlay/timeline_overlay_bloc.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/models/divine_video_clip.dart';
+import 'package:openvine/widgets/video_editor/main_editor/video_editor_scope.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/controls/video_editor_timeline_clip_controls.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/controls/video_editor_timeline_controls.dart';
+import 'package:pro_image_editor/pro_image_editor.dart'
+    show ProImageEditorState;
 import 'package:pro_video_editor/pro_video_editor.dart';
 
 class _MockClipEditorBloc extends MockBloc<ClipEditorEvent, ClipEditorState>
     implements ClipEditorBloc {}
 
+class _MockTimelineOverlayBloc
+    extends MockBloc<TimelineOverlayEvent, TimelineOverlayState>
+    implements TimelineOverlayBloc {}
+
 void main() {
   group(TimelineClipControls, () {
     late _MockClipEditorBloc bloc;
+
+    setUpAll(() {
+      registerFallbackValue(const ClipEditorEditingStopped());
+    });
 
     setUp(() {
       bloc = _MockClipEditorBloc();
@@ -45,6 +57,69 @@ void main() {
             ),
           ),
         ),
+      );
+    }
+
+    DivineVideoClip clip(String id) => DivineVideoClip(
+      id: id,
+      video: EditorVideo.file('/tmp/$id.mp4'),
+      duration: const Duration(seconds: 3),
+      recordedAt: DateTime(2025),
+      targetAspectRatio: model.AspectRatio.vertical,
+      originalAspectRatio: 9 / 16,
+    );
+
+    Future<VideoEditorTimelineControls> pumpWithMissingEditorScope(
+      WidgetTester tester,
+    ) async {
+      when(
+        () => bloc.state,
+      ).thenReturn(ClipEditorState(clips: [clip('clip-1'), clip('clip-2')]));
+      final overlayBloc = _MockTimelineOverlayBloc();
+      when(() => overlayBloc.state).thenReturn(const TimelineOverlayState());
+      when(
+        () => overlayBloc.stream,
+      ).thenAnswer((_) => const Stream<TimelineOverlayState>.empty());
+
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              // An unattached editorKey => VideoEditorScope.editor is null,
+              // reproducing a gesture that resolves after the editor route
+              // was popped.
+              body: VideoEditorScope(
+                editorKey: GlobalKey<ProImageEditorState>(),
+                removeAreaKey: GlobalKey(),
+                originalClipAspectRatio: 9 / 16,
+                bodySizeNotifier: ValueNotifier(const Size(400, 600)),
+                zoomMatrixNotifier: ValueNotifier(Matrix4.identity()),
+                fromLibrary: false,
+                onOpenCamera: () {},
+                onOpenClipsEditor: () {},
+                onAddStickers: () {},
+                onOpenMusicLibrary: () {},
+                onOpenVoiceOver: () {},
+                onAddEditTextLayer: ([layer]) async => null,
+                child: MultiBlocProvider(
+                  providers: [
+                    BlocProvider<ClipEditorBloc>.value(value: bloc),
+                    BlocProvider<TimelineOverlayBloc>.value(value: overlayBloc),
+                  ],
+                  child: TimelineClipControls(
+                    playheadPosition: ValueNotifier(Duration.zero),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      return tester.widget<VideoEditorTimelineControls>(
+        find.byType(VideoEditorTimelineControls),
       );
     }
 
@@ -72,9 +147,7 @@ void main() {
 
     testWidgets(
       'dispatches ClipEditorClipReverseRequested when reverse pressed',
-      (
-        tester,
-      ) async {
+      (tester) async {
         final state = ClipEditorState(
           clips: [
             DivineVideoClip(
@@ -128,20 +201,19 @@ void main() {
       },
     );
 
-    testWidgets(
-      'Speed button is hidden while isExtractingAudio',
-      (tester) async {
-        when(
-          () => bloc.state,
-        ).thenReturn(const ClipEditorState(isExtractingAudio: true));
-        await tester.pumpWidget(build());
+    testWidgets('Speed button is hidden while isExtractingAudio', (
+      tester,
+    ) async {
+      when(
+        () => bloc.state,
+      ).thenReturn(const ClipEditorState(isExtractingAudio: true));
+      await tester.pumpWidget(build());
 
-        final controls = tester.widget<VideoEditorTimelineControls>(
-          find.byType(VideoEditorTimelineControls),
-        );
-        expect(controls.onSpeed, isNull);
-      },
-    );
+      final controls = tester.widget<VideoEditorTimelineControls>(
+        find.byType(VideoEditorTimelineControls),
+      );
+      expect(controls.onSpeed, isNull);
+    });
 
     testWidgets('Select button is hidden for a single clip', (tester) async {
       when(() => bloc.state).thenReturn(
@@ -166,20 +238,48 @@ void main() {
       expect(controls.onMultiSelect, isNull);
     });
 
+    final staleEditorActions =
+        <
+          ({
+            String actionLabel,
+            VoidCallback? Function(VideoEditorTimelineControls controls)
+            callback,
+          })
+        >[
+          (actionLabel: 'delete', callback: (controls) => controls.onDelete),
+          (
+            actionLabel: 'duplicate',
+            callback: (controls) => controls.onDuplicated,
+          ),
+          (
+            actionLabel: 'speed change',
+            callback: (controls) => controls.onSpeed,
+          ),
+        ];
+
+    for (final action in staleEditorActions) {
+      testWidgets(
+        '${action.actionLabel} is a no-op when the editor scope is gone',
+        (tester) async {
+          final controls = await pumpWithMissingEditorScope(tester);
+
+          final callback = action.callback(controls);
+          expect(callback, isNotNull);
+          callback!.call();
+          await tester.pump();
+
+          expect(tester.takeException(), isNull);
+          verifyNever(() => bloc.add(any()));
+        },
+      );
+    }
+
     testWidgets('Select button starts multi-select with multiple clips', (
       tester,
     ) async {
-      DivineVideoClip clip(String id) => DivineVideoClip(
-        id: id,
-        video: EditorVideo.file('/tmp/$id.mp4'),
-        duration: const Duration(seconds: 3),
-        recordedAt: DateTime(2025),
-        targetAspectRatio: model.AspectRatio.vertical,
-        originalAspectRatio: 9 / 16,
-      );
-      when(() => bloc.state).thenReturn(
-        ClipEditorState(clips: [clip('clip-1'), clip('clip-2')]),
-      );
+      when(
+        () => bloc.state,
+      ).thenReturn(ClipEditorState(clips: [clip('clip-1'), clip('clip-2')]));
 
       await tester.pumpWidget(build());
 
