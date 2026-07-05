@@ -137,6 +137,33 @@ enum VideoFeedError {
   noFollowedUsers,
 }
 
+/// A just-committed home-feed tuning swipe, surfaced for the UI's Undo
+/// snackbar.
+final class VideoFeedTuningAction extends Equatable {
+  const VideoFeedTuningAction({
+    required this.videoId,
+    required this.direction,
+    required this.sequence,
+    this.publishedEventId,
+  });
+
+  /// Event ID of the swiped video.
+  final String videoId;
+
+  /// The direction that was published.
+  final FeedTuningDirection direction;
+
+  /// Monotonic action id so identical consecutive swipes still notify
+  /// listeners.
+  final int sequence;
+
+  /// Published feed-tuning event id, or `null` when nothing was published.
+  final String? publishedEventId;
+
+  @override
+  List<Object?> get props => [videoId, direction, sequence, publishedEventId];
+}
+
 /// State for the VideoFeedBloc.
 ///
 /// Contains:
@@ -162,6 +189,8 @@ final class VideoFeedBlocState extends Equatable {
     this.paginationCursor,
     this.currentIndex = 0,
     this.enrichmentRevision = 0,
+    this.tuningActionSequence = 0,
+    this.lastTuningAction,
   }) : source =
            source ??
            (mode == FeedMode.following
@@ -229,6 +258,16 @@ final class VideoFeedBlocState extends Equatable {
   /// BLoC can suppress an otherwise valid state emission.
   final int enrichmentRevision;
 
+  /// The most recently committed feed-tuning swipe, for the UI's Undo
+  /// snackbar. `null` until the user tunes a video.
+  final VideoFeedTuningAction? lastTuningAction;
+
+  /// Monotonic counter for feed-tuning actions.
+  ///
+  /// Kept in state so every BLoC mutation remains observable through the state
+  /// stream while still letting identical consecutive swipes notify listeners.
+  final int tuningActionSequence;
+
   /// Whether data has been successfully loaded.
   bool get isLoaded => status == VideoFeedStatus.success;
 
@@ -266,6 +305,8 @@ final class VideoFeedBlocState extends Equatable {
     bool clearPaginationCursor = false,
     int? currentIndex,
     int? enrichmentRevision,
+    int? tuningActionSequence,
+    VideoFeedTuningAction? lastTuningAction,
   }) {
     return VideoFeedBlocState(
       status: status ?? this.status,
@@ -285,6 +326,8 @@ final class VideoFeedBlocState extends Equatable {
           : (paginationCursor ?? this.paginationCursor),
       currentIndex: currentIndex ?? this.currentIndex,
       enrichmentRevision: enrichmentRevision ?? this.enrichmentRevision,
+      tuningActionSequence: tuningActionSequence ?? this.tuningActionSequence,
+      lastTuningAction: lastTuningAction ?? this.lastTuningAction,
     );
   }
 
@@ -303,5 +346,7 @@ final class VideoFeedBlocState extends Equatable {
     paginationCursor,
     currentIndex,
     enrichmentRevision,
+    tuningActionSequence,
+    lastTuningAction,
   ];
 }
