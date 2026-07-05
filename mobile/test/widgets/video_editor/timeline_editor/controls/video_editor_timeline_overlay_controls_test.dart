@@ -12,6 +12,7 @@ import 'package:models/models.dart';
 import 'package:openvine/blocs/video_editor/clip_editor/clip_editor_bloc.dart';
 import 'package:openvine/blocs/video_editor/main_editor/video_editor_main_bloc.dart';
 import 'package:openvine/blocs/video_editor/timeline_overlay/timeline_overlay_bloc.dart';
+import 'package:openvine/blocs/video_editor/tune_editor/video_editor_tune_bloc.dart';
 import 'package:openvine/constants/video_editor_constants.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
 import 'package:openvine/models/timeline_overlay_item.dart';
@@ -174,6 +175,26 @@ void main() {
         type: TimelineOverlayType.sound,
         startTime: Duration.zero,
         endTime: Duration(seconds: 10),
+      );
+
+      await tester.pumpWidget(build(item));
+
+      expect(find.byType(VideoEditorTimelineControls), findsOneWidget);
+      expect(find.text(l10n.videoEditorDeleteLabel), findsOneWidget);
+      expect(find.text(l10n.videoEditorEditLabel), findsOneWidget);
+      expect(find.text(l10n.videoEditorDuplicateLabel), findsOneWidget);
+      expect(find.text(l10n.videoEditorSplitLabel), findsOneWidget);
+      expect(find.text(l10n.videoEditorDoneLabel), findsOneWidget);
+    });
+
+    testWidgets('renders delete/edit/duplicate/split/done for tune', (
+      tester,
+    ) async {
+      const item = TimelineOverlayItem(
+        id: 'set-1',
+        type: TimelineOverlayType.tune,
+        startTime: Duration.zero,
+        endTime: Duration(seconds: 5),
       );
 
       await tester.pumpWidget(build(item));
@@ -487,6 +508,204 @@ void main() {
       );
 
       testWidgets(
+        'tune delete removes every member of the set and deselects',
+        (tester) async {
+          when(() => mockStateManager.activeTuneAdjustments).thenReturn([
+            TuneAdjustmentMatrix(
+              id: 'brightness__set-1',
+              value: 0.2,
+              matrix: const [],
+              meta: const {
+                VideoEditorConstants.tuneSetIdMetaKey: 'set-1',
+                VideoEditorConstants.tuneKindMetaKey: 'brightness',
+              },
+            ),
+            TuneAdjustmentMatrix(
+              id: 'contrast__set-1',
+              value: -0.1,
+              matrix: const [],
+              meta: const {
+                VideoEditorConstants.tuneSetIdMetaKey: 'set-1',
+                VideoEditorConstants.tuneKindMetaKey: 'contrast',
+              },
+            ),
+            TuneAdjustmentMatrix(
+              id: 'brightness__set-2',
+              value: 0.3,
+              matrix: const [],
+              meta: const {
+                VideoEditorConstants.tuneSetIdMetaKey: 'set-2',
+                VideoEditorConstants.tuneKindMetaKey: 'brightness',
+              },
+            ),
+          ]);
+          when(
+            () => mockEditor.addHistory(
+              tuneAdjustments: any(named: 'tuneAdjustments'),
+            ),
+          ).thenAnswer((_) {});
+
+          const item = TimelineOverlayItem(
+            id: 'set-1',
+            type: TimelineOverlayType.tune,
+            startTime: Duration.zero,
+            endTime: Duration(seconds: 5),
+          );
+          await tester.pumpWidget(buildWithEditor(item, mockEditor, mainBloc));
+
+          await tester.tap(
+            find.bySemanticsLabel(
+              l10n.videoEditorDeleteSelectedItemSemanticLabel,
+            ),
+          );
+          await tester.pump();
+
+          final result = verify(
+            () => mockEditor.addHistory(
+              tuneAdjustments: captureAny(named: 'tuneAdjustments'),
+            ),
+          )..called(1);
+          final tunes = result.captured.single as List<TuneAdjustmentMatrix>;
+          expect(tunes.map((t) => t.id), ['brightness__set-2']);
+
+          verify(
+            () => overlayBloc.add(const TimelineOverlayItemSelected(null)),
+          ).called(1);
+        },
+      );
+
+      testWidgets(
+        'tune duplicate copies every member into a new set and selects it',
+        (tester) async {
+          when(() => mockStateManager.activeTuneAdjustments).thenReturn([
+            TuneAdjustmentMatrix(
+              id: 'brightness__set-1',
+              value: 0.2,
+              matrix: const [],
+              meta: const {
+                VideoEditorConstants.tuneSetIdMetaKey: 'set-1',
+                VideoEditorConstants.tuneKindMetaKey: 'brightness',
+              },
+            ),
+            TuneAdjustmentMatrix(
+              id: 'contrast__set-1',
+              value: -0.1,
+              matrix: const [],
+              meta: const {
+                VideoEditorConstants.tuneSetIdMetaKey: 'set-1',
+                VideoEditorConstants.tuneKindMetaKey: 'contrast',
+              },
+            ),
+          ]);
+          when(
+            () => mockEditor.addHistory(
+              tuneAdjustments: any(named: 'tuneAdjustments'),
+            ),
+          ).thenAnswer((_) {});
+
+          const item = TimelineOverlayItem(
+            id: 'set-1',
+            type: TimelineOverlayType.tune,
+            startTime: Duration.zero,
+            endTime: Duration(seconds: 5),
+          );
+          await tester.pumpWidget(buildWithEditor(item, mockEditor, mainBloc));
+
+          await tester.tap(
+            find.bySemanticsLabel(
+              l10n.videoEditorDuplicateSelectedItemSemanticLabel,
+            ),
+          );
+          await tester.pump();
+
+          final result = verify(
+            () => mockEditor.addHistory(
+              tuneAdjustments: captureAny(named: 'tuneAdjustments'),
+            ),
+          )..called(1);
+          final tunes = result.captured.single as List<TuneAdjustmentMatrix>;
+          // Original two + two copies in a new set.
+          expect(tunes, hasLength(4));
+          final copySetIds = tunes
+              .skip(2)
+              .map(
+                (t) => t.meta[VideoEditorConstants.tuneSetIdMetaKey] as String?,
+              )
+              .toSet();
+          expect(copySetIds, hasLength(1));
+          expect(copySetIds.single, isNot('set-1'));
+
+          final selected = verify(
+            () => overlayBloc.add(captureAny()),
+          ).captured.whereType<TimelineOverlayItemSelected>().last;
+          expect(selected.itemId, copySetIds.single);
+        },
+      );
+
+      testWidgets(
+        'tune split cuts every member and moves the tail into a new set',
+        (tester) async {
+          when(() => mockStateManager.activeTuneAdjustments).thenReturn([
+            TuneAdjustmentMatrix(
+              id: 'brightness__set-1',
+              value: 0.2,
+              matrix: const [],
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 5),
+              meta: const {
+                VideoEditorConstants.tuneSetIdMetaKey: 'set-1',
+                VideoEditorConstants.tuneKindMetaKey: 'brightness',
+              },
+            ),
+          ]);
+          when(() => mainBloc.state).thenReturn(
+            const VideoEditorMainState(currentPosition: Duration(seconds: 3)),
+          );
+          when(
+            () => mockEditor.addHistory(
+              tuneAdjustments: any(named: 'tuneAdjustments'),
+            ),
+          ).thenAnswer((_) {});
+
+          const item = TimelineOverlayItem(
+            id: 'set-1',
+            type: TimelineOverlayType.tune,
+            startTime: Duration(seconds: 1),
+            endTime: Duration(seconds: 5),
+          );
+          await tester.pumpWidget(buildWithEditor(item, mockEditor, mainBloc));
+
+          await tester.tap(
+            find.bySemanticsLabel(
+              l10n.videoEditorSplitSelectedClipSemanticLabel,
+            ),
+          );
+          await tester.pump();
+
+          final result = verify(
+            () => mockEditor.addHistory(
+              tuneAdjustments: captureAny(named: 'tuneAdjustments'),
+            ),
+          )..called(1);
+          final tunes = result.captured.single as List<TuneAdjustmentMatrix>;
+          expect(tunes, hasLength(2));
+          // Head keeps set-1 and ends at the split.
+          expect(
+            tunes[0].meta[VideoEditorConstants.tuneSetIdMetaKey],
+            'set-1',
+          );
+          expect(tunes[0].endTime, const Duration(seconds: 3));
+          // Tail is a new set spanning split → original end.
+          expect(
+            tunes[1].meta[VideoEditorConstants.tuneSetIdMetaKey],
+            isNot('set-1'),
+          );
+          expect(tunes[1].startTime, const Duration(seconds: 3));
+          expect(tunes[1].endTime, const Duration(seconds: 5));
+        },
+      );
+
+      testWidgets(
         'sound duplicate serializes updated tracks under the audio history key '
         'and selects the copy',
         (tester) async {
@@ -660,6 +879,73 @@ void main() {
           // clipBloc.state would never be read.
           verify(() => clipBloc.state).called(greaterThanOrEqualTo(1));
           expect(find.byType(LayerAnimationPickerView), findsOneWidget);
+        },
+      );
+
+      testWidgets(
+        'tune edit opens the tune sub-editor seeded with the set id',
+        (tester) async {
+          final tuneBloc = VideoEditorTuneBloc();
+          addTearDown(tuneBloc.close);
+          when(() => mockEditor.openTuneEditor()).thenAnswer((_) {});
+          when(() => mainBloc.state).thenReturn(const VideoEditorMainState());
+
+          const item = TimelineOverlayItem(
+            id: 'set-1',
+            type: TimelineOverlayType.tune,
+            startTime: Duration.zero,
+            endTime: Duration(seconds: 5),
+          );
+          await tester.pumpWidget(
+            ProviderScope(
+              child: MaterialApp(
+                localizationsDelegates: AppLocalizations.localizationsDelegates,
+                supportedLocales: AppLocalizations.supportedLocales,
+                home: Scaffold(
+                  body: MultiBlocProvider(
+                    providers: [
+                      BlocProvider<VideoEditorMainBloc>.value(value: mainBloc),
+                      BlocProvider<TimelineOverlayBloc>.value(
+                        value: overlayBloc,
+                      ),
+                      BlocProvider<VideoEditorTuneBloc>.value(value: tuneBloc),
+                    ],
+                    child: VideoEditorScope(
+                      editorKey: GlobalKey(),
+                      removeAreaKey: GlobalKey(),
+                      originalClipAspectRatio: 9 / 16,
+                      bodySizeNotifier: ValueNotifier(const Size(400, 600)),
+                      zoomMatrixNotifier: ValueNotifier(Matrix4.identity()),
+                      fromLibrary: false,
+                      onOpenCamera: () {},
+                      onOpenClipsEditor: () {},
+                      onAddStickers: () {},
+                      onAddEditTextLayer: ([layer]) async => null,
+                      onOpenMusicLibrary: () {},
+                      onOpenVoiceOver: () {},
+                      editorOverride: mockEditor,
+                      child: const TimelineOverlayControls(item: item),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+
+          await tester.tap(
+            find.bySemanticsLabel(
+              l10n.videoEditorEditSelectedItemSemanticLabel,
+            ),
+          );
+          await tester.pump();
+
+          verify(() => mockEditor.openTuneEditor()).called(1);
+          verify(
+            () => mainBloc.add(
+              const VideoEditorMainOpenSubEditor(SubEditorType.tune),
+            ),
+          ).called(1);
+          expect(tuneBloc.state.editingSetId, 'set-1');
         },
       );
     });

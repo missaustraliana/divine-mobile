@@ -7601,6 +7601,36 @@ class AppLocalizationsKo extends AppLocalizations {
   String get videoEditorFilterLabel => '필터';
 
   @override
+  String get videoEditorTuneLabel => '조정';
+
+  @override
+  String get videoEditorOpenTuneSemanticLabel => '조정 편집기 열기';
+
+  @override
+  String get videoEditorTuneBrightness => '밝기';
+
+  @override
+  String get videoEditorTuneContrast => '대비';
+
+  @override
+  String get videoEditorTuneSaturation => '채도';
+
+  @override
+  String get videoEditorTuneExposure => '노출';
+
+  @override
+  String get videoEditorTuneHue => '색조';
+
+  @override
+  String get videoEditorTuneTemperature => '색온도';
+
+  @override
+  String get videoEditorTuneTint => '틴트';
+
+  @override
+  String get videoEditorTuneFade => '페이드';
+
+  @override
   String get videoEditorAudioLabel => '오디오';
 
   @override

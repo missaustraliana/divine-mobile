@@ -9,6 +9,7 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:models/models.dart';
 import 'package:openvine/constants/video_editor_constants.dart';
+import 'package:openvine/extensions/tune_adjustment_matrix_extensions.dart';
 import 'package:openvine/models/timeline_overlay_item.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
 
@@ -56,6 +57,17 @@ class TimelineOverlayBloc
   }
 
   static const _markerMatchTolerance = Duration(milliseconds: 50);
+
+  /// Adjustment kind → display label for tune timeline bars. Uses the same
+  /// English names the (non-localized) filter bars use; the tune editor's
+  /// bottom bar shows the localized names.
+  static final Map<String, String> _tuneLabels = {
+    for (final t in VideoEditorConstants.tuneAdjustments) t.id: t.label,
+  };
+
+  /// Label for a single tune adjustment, resolved from its recorded kind.
+  static String _tuneKindLabel(TuneAdjustmentMatrix matrix) =>
+      _tuneLabels[matrix.tuneKind] ?? matrix.tuneKind;
 
   void _onUpdateItems(
     TimelineOverlayItemsUpdate event,
@@ -109,6 +121,27 @@ class TimelineOverlayBloc
           ),
     ];
 
+    // Group tune adjustments into sets (one Adjust session → one bar sharing a
+    // time window). Neutral adjustments (value 0) are skipped. Insertion order
+    // is preserved so existing sets keep their rows and a new set lands last.
+    final tuneSets = <String, List<TuneAdjustmentMatrix>>{};
+    for (final tune in event.tuneAdjustments) {
+      if (tune.value == 0) continue;
+      (tuneSets[tune.tuneSetId] ??= []).add(tune);
+    }
+    final tunes = <TimelineOverlayItem>[
+      for (final entry in tuneSets.entries)
+        TimelineOverlayItem(
+          id: entry.key,
+          type: .tune,
+          // All members of a set share the same window (timeline trims apply to
+          // every member), so the first member is representative.
+          startTime: entry.value.first.startTime ?? .zero,
+          endTime: _clampEnd(entry.value.first.endTime ?? total, total),
+          label: entry.value.map(_tuneKindLabel).join(', '),
+        ),
+    ];
+
     final layers = <TimelineOverlayItem>[
       for (final layer in event.layers)
         TimelineOverlayItem(
@@ -124,6 +157,7 @@ class TimelineOverlayBloc
     final newItems = [
       ..._assignRows(sounds),
       ..._assignRows(filters),
+      ..._assignRows(tunes),
       ..._assignRows(layers),
     ];
 

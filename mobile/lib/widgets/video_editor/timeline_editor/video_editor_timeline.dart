@@ -16,6 +16,7 @@ import 'package:openvine/widgets/video_editor/timeline_editor/strips/video_edito
 import 'package:openvine/widgets/video_editor/timeline_editor/video_editor_timeline_geometry.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/video_editor_timeline_header.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/video_editor_timeline_interactive_body.dart';
+import 'package:openvine/widgets/video_editor/tune_editor/tune_set_timeline_ops.dart';
 
 /// Interactive timeline editor for composing video clips.
 ///
@@ -542,6 +543,17 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
 
         _reorderEditorList(filters, filterIdx, targetIdx);
 
+      case .tune:
+        // A tune bar is a *set* of adjustments sharing one window; retime every
+        // member. Order is irrelevant for non-overlapping color filters, so no
+        // reorder.
+        retimeTuneSet(
+          editor,
+          setId: item.id,
+          startTime: startTime,
+          endTime: startTime + duration,
+        );
+
       case .sound:
         final audioTracks = editor.stateManager.audioTracks;
         final audioIdx = audioTracks.indexWhere((e) => e.id == item.id);
@@ -649,6 +661,13 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
           startTime: startTime,
           endTime: endTime,
           skipUpdateHistory: true,
+        );
+      case .tune:
+        retimeTuneSet(
+          editor,
+          setId: item.id,
+          startTime: startTime,
+          endTime: endTime,
         );
       case .sound:
         final audioTracks = editor.stateManager.audioTracks;
@@ -762,6 +781,13 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
           startTime: startTime,
           endTime: startTime + item.duration,
           skipUpdateHistory: true,
+        );
+      case .tune:
+        retimeTuneSet(
+          editor,
+          setId: item.id,
+          startTime: startTime,
+          endTime: startTime + item.duration,
         );
       case .sound:
         final audioTracks = editor.stateManager.audioTracks;

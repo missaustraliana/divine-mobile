@@ -7971,6 +7971,37 @@ class AppLocalizationsBg extends AppLocalizations {
   String get videoEditorFilterLabel => 'Филтър';
 
   @override
+  String get videoEditorTuneLabel => 'Настройка';
+
+  @override
+  String get videoEditorOpenTuneSemanticLabel =>
+      'Отваряне на редактора за настройки';
+
+  @override
+  String get videoEditorTuneBrightness => 'Яркост';
+
+  @override
+  String get videoEditorTuneContrast => 'Контраст';
+
+  @override
+  String get videoEditorTuneSaturation => 'Наситеност';
+
+  @override
+  String get videoEditorTuneExposure => 'Експозиция';
+
+  @override
+  String get videoEditorTuneHue => 'Нюанс';
+
+  @override
+  String get videoEditorTuneTemperature => 'Температура';
+
+  @override
+  String get videoEditorTuneTint => 'Отенък';
+
+  @override
+  String get videoEditorTuneFade => 'Избледняване';
+
+  @override
   String get videoEditorAudioLabel => 'Аудио';
 
   @override

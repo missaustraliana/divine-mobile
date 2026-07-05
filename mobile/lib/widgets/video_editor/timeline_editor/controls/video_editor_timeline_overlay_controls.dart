@@ -4,7 +4,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:openvine/blocs/video_editor/clip_editor/clip_editor_bloc.dart';
 import 'package:openvine/blocs/video_editor/main_editor/video_editor_main_bloc.dart';
 import 'package:openvine/blocs/video_editor/timeline_overlay/timeline_overlay_bloc.dart';
+import 'package:openvine/blocs/video_editor/tune_editor/video_editor_tune_bloc.dart';
 import 'package:openvine/constants/video_editor_constants.dart';
+import 'package:openvine/extensions/tune_adjustment_matrix_extensions.dart';
 import 'package:openvine/extensions/video_editor_history_extensions.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/models/timeline_overlay_item.dart';
@@ -12,8 +14,10 @@ import 'package:openvine/screens/video_editor/video_audio_editor_timing_screen.d
 import 'package:openvine/widgets/video_editor/main_editor/video_editor_scope.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/controls/video_editor_layer_animation_sheet.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/controls/video_editor_timeline_controls.dart';
+import 'package:openvine/widgets/video_editor/tune_editor/open_tune_editor.dart';
 import 'package:pro_image_editor/core/models/layers/layer.dart';
 import 'package:pro_image_editor/features/filter_editor/types/filter_state.dart';
+import 'package:pro_image_editor/features/tune_editor/models/tune_adjustment_matrix.dart';
 
 /// Controls shown when an overlay item is selected.
 /// Adapts buttons based on the overlay type (layer vs filter).
@@ -27,6 +31,7 @@ class TimelineOverlayControls extends StatelessWidget {
     return switch (item.type) {
       .sound => _SoundOverlayControls(item: item),
       .filter => _FilterOverlayControls(item: item),
+      .tune => _TuneOverlayControls(item: item),
       .layer => _LayerOverlayControls(item: item),
     };
   }
@@ -223,6 +228,117 @@ class _FilterOverlayControls extends StatelessWidget {
       TimelineOverlayItemSelected(second.id),
     );
   }
+}
+
+/// Controls for a tune-adjustment *set* overlay: delete, duplicate, split,
+/// and done.
+///
+/// Each bar bundles one Adjust session's adjustments (a set sharing one
+/// window). Delete removes every member; duplicate copies the whole set into a
+/// new set (overlapping until moved); split cuts every member at the playhead,
+/// leaving the tail as a new set. All new sets get a fresh set id so they
+/// render as their own bar.
+class _TuneOverlayControls extends StatelessWidget {
+  const _TuneOverlayControls({required this.item});
+
+  final TimelineOverlayItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return VideoEditorTimelineControls(
+      onDelete: () => _removeTuneSet(context: context),
+      onEdit: () => _editTuneSet(context: context),
+      onDuplicated: () => _duplicateTuneSet(context: context),
+      onSplit: () => _splitTuneSet(context: context),
+      onDone: () => TimelineOverlayControls._deselect(context),
+    );
+  }
+
+  void _editTuneSet({required BuildContext context}) {
+    openTuneEditor(
+      context.read<VideoEditorMainBloc>(),
+      context.read<VideoEditorTuneBloc>(),
+      VideoEditorScope.of(context),
+      editSetId: item.id,
+    );
+  }
+
+  void _removeTuneSet({required BuildContext context}) {
+    final editor = VideoEditorScope.of(context).editor;
+    if (editor == null) return;
+
+    final updated = editor.stateManager.activeTuneAdjustments
+        .where((t) => t.tuneSetId != item.id)
+        .map((e) => e.copy())
+        .toList();
+
+    editor.addHistory(tuneAdjustments: updated);
+
+    context.read<TimelineOverlayBloc>().add(
+      const TimelineOverlayItemSelected(null),
+    );
+  }
+
+  void _duplicateTuneSet({required BuildContext context}) {
+    final editor = VideoEditorScope.of(context).editor;
+    if (editor == null) return;
+
+    final tunes = editor.stateManager.activeTuneAdjustments;
+    final members = tunes.where((t) => t.tuneSetId == item.id);
+    if (members.isEmpty) return;
+
+    final newSetId = TuneSet.newId();
+    final copies = members
+        .map((m) => _reSet(m, newSetId))
+        .toList(growable: false);
+
+    editor.addHistory(
+      tuneAdjustments: [...tunes.map((e) => e.copy()), ...copies],
+    );
+    context.read<TimelineOverlayBloc>().add(
+      TimelineOverlayItemSelected(newSetId),
+    );
+  }
+
+  void _splitTuneSet({required BuildContext context}) {
+    final editor = VideoEditorScope.of(context).editor;
+    if (editor == null) return;
+
+    final splitAt = _validSplitPosition(context, item);
+    if (splitAt == null) return;
+
+    final newSetId = TuneSet.newId();
+    final updated = <TuneAdjustmentMatrix>[];
+    for (final m in editor.stateManager.activeTuneAdjustments) {
+      if (m.tuneSetId != item.id) {
+        updated.add(m.copy());
+        continue;
+      }
+      // Head keeps the set id and ends at the split; tail becomes a new set.
+      updated
+        ..add(m.copyWith(endTime: splitAt))
+        ..add(
+          _reSet(m, newSetId).copyWith(
+            startTime: splitAt,
+            endTime: item.endTime,
+          ),
+        );
+    }
+
+    editor.addHistory(tuneAdjustments: updated);
+    context.read<TimelineOverlayBloc>().add(
+      TimelineOverlayItemSelected(newSetId),
+    );
+  }
+}
+
+/// Copies [m] into the set [setId] with a fresh per-instance id.
+TuneAdjustmentMatrix _reSet(TuneAdjustmentMatrix m, String setId) {
+  final kind = m.tuneKind;
+  return m.copyWith(
+    id: TuneSet.memberId(kind: kind, setId: setId),
+    meta: TuneSet.metaFor(setId: setId, kind: kind),
+  );
 }
 
 /// Controls for sound overlays: delete, edit, duplicate, split, and done.

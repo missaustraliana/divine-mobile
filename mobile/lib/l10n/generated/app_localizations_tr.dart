@@ -7869,6 +7869,36 @@ class AppLocalizationsTr extends AppLocalizations {
   String get videoEditorFilterLabel => 'Filtre';
 
   @override
+  String get videoEditorTuneLabel => 'Ayarla';
+
+  @override
+  String get videoEditorOpenTuneSemanticLabel => 'Ayarlar düzenleyicisini aç';
+
+  @override
+  String get videoEditorTuneBrightness => 'Parlaklık';
+
+  @override
+  String get videoEditorTuneContrast => 'Kontrast';
+
+  @override
+  String get videoEditorTuneSaturation => 'Doygunluk';
+
+  @override
+  String get videoEditorTuneExposure => 'Pozlama';
+
+  @override
+  String get videoEditorTuneHue => 'Renk tonu';
+
+  @override
+  String get videoEditorTuneTemperature => 'Sıcaklık';
+
+  @override
+  String get videoEditorTuneTint => 'Ton';
+
+  @override
+  String get videoEditorTuneFade => 'Solma';
+
+  @override
   String get videoEditorAudioLabel => 'Ses';
 
   @override

@@ -20,7 +20,9 @@ import 'package:openvine/blocs/video_editor/draw_editor/video_editor_draw_bloc.d
 import 'package:openvine/blocs/video_editor/filter_editor/video_editor_filter_bloc.dart';
 import 'package:openvine/blocs/video_editor/main_editor/video_editor_main_bloc.dart';
 import 'package:openvine/blocs/video_editor/timeline_overlay/timeline_overlay_bloc.dart';
+import 'package:openvine/blocs/video_editor/tune_editor/video_editor_tune_bloc.dart';
 import 'package:openvine/constants/video_editor_constants.dart';
+import 'package:openvine/extensions/tune_adjustment_matrix_extensions.dart';
 import 'package:openvine/extensions/video_editor_extensions.dart';
 import 'package:openvine/extensions/video_editor_history_extensions.dart';
 import 'package:openvine/models/divine_video_clip.dart';
@@ -42,6 +44,7 @@ import 'package:openvine/widgets/video_editor/main_editor/video_editor_scope.dar
 import 'package:openvine/widgets/video_editor/main_editor/video_editor_thumbnail.dart';
 import 'package:openvine/widgets/video_editor/sticker_editor/video_editor_sticker.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/video_editor_timeline_geometry.dart';
+import 'package:openvine/widgets/video_editor/tune_editor/tune_set_timeline_ops.dart';
 import 'package:pro_image_editor/pro_image_editor.dart'
     hide AudioTrack, VideoClip;
 import 'package:unified_logger/unified_logger.dart';
@@ -1341,6 +1344,7 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
         TimelineOverlayItemsUpdate(
           layers: editor.activeLayers,
           filters: editor.stateManager.activeFilters,
+          tuneAdjustments: editor.stateManager.activeTuneAdjustments,
           totalVideoDuration: videoDuration,
           audioTracks: editor.stateManager.audioTracks,
           timelineMarkers: editor.stateManager.timelineMarkers,
@@ -1443,6 +1447,21 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
         ),
       );
     });
+  }
+
+  /// Seeds the tune editor's live preview with the edited set's values via its
+  /// public `onChanged` API. The editor seeds itself neutral because set
+  /// members carry unique per-instance ids rather than preset ids.
+  void _seedTuneEditorPreview(VideoEditorScope scope, String? setId) {
+    if (setId == null) return;
+    final tuneEditor = scope.tuneEditor;
+    final active = scope.editor?.stateManager.activeTuneAdjustments;
+    if (tuneEditor == null || active == null) return;
+    seedTuneEditorPreview(
+      tuneEditor: tuneEditor,
+      active: active,
+      setId: setId,
+    );
   }
 
   /// Handles state history changes and exports the history to the provider.
@@ -2157,6 +2176,17 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
               bottomBar: (_, _) => null,
             ),
           ),
+          tuneEditor: TuneEditorConfigs(
+            safeArea: const EditorSafeArea.none(),
+            tuneAdjustmentOptions: VideoEditorConstants.tuneAdjustments,
+            style: const TuneEditorStyle(
+              background: VineTheme.backgroundCamera,
+            ),
+            widgets: TuneEditorWidgets(
+              appBar: (_, _) => null,
+              bottomBar: (_, _) => null,
+            ),
+          ),
           helperLines: HelperLineConfigs(
             style: HelperLineStyle(
               // 1.25 is the pro_image_editor default; we divide by fittedBoxScale
@@ -2268,6 +2298,7 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
                 .paint => .draw,
                 .text => .text,
                 .filter => .filter,
+                .tune => .tune,
                 .sticker => .stickers,
                 _ => null,
               };
@@ -2382,6 +2413,30 @@ class _VideoEditorState extends ConsumerState<_VideoEditor>
               final filterBloc = context.read<VideoEditorFilterBloc>();
               filterBloc.add(const VideoEditorFilterEditorInitialized());
             },
+          ),
+          tuneEditorCallbacks: TuneEditorCallbacks(
+            // A new session starts neutral; an edit session seeds the bottom-bar
+            // sliders from the set being edited. See TuneSet.sessionSeed and
+            // VideoEditorTuneOverlayControls._commit.
+            onInit: () {
+              final tuneBloc = context.read<VideoEditorTuneBloc>();
+              tuneBloc.add(
+                VideoEditorTuneEditorInitialized(
+                  TuneSet.sessionSeed(
+                    scope.editor?.stateManager.activeTuneAdjustments ??
+                        const [],
+                    tuneBloc.state.editingSetId,
+                  ),
+                ),
+              );
+            },
+            // The editor seeds its own preview neutral (set members carry unique
+            // ids, not preset ids), so seed the live preview from the edited set
+            // once the view is up.
+            onAfterViewInit: () => _seedTuneEditorPreview(
+              scope,
+              context.read<VideoEditorTuneBloc>().state.editingSetId,
+            ),
           ),
         ),
       ),
