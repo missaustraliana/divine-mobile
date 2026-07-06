@@ -68,6 +68,15 @@ class CameraController: NSObject {
             audioInterruptedLock.unlock()
         }
     }
+
+    /// Diagnostics for the finished-clip audio log (#4779 family): how many
+    /// audio buffers reached the writer and the loudest peak seen during
+    /// the recording (dBFS, 0 = full scale). A populated track whose peak
+    /// stayed near -160 is the silent-AAC signature. Written on
+    /// `videoOutputQueue`, read once after the writer finished — same loose
+    /// cross-queue convention as `lastVideoFrameEndPTS`.
+    private var appendedAudioBufferCount = 0
+    private var maxAudioPeakDb: Float = -160
     
     private var textureRegistry: FlutterTextureRegistry
 
@@ -396,7 +405,8 @@ class CameraController: NSObject {
             // (captureOutput) see a consistent value.
             self.audioInterrupted = true
             DivineCameraLog.shared.warning(
-                "AVAudioSession interruption began — audio capture paused",
+                "AVAudioSession interruption began — audio capture paused "
+                    + "(reason=\(Self.interruptionReasonDescription(info)))",
                 name: "DivineCamera.AudioSession"
             )
         case .ended:
@@ -422,6 +432,9 @@ class CameraController: NSObject {
             // flag set so the next recording continues without audio.
             sessionQueue.async { [weak self] in
                 guard let self = self else { return }
+                // While paused (app locked / backgrounded) don't re-grab
+                // the mic; resumePreview() recovers instead.
+                guard !self.isPaused else { return }
                 if self.attachAudioToSessionIfNeeded() {
                     self.audioInterrupted = false
                 } else {
@@ -435,7 +448,28 @@ class CameraController: NSObject {
             break
         }
     }
-    
+
+    /// Human-readable interruption reason for the diagnostics log.
+    /// `builtInMicMuted` (iPad hardware mic mute) silently kills capture
+    /// and is invisible without this.
+    private static func interruptionReasonDescription(
+        _ info: [AnyHashable: Any]
+    ) -> String {
+        guard #available(iOS 14.5, *),
+              let raw = info[AVAudioSessionInterruptionReasonKey] as? UInt else {
+            return "unspecified"
+        }
+        if #available(iOS 17.0, *),
+           AVAudioSession.InterruptionReason(rawValue: raw) == .routeDisconnected {
+            return "routeDisconnected"
+        }
+        switch AVAudioSession.InterruptionReason(rawValue: raw) {
+        case .default: return "default"
+        case .builtInMicMuted: return "builtInMicMuted"
+        default: return "raw(\(raw))"
+        }
+    }
+
     /// Gets metadata for the currently active camera lens.
     private func getCurrentLensMetadata() -> [String: Any]? {
         guard let device = videoDevice else {
@@ -1136,7 +1170,12 @@ class CameraController: NSObject {
         // the status bar shortly after the camera page opens (TikTok,
         // Instagram, and Snapchat all behave the same way).
         sessionQueue.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            _ = self?.attachAudioToSessionIfNeeded()
+            // Skip when the preview was paused before the pre-build fired
+            // (locked / backgrounded within 1s of the first frame) —
+            // attaching would grab the mic while the app isn't visible.
+            // resumePreview() / startRecording() attach on demand instead.
+            guard let self = self, !self.isPaused else { return }
+            _ = self.attachAudioToSessionIfNeeded()
         }
     }
     
@@ -2079,6 +2118,27 @@ class CameraController: NSObject {
                 )
             }
 
+            // One state line per recording so a silent clip can be traced
+            // to its cause: no input in the route, a system-level input
+            // mute, or a category another player stole.
+            let session = AVAudioSession.sharedInstance()
+            let inputs = session.currentRoute.inputs
+                .map(\.portType.rawValue).joined(separator: "+")
+            let outputs = session.currentRoute.outputs
+                .map(\.portType.rawValue).joined(separator: "+")
+            var inputMuted = "n/a"
+            if #available(iOS 17.0, *) {
+                inputMuted = AVAudioApplication.shared.isInputMuted
+                    ? "true" : "false"
+            }
+            DivineCameraLog.shared.info(
+                "Recording audio state: ready=\(audioReady), "
+                    + "category=\(session.category.rawValue), "
+                    + "inputs=[\(inputs)], outputs=[\(outputs)], "
+                    + "inputMuted=\(inputMuted)",
+                name: "DivineCamera.Recording"
+            )
+
             self.videoOutputQueue.async { [weak self] in
                 guard let self = self else { return }
                 self.startRecordingAfterAudioReady(
@@ -2206,6 +2266,8 @@ class CameraController: NSObject {
             self.isWriterSessionStarted = false  // Will be set to true when first frame is received
             self.lastVideoFrameEndPTS = nil
             self.recordingStartTime = Date()
+            self.appendedAudioBufferCount = 0
+            self.maxAudioPeakDb = -160
 
             // Check and enable auto-flash if needed
             self.checkAndEnableAutoFlash()
@@ -2341,14 +2403,16 @@ class CameraController: NSObject {
                         // reports (#4779): inspect the finished file rather than
                         // trusting the in-flight audioReady flag.
                         let hasAudioTrack = !asset.tracks(withMediaType: .audio).isEmpty
+                        let audioStats = "audioBuffers=\(self.appendedAudioBufferCount), "
+                            + "maxPeakDb=\(String(format: "%.1f", self.maxAudioPeakDb))"
                         if hasAudioTrack {
                             DivineCameraLog.shared.info(
-                                "Recording completed with audio track (durationMs=\(duration))",
+                                "Recording completed with audio track (durationMs=\(duration), \(audioStats))",
                                 name: "DivineCamera.Recording"
                             )
                         } else {
                             DivineCameraLog.shared.warning(
-                                "Recording completed WITHOUT audio track (durationMs=\(duration))",
+                                "Recording completed WITHOUT audio track (durationMs=\(duration), \(audioStats))",
                                 name: "DivineCamera.Recording"
                             )
                         }
@@ -2379,17 +2443,81 @@ class CameraController: NSObject {
                     self.recordingStartTime = nil
                     self.isWriterSessionStarted = false
                     self.lastVideoFrameEndPTS = nil
+
+                    // pausePreview() keeps the mic attached while a
+                    // recording is draining. If the preview is still
+                    // paused now (app locked mid-recording), release the
+                    // mic so the lock screen stops showing the recording
+                    // indicator.
+                    if self.isPaused {
+                        self.sessionQueue.async { [weak self] in
+                            guard let self = self,
+                                  self.isPaused,
+                                  !self.isRecording else { return }
+                            self.releaseAudioForPause()
+                        }
+                    }
                 }
             }
         }
     }
 
+    /// Releases the microphone while the preview is paused.
+    ///
+    /// The dedicated audio capture session normally keeps running between
+    /// recordings so record-start stays instant, but holding it across an
+    /// app pause leaves the app owning the mic — iOS surfaces that as a
+    /// recording indicator on the lock screen. Stop the capture session
+    /// BEFORE deactivating the shared AVAudioSession; the reverse order
+    /// leaves a stale route delivering digital-silence buffers (see
+    /// attachAudioToSessionIfNeeded()).
+    ///
+    /// Must run on `sessionQueue`.
+    private func releaseAudioForPause() {
+        audioCaptureSession?.stopRunning()
+        do {
+            try AVAudioSession.sharedInstance().setActive(
+                false,
+                options: .notifyOthersOnDeactivation
+            )
+        } catch {
+            // A failing deactivation (session busy / insufficient priority) is
+            // exactly the "mic not released" symptom this path guards against,
+            // so surface it instead of swallowing. stopRunning() above is the
+            // primary indicator-clearer, so this stays a warning.
+            DivineCameraLog.shared.warning(
+                "Failed to deactivate audio session on pause — mic may stay "
+                    + "held (error=\(error.localizedDescription))",
+                name: "DivineCamera.AudioSession"
+            )
+        }
+        DivineCameraLog.shared.info(
+            "Released mic for pause (audio capture stopped, session inactive)",
+            name: "DivineCamera.AudioSession"
+        )
+    }
+
     /// Pauses the camera preview.
-    func pausePreview() {
+    ///
+    /// Pass `releaseAudio: false` for transient foreground interruptions
+    /// (iOS `.inactive` from a Control Center / app-switcher pull) to stop
+    /// only the video session and leave the shared audio session running —
+    /// releasing it there would signal other apps to resume and then re-cut
+    /// their playback on every pull. `releaseAudio: true` (genuine
+    /// background) additionally frees the mic so the lock screen stops
+    /// showing the recording indicator.
+    func pausePreview(releaseAudio: Bool = true) {
         disableScreenFlash()
         isPaused = true
         sessionQueue.async { [weak self] in
-            self?.captureSession?.stopRunning()
+            guard let self = self else { return }
+            self.captureSession?.stopRunning()
+            // Keep the mic during an active recording — the writer is
+            // still draining; stopRecording() releases it if the preview
+            // is still paused once the file is finalized.
+            if releaseAudio, !self.isRecording {
+                self.releaseAudioForPause()
+            }
         }
     }
     
@@ -2403,11 +2531,23 @@ class CameraController: NSObject {
         }
         
         sessionQueue.async { [weak self] in
-            self?.captureSession?.startRunning()
-            
+            guard let self = self else { return }
+            self.captureSession?.startRunning()
+
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 completion(self.getCameraState(), nil)
+            }
+
+            // Restore the audio path released by releaseAudioForPause().
+            // A successful attach proves the path is live again, so also
+            // clear a stale interruption flag — iOS delivers no `.ended`
+            // for lock-screen interruptions, and a stuck flag would drop
+            // the audio track from every later recording in this session.
+            // Skip the never-built case (paused before the pre-build
+            // fired); startRecording() builds on demand.
+            if self.audioCaptureSession != nil, self.attachAudioToSessionIfNeeded() {
+                self.audioInterrupted = false
             }
         }
     }
@@ -2649,6 +2789,10 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
                 // Only append audio after session has started
                 if isWriterSessionStarted && writer.status == .writing && audioInput.isReadyForMoreMediaData {
                     audioInput.append(sampleBuffer)
+                    appendedAudioBufferCount += 1
+                    for channel in connection.audioChannels {
+                        maxAudioPeakDb = max(maxAudioPeakDb, channel.peakHoldLevel)
+                    }
                 }
             }
         }
