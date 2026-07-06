@@ -14,12 +14,31 @@ Future<String> getSharedDatabasePath() async {
 }
 
 /// Stub implementation - will be replaced by conditional imports
-QueryExecutor openEncryptedConnection({required String rawKeyHex}) {
+QueryExecutor openEncryptedConnection({
+  required String rawKeyHex,
+  String? databasePath,
+}) {
   throw UnsupportedError('No database implementation found for this platform');
 }
 
 /// Stub implementation - will be replaced by conditional imports
 Future<bool> encryptedDatabaseOpensWithKey({
+  required String rawKeyHex,
+  String? databasePath,
+}) async {
+  throw UnsupportedError('No database implementation found for this platform');
+}
+
+/// Stub implementation - will be replaced by conditional imports
+Future<bool> salvageCorruptEncryptedDatabase({
+  required String rawKeyHex,
+  String? databasePath,
+}) async {
+  throw UnsupportedError('No database implementation found for this platform');
+}
+
+/// Stub implementation - will be replaced by conditional imports
+Future<bool> encryptedDatabaseKeyDecrypts({
   required String rawKeyHex,
   String? databasePath,
 }) async {

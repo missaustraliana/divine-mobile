@@ -25,7 +25,10 @@ Future<String> getSharedDatabasePath() async {
 /// Web at-rest encryption is deferred behind the OPFS migration (#373). The
 /// app guards encryption with `kIsWeb`, so this is never reached at runtime —
 /// it exists only so app code compiles for web. See the native variant.
-QueryExecutor openEncryptedConnection({required String rawKeyHex}) {
+QueryExecutor openEncryptedConnection({
+  required String rawKeyHex,
+  String? databasePath,
+}) {
   throw UnsupportedError(
     'Native at-rest encryption is not supported on web',
   );
@@ -34,6 +37,28 @@ QueryExecutor openEncryptedConnection({required String rawKeyHex}) {
 /// Web never opens native encrypted databases; startup skips DB encryption
 /// there.
 Future<bool> encryptedDatabaseOpensWithKey({
+  required String rawKeyHex,
+  String? databasePath,
+}) async {
+  throw UnsupportedError(
+    'Native at-rest encryption is not supported on web',
+  );
+}
+
+/// Corruption salvage is native-only; startup skips DB encryption on web.
+/// Never reached at runtime (guarded by `kIsWeb` in the app).
+Future<bool> encryptedDatabaseKeyDecrypts({
+  required String rawKeyHex,
+  String? databasePath,
+}) async {
+  throw UnsupportedError(
+    'Native at-rest encryption is not supported on web',
+  );
+}
+
+/// Corruption salvage is native-only; startup skips DB encryption on web.
+/// Never reached at runtime (guarded by `kIsWeb` in the app).
+Future<bool> salvageCorruptEncryptedDatabase({
   required String rawKeyHex,
   String? databasePath,
 }) async {
