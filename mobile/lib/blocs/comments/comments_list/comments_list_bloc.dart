@@ -48,6 +48,7 @@ class CommentsListBloc extends Bloc<CommentsListEvent, CommentsListState> {
     on<CommentsInitialBackfillCompleted>(_onInitialBackfillCompleted);
     on<NewCommentsAcknowledged>(_onNewCommentsAcknowledged);
     on<CommentsListErrorCleared>(_onErrorCleared);
+    on<CommentsScrollHandled>(_onScrollHandled);
     on<OptimisticCommentInserted>(_onOptimisticCommentInserted);
     on<OptimisticCommentConfirmed>(_onOptimisticCommentConfirmed);
     on<OptimisticCommentRolledBack>(_onOptimisticCommentRolledBack);
@@ -266,6 +267,14 @@ class CommentsListBloc extends Bloc<CommentsListEvent, CommentsListState> {
     emit(state.copyWith(clearError: true));
   }
 
+  void _onScrollHandled(
+    CommentsScrollHandled event,
+    Emitter<CommentsListState> emit,
+  ) {
+    if (state.scrollToCommentId == null) return;
+    emit(state.copyWith(clearScrollTo: true));
+  }
+
   void _onNewCommentReceived(
     NewCommentReceived event,
     Emitter<CommentsListState> emit,
@@ -340,10 +349,24 @@ class CommentsListBloc extends Bloc<CommentsListEvent, CommentsListState> {
     OptimisticCommentInserted event,
     Emitter<CommentsListState> emit,
   ) {
-    _emitStore(emit, {
+    // Flag the just-inserted comment for scroll-into-view only when it is a
+    // reply: a reply nests under an (often older) parent and would otherwise
+    // render off-screen, so the poster thinks the post failed and retries
+    // (#5854). A new top-level comment already lands at the visible top, so it
+    // needs no scroll. The UI scrolls to the flagged id then acks via
+    // [CommentsScrollHandled].
+    final updated = {
       ...state.commentsById,
       event.placeholder.id: event.placeholder,
-    });
+    };
+    final isReply = event.placeholder.replyToEventId != null;
+    emit(
+      state.copyWith(
+        commentsById: updated,
+        replyCountsByCommentId: computeReplyCounts(updated),
+        scrollToCommentId: isReply ? event.placeholder.id : null,
+      ),
+    );
   }
 
   void _onOptimisticCommentConfirmed(

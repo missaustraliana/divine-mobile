@@ -3,6 +3,7 @@
 
 import 'dart:async';
 
+import 'package:comments_repository/comments_repository.dart';
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -56,6 +57,35 @@ String _reactionsErrorToString(AppLocalizations l10n, ReactionsError error) {
     ReactionsError.blockFailed => l10n.commentsErrorBlockFailed,
     ReactionsError.deleteCommentFailed => l10n.commentsErrorDeleteFailed,
   };
+}
+
+/// Normalizes comment text for duplicate detection: trims, collapses internal
+/// whitespace, and lowercases. The real #5854 duplicates differ only in
+/// whitespace ("box of  krayshawns" vs "box of krayshawns"), so an exact-match
+/// guard would leak — this catches them.
+String _normalizeCommentText(String text) =>
+    text.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+
+/// Returns true only for the resend window #5854 needs to suppress: an
+/// in-flight optimistic reply by the same author, to the same parent, with the
+/// same normalized text. Top-level comments and confirmed comments are allowed
+/// so intentional repeated reactions are not silently dropped.
+bool isDuplicatePendingReplySubmission({
+  required Iterable<Comment> comments,
+  required String content,
+  required String authorPubkey,
+  String? parentCommentId,
+}) {
+  if (parentCommentId == null) return false;
+
+  final normalized = _normalizeCommentText(content);
+  return comments.any(
+    (c) =>
+        c.id.startsWith('pending_comment_') &&
+        c.authorPubkey == authorPubkey &&
+        c.replyToEventId == parentCommentId &&
+        _normalizeCommentText(c.content) == normalized,
+  );
 }
 
 /// Dynamic title widget that shows comment count and a "# new" pill
@@ -206,6 +236,21 @@ abstract final class CommentsScreen {
                       ),
                       ...followRepository.followingPubkeys,
                     ],
+                    // Live duplicate check against the canonical store so a
+                    // re-sent reply doesn't publish a duplicate (#5854).
+                    isDuplicateSubmission:
+                        ({
+                          required String content,
+                          required String authorPubkey,
+                          String? parentCommentId,
+                        }) {
+                          return isDuplicatePendingReplySubmission(
+                            comments: listBloc.state.commentsById.values,
+                            content: content,
+                            authorPubkey: authorPubkey,
+                            parentCommentId: parentCommentId,
+                          );
+                        },
                   );
                 },
               ),
