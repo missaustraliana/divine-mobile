@@ -103,6 +103,22 @@ extension VideoEventAppExtensions on VideoEvent {
     }
   }
 
+  /// Whether the event explicitly advertises only the raw Blossom blob URL.
+  ///
+  /// Fresh direct uploads can publish before `/720p.mp4` or HLS derivatives
+  /// exist. When the event's `imeta` contains a single raw
+  /// `https://media.divine.video/{sha256}` URL, prefer that proven source for
+  /// initial playback instead of speculatively probing derived variants.
+  bool get hasRawOnlyDivineImetaUrl {
+    final url = videoUrl;
+    if (url == null || url.isEmpty || !hasBareDivineHashPath) {
+      return false;
+    }
+
+    final imetaUrls = imetaVideoUrls;
+    return imetaUrls.length == 1 && imetaUrls.single == url;
+  }
+
   /// Check if we should show the "Not Divine" badge.
   ///
   /// Shows badge for content that is:
@@ -217,6 +233,13 @@ extension VideoEventAppExtensions on VideoEvent {
     // Classic Vine originals are 480p or lower — serve the raw blob directly.
     // Transcoded 720p variants are pointless upscales and may not exist.
     if (isOriginalVine) return '$_divineMediaBase/$hash';
+
+    // Direct Blossom uploads that only advertise the raw blob should start
+    // from that actual published URL. Derived MP4/HLS variants may not exist
+    // yet and can generate avoidable parser errors before falling back. This
+    // intentionally precedes the developer format override below: forcing a
+    // derived variant on a raw-only upload would just 404.
+    if (hasRawOnlyDivineImetaUrl) return videoUrl;
 
     // Developer format override takes priority
     final override = videoFormatPreference.format;
