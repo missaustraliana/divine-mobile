@@ -12,8 +12,13 @@ import 'package:go_router/go_router.dart';
 import 'package:models/models.dart';
 import 'package:openvine/blocs/my_profile/my_profile_bloc.dart';
 import 'package:openvine/blocs/other_profile/other_profile_bloc.dart';
+import 'package:openvine/features/feature_flags/models/feature_flag.dart';
+import 'package:openvine/features/feature_flags/providers/feature_flag_providers.dart';
+import 'package:openvine/features/monetization/monetization_analytics.dart';
+import 'package:openvine/features/monetization/monetization_storefront_policy.dart';
 import 'package:openvine/features/people_lists/view/people_list_membership_indicator.dart';
 import 'package:openvine/l10n/l10n.dart';
+import 'package:openvine/providers/analytics_providers.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/nip05_verification_provider.dart';
 import 'package:openvine/providers/shared_preferences_provider.dart';
@@ -33,6 +38,7 @@ import 'package:openvine/widgets/linkified_text/linkified_text_widgets.dart';
 import 'package:openvine/widgets/profile/profile_action_buttons_widget.dart';
 import 'package:openvine/widgets/profile/profile_actions_sheet/profile_actions_sheet.dart';
 import 'package:openvine/widgets/profile/profile_stats_row_widget.dart';
+import 'package:openvine/widgets/profile/profile_support_sheet.dart';
 import 'package:openvine/widgets/profile/profile_website_row.dart';
 import 'package:openvine/widgets/profile/verified_accounts_row.dart';
 import 'package:openvine/widgets/user_avatar.dart';
@@ -185,7 +191,10 @@ class _ProfileHeaderWidgetState extends ConsumerState<ProfileHeaderWidget> {
         // identity shimmers until the bloc is wired in.
         selection = (profile: null, isInitialOrLoading: true);
       }
-      effectiveProfile = selection.profile ?? widget.profile;
+      effectiveProfile = _bestProfileForHeader(
+        selection.profile,
+        widget.profile,
+      );
       // Skeleton on the user's own profile is appropriate only while we
       // genuinely have nothing to show. As soon as a cached profile is
       // available, fall through to render the real identity. After
@@ -355,6 +364,11 @@ class _ProfileHeaderWidgetState extends ConsumerState<ProfileHeaderWidget> {
               ],
             ),
           ),
+          _ProfileSupportButton(
+            links: monetizationLinksForCurrentStorefront(
+              effectiveProfile?.enabledMonetizationLinks ?? const [],
+            ),
+          ),
           if (!widget.isOwnProfile) ...[
             PeopleListMembershipIndicator(pubkey: widget.userIdHex),
             const SizedBox(height: 16),
@@ -384,6 +398,40 @@ class _ProfileHeaderWidgetState extends ConsumerState<ProfileHeaderWidget> {
         ],
       ),
     );
+  }
+
+  UserProfile? _bestProfileForHeader(
+    UserProfile? blocProfile,
+    UserProfile? suppliedProfile,
+  ) {
+    if (blocProfile == null) return suppliedProfile;
+    if (suppliedProfile == null) return blocProfile;
+
+    final blocHasMonetization = blocProfile.rawData.containsKey(
+      divineMonetizationLinksKey,
+    );
+    final suppliedHasMonetization = suppliedProfile.rawData.containsKey(
+      divineMonetizationLinksKey,
+    );
+
+    // Funnelcake REST profiles do not include Divine's custom Kind 0 fields.
+    // Prefer a relay/cache profile that has the monetization key over a REST
+    // projection that cannot carry it, even when the REST timestamp is newer.
+    if (suppliedHasMonetization &&
+        !blocHasMonetization &&
+        blocProfile.eventId.startsWith('rest-')) {
+      return suppliedProfile;
+    }
+    if (blocHasMonetization &&
+        !suppliedHasMonetization &&
+        suppliedProfile.eventId.startsWith('rest-')) {
+      return blocProfile;
+    }
+
+    if (suppliedProfile.createdAt.isAfter(blocProfile.createdAt)) {
+      return suppliedProfile;
+    }
+    return blocProfile;
   }
 
   void _showSessionExpiredSheet(
@@ -428,6 +476,48 @@ class _ProfileHeaderWidgetState extends ConsumerState<ProfileHeaderWidget> {
       scrollable: false,
       showHeaderDivider: false,
       body: ProfileActionsSheetContent(actions: actions),
+    );
+  }
+}
+
+class _ProfileSupportButton extends ConsumerWidget {
+  const _ProfileSupportButton({required this.links});
+
+  final List<MonetizationLink> links;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (links.isEmpty) return const SizedBox.shrink();
+    final enabled = ref.watch(
+      isFeatureEnabledProvider(FeatureFlag.profileMonetizationLinks),
+    );
+    if (!enabled) return const SizedBox.shrink();
+
+    final analytics = ref.watch(analyticsEventSinkProvider);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Align(
+        child: DivineButton(
+          key: const Key('profile-support-button'),
+          leadingIcon: .heart,
+          type: .secondary,
+          size: .tiny,
+          label: usesAppleAppStoreTipPolicy
+              ? context.l10n.profileTipButtonLabel
+              : context.l10n.profileSupportButtonLabel,
+          onPressed: () {
+            trackMonetizationAffordanceTapped(
+              analytics: analytics,
+              links: links,
+            );
+            showProfileSupportSheet(
+              context: context,
+              links: links,
+              analytics: analytics,
+            );
+          },
+        ),
+      ),
     );
   }
 }

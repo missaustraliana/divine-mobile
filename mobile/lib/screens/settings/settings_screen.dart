@@ -14,6 +14,7 @@ import 'package:openvine/blocs/settings_account/settings_account_cubit.dart';
 import 'package:openvine/features/feature_flags/models/feature_flag.dart';
 import 'package:openvine/features/feature_flags/providers/feature_flag_providers.dart';
 import 'package:openvine/features/feature_flags/screens/feature_flag_screen.dart';
+import 'package:openvine/features/monetization/monetization_storefront_policy.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/models/known_account.dart';
 import 'package:openvine/providers/app_providers.dart';
@@ -31,6 +32,7 @@ import 'package:openvine/screens/safety_settings_screen.dart';
 import 'package:openvine/screens/settings/general_settings_screen.dart';
 import 'package:openvine/screens/settings/invites_screen.dart';
 import 'package:openvine/screens/settings/legal_screen.dart';
+import 'package:openvine/screens/settings/monetization_links_settings_screen.dart';
 import 'package:openvine/screens/settings/nostr_settings_screen.dart';
 import 'package:openvine/screens/settings/support_center_screen.dart';
 import 'package:openvine/services/auth_service.dart' hide UserProfile;
@@ -176,6 +178,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final accountSwitchingEnabled = ref.watch(
       isFeatureEnabledProvider(FeatureFlag.accountSwitching),
     );
+    final monetizationLinksEnabled = ref.watch(
+      isFeatureEnabledProvider(FeatureFlag.profileMonetizationLinks),
+    );
+    final appStoreTipPolicy = usesAppleAppStoreTipPolicy;
     return BlocProvider.value(
       value: _accountCubit,
       child: Scaffold(
@@ -219,6 +225,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   divineIcon: DivineIconName.trendUp,
                   onTap: () => context.push(CreatorAnalyticsScreen.path),
                 ),
+                if (isAuthenticated && monetizationLinksEnabled)
+                  _SettingsTile(
+                    title: appStoreTipPolicy
+                        ? context.l10n.monetizationTipsSettingsTitle
+                        : context.l10n.monetizationSettingsTitle,
+                    divineIcon: DivineIconName.heart,
+                    subtitle: appStoreTipPolicy
+                        ? context.l10n.monetizationTipsSettingsSubtitle
+                        : context.l10n.monetizationSettingsSubtitle,
+                    onTap: () =>
+                        context.push(MonetizationLinksSettingsScreen.path),
+                  ),
                 _SettingsTile(
                   title: context.l10n.settingsSupportCenter,
                   icon: Icons.support_agent,

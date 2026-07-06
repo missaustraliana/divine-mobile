@@ -19,6 +19,7 @@ import 'package:openvine/blocs/my_profile/my_profile_bloc.dart';
 import 'package:openvine/blocs/others_followers/others_followers_bloc.dart';
 import 'package:openvine/features/feature_flags/models/feature_flag.dart';
 import 'package:openvine/features/feature_flags/providers/feature_flag_providers.dart';
+import 'package:openvine/features/monetization/monetization_storefront_policy.dart';
 import 'package:openvine/features/people_lists/bloc/people_lists_bloc.dart';
 import 'package:openvine/features/people_lists/view/people_list_membership_indicator.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
@@ -236,6 +237,9 @@ void main() {
       String? about,
       String? picture,
       String? nip05,
+      Map<String, dynamic> rawData = const {},
+      DateTime? createdAt,
+      String eventId = 'test-event',
     }) {
       return UserProfile(
         pubkey: testUserHex,
@@ -245,14 +249,15 @@ void main() {
           'about': ?about,
           'picture': ?picture,
           'nip05': ?nip05,
+          ...rawData,
         },
         displayName: displayName,
         name: name,
         about: about,
         picture: picture,
         nip05: nip05,
-        createdAt: DateTime.now(),
-        eventId: 'test-event',
+        createdAt: createdAt ?? DateTime.now(),
+        eventId: eventId,
       );
     }
 
@@ -260,6 +265,10 @@ void main() {
       mockFollowRepository = MockFollowRepository();
       mockNostrClient = MockNostrClient();
       await CacheSync.init(dao: _FakeCacheDao());
+    });
+
+    tearDown(() {
+      debugUsesAppleAppStoreTipPolicyOverride = null;
     });
 
     setUpAll(() async {
@@ -289,6 +298,7 @@ void main() {
       Stream<BackgroundPublishState>? backgroundPublishStream,
       List<ProfileBadgeViewData> acceptedProfileBadges = const [],
       MockGoRouter? goRouter,
+      bool monetizationLinksEnabled = false,
     }) {
       final authService = MockAuthService(
         isAnonymousValue: isAnonymous,
@@ -393,6 +403,9 @@ void main() {
           isFeatureEnabledProvider(
             FeatureFlag.curatedLists,
           ).overrideWith((ref) => curatedListsEnabled),
+          isFeatureEnabledProvider(
+            FeatureFlag.profileMonetizationLinks,
+          ).overrideWith((ref) => monetizationLinksEnabled),
         ],
         child: MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -740,6 +753,181 @@ void main() {
         expect(find.text('Seeded bio'), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'shows support affordance from a newer supplied own-profile profile',
+      (tester) async {
+        final staleProfile = createTestProfile(
+          displayName: 'Creator',
+          createdAt: DateTime.utc(2026),
+          eventId: 'old-kind0',
+        );
+        final savedProfile = createTestProfile(
+          displayName: 'Creator',
+          createdAt: DateTime.utc(2026, 1, 1, 0, 1),
+          eventId: 'new-kind0',
+          rawData: {
+            divineMonetizationLinksKey: [
+              const MonetizationLink(
+                provider: MonetizationLinkProvider.cashApp,
+                category: MonetizationLinkCategory.tip,
+                url: r'https://cash.app/$creator',
+                enabled: true,
+              ).toJson(),
+            ],
+          },
+        );
+
+        await tester.pumpWidget(
+          buildTestWidget(
+            userIdHex: testUserHex,
+            isOwnProfile: true,
+            profile: staleProfile,
+            suppliedProfile: savedProfile,
+            monetizationLinksEnabled: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('profile-support-button')), findsOneWidget);
+      },
+    );
+
+    testWidgets('shows support affordance for other profiles with links', (
+      tester,
+    ) async {
+      final creatorProfile = createTestProfile(
+        displayName: 'Creator',
+        about: 'Creator bio',
+        rawData: {
+          divineMonetizationLinksKey: [
+            const MonetizationLink(
+              provider: MonetizationLinkProvider.patreon,
+              category: MonetizationLinkCategory.subscription,
+              url: 'https://www.patreon.com/creator',
+              enabled: true,
+            ).toJson(),
+          ],
+        },
+      );
+
+      await tester.pumpWidget(
+        buildTestWidget(
+          userIdHex: testUserHex,
+          isOwnProfile: false,
+          suppliedProfile: creatorProfile,
+          monetizationLinksEnabled: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('profile-support-button')), findsOneWidget);
+      expect(find.text('Support'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('Support')).dy,
+        greaterThan(tester.getBottomLeft(find.text('Creator bio')).dy),
+      );
+      expect(
+        tester.getTopLeft(find.text('Support')).dy,
+        lessThan(tester.getTopLeft(find.text('Likes')).dy),
+      );
+    });
+
+    testWidgets('hides support affordance when monetization flag is off', (
+      tester,
+    ) async {
+      final creatorProfile = createTestProfile(
+        displayName: 'Creator',
+        rawData: {
+          divineMonetizationLinksKey: [
+            const MonetizationLink(
+              provider: MonetizationLinkProvider.cashApp,
+              category: MonetizationLinkCategory.tip,
+              url: r'https://cash.app/$creator',
+              enabled: true,
+            ).toJson(),
+          ],
+        },
+      );
+
+      await tester.pumpWidget(
+        buildTestWidget(
+          userIdHex: testUserHex,
+          isOwnProfile: false,
+          suppliedProfile: creatorProfile,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('profile-support-button')), findsNothing);
+    });
+
+    testWidgets(
+      'hides subscription-only support links on iOS storefronts',
+      (tester) async {
+        debugUsesAppleAppStoreTipPolicyOverride = true;
+
+        final creatorProfile = createTestProfile(
+          displayName: 'Creator',
+          about: 'Creator bio',
+          rawData: {
+            divineMonetizationLinksKey: [
+              const MonetizationLink(
+                provider: MonetizationLinkProvider.patreon,
+                category: MonetizationLinkCategory.subscription,
+                url: 'https://www.patreon.com/creator',
+                enabled: true,
+              ).toJson(),
+            ],
+          },
+        );
+
+        await tester.pumpWidget(
+          buildTestWidget(
+            userIdHex: testUserHex,
+            isOwnProfile: false,
+            suppliedProfile: creatorProfile,
+            monetizationLinksEnabled: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('profile-support-button')), findsNothing);
+        expect(find.text('Support'), findsNothing);
+      },
+    );
+
+    testWidgets('uses tip affordance copy on iOS storefronts', (tester) async {
+      debugUsesAppleAppStoreTipPolicyOverride = true;
+
+      final creatorProfile = createTestProfile(
+        displayName: 'Creator',
+        rawData: {
+          divineMonetizationLinksKey: [
+            const MonetizationLink(
+              provider: MonetizationLinkProvider.cashApp,
+              category: MonetizationLinkCategory.tip,
+              url: r'https://cash.app/$creator',
+              enabled: true,
+            ).toJson(),
+          ],
+        },
+      );
+
+      await tester.pumpWidget(
+        buildTestWidget(
+          userIdHex: testUserHex,
+          isOwnProfile: false,
+          suppliedProfile: creatorProfile,
+          monetizationLinksEnabled: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('profile-support-button')), findsOneWidget);
+      expect(find.text('Tip'), findsOneWidget);
+      expect(find.text('Support'), findsNothing);
+    });
 
     testWidgets('displays stats from ProfileStats when provided', (
       tester,

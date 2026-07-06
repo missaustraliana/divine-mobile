@@ -49,7 +49,9 @@ class ProfileActionButtons extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (isOwnProfile) {
-      return _ActionButtonsRow(children: _buildOwnProfileButtons(context));
+      return _ActionButtonsRow(
+        children: _buildOwnProfileButtons(context),
+      );
     }
 
     final followRepository = ref.watch(followRepositoryProvider);
@@ -183,7 +185,6 @@ class _OtherProfileButtons extends StatelessWidget {
               ? null
               : () => onShareProfile!(context),
         );
-
         final List<Widget> children;
 
         if (isFollowing) {

@@ -292,23 +292,33 @@ class ProfileRepository {
   ///
   /// Returns `null` if no profile exists across all sources.
   /// On success, the profile is automatically cached locally.
-  Future<UserProfile?> fetchFreshProfile({required String pubkey}) {
+  Future<UserProfile?> fetchFreshProfile({
+    required String pubkey,
+    bool requireRawKind0 = false,
+  }) {
     // Clear stale _confirmedMissing so we always re-check the REST API.
     // The sentinel may have been set by a batch fetch when the user had
     // no Kind 0 profile, but they may have published one since then.
     _confirmedMissing.remove(pubkey);
 
     // Deduplicate: return existing in-flight future if present.
-    final existing = _inFlightFetches[pubkey];
+    final fetchKey = requireRawKind0 ? '$pubkey#raw-kind0' : pubkey;
+    final existing = _inFlightFetches[fetchKey];
     if (existing != null) return existing;
 
-    final future = _doFetchFreshProfile(pubkey);
-    _inFlightFetches[pubkey] = future;
+    final future = _doFetchFreshProfile(
+      pubkey,
+      requireRawKind0: requireRawKind0,
+    );
+    _inFlightFetches[fetchKey] = future;
 
-    return future.whenComplete(() => _inFlightFetches.remove(pubkey));
+    return future.whenComplete(() => _inFlightFetches.remove(fetchKey));
   }
 
-  Future<UserProfile?> _doFetchFreshProfile(String pubkey) async {
+  Future<UserProfile?> _doFetchFreshProfile(
+    String pubkey, {
+    required bool requireRawKind0,
+  }) async {
     if (_blockFilter?.call(pubkey) ?? false) return null;
 
     // Step 1: Try Funnelcake REST API (fast, broad coverage).
@@ -320,7 +330,7 @@ class ProfileRepository {
             final funnelcakeProfile = UserProfile.fromUserProfileFound(result);
             await _cacheProfileStatsFromResult(pubkey, result);
 
-            if (result.profile.createdAt != null) {
+            if (result.profile.createdAt != null && !requireRawKind0) {
               // Funnelcake exposes the original Nostr Kind 0 `created_at`
               // (the `profile.profile_updated` field), so a newest-wins
               // merge against the local cache is safe — a stale Funnelcake
@@ -348,7 +358,7 @@ class ProfileRepository {
             // through to the relay/indexer path so a newer Kind 0 on
             // relays can still upgrade the cache.
             final existing = await _userProfilesDao.getProfile(pubkey);
-            if (existing == null) {
+            if (existing == null && !requireRawKind0) {
               _knownCached.add(pubkey);
               await _userProfilesDao.upsertProfile(funnelcakeProfile);
               return funnelcakeProfile;
@@ -359,6 +369,9 @@ class ProfileRepository {
             // User exists but has no Kind 0. Cache stats and skip relay
             // fallback — the profile genuinely does not exist yet.
             await _cacheProfileStatsFromResult(pubkey, result);
+            if (requireRawKind0) {
+              break;
+            }
             _confirmedMissing.add(pubkey);
             return null;
           case null:
@@ -377,10 +390,17 @@ class ProfileRepository {
     // Step 2: Fire connected relays and indexer relays concurrently.
     // Return the first valid profile immediately, then let slower
     // sources upgrade the cache if they have a newer kind 0 event.
-    final relayProfile = await _fetchFromRelaysParallel(pubkey);
+    final relayProfile = await _fetchFromRelaysParallel(
+      pubkey,
+      requireRawKind0: requireRawKind0,
+    );
     if (relayProfile != null) {
       await _cacheProfileIfNewer(relayProfile);
       return relayProfile;
+    }
+
+    if (requireRawKind0) {
+      return null;
     }
 
     // Relay/indexer found nothing. If a local profile already exists
@@ -432,7 +452,10 @@ class ProfileRepository {
   /// kind 0 profile event. Returns the first valid profile immediately,
   /// then upgrades the cache if a slower source yields a newer event.
   /// Falls back to null only when every source completes without a result.
-  Future<UserProfile?> _fetchFromRelaysParallel(String pubkey) async {
+  Future<UserProfile?> _fetchFromRelaysParallel(
+    String pubkey, {
+    required bool requireRawKind0,
+  }) async {
     final completer = Completer<UserProfile?>();
     UserProfile? newestProfile;
     var remaining = 2;
@@ -463,15 +486,27 @@ class ProfileRepository {
       }
     }
 
-    unawaited(handleSource(_fetchFromConnectedRelays(pubkey)));
+    unawaited(
+      handleSource(
+        _fetchFromConnectedRelays(
+          pubkey,
+          useCache: requireRawKind0 ? false : null,
+        ),
+      ),
+    );
     unawaited(handleSource(_fetchFromIndexerRelays(pubkey)));
 
     return completer.future;
   }
 
-  Future<UserProfile?> _fetchFromConnectedRelays(String pubkey) async {
+  Future<UserProfile?> _fetchFromConnectedRelays(
+    String pubkey, {
+    required bool? useCache,
+  }) async {
     try {
-      final event = await _nostrClient.fetchProfile(pubkey);
+      final event = useCache == null
+          ? await _nostrClient.fetchProfile(pubkey)
+          : await _nostrClient.fetchProfile(pubkey, useCache: useCache);
       if (event != null) {
         final profile = UserProfile.fromNostrEvent(event);
         Log.debug(
@@ -562,6 +597,7 @@ class ProfileRepository {
     bool clearNip05 = false,
     String? picture,
     String? banner,
+    Iterable<MonetizationLink>? monetizationLinks,
     UserProfile? currentProfile,
   }) async {
     // External NIP-05 takes precedence when provided.
@@ -615,13 +651,30 @@ class ProfileRepository {
       newContent.remove('nip05');
     }
 
+    if (monetizationLinks != null) {
+      final encoded = encodeMonetizationLinks(
+        monetizationLinks.where((link) => link.enabled),
+      );
+      if (encoded.isEmpty) {
+        newContent.remove(divineMonetizationLinksKey);
+      } else {
+        newContent[divineMonetizationLinksKey] = encoded;
+      }
+    }
+
     // Every other key — lud16, lud06, website, bot, NIP-39 `i` tags,
     // custom client fields, future NIPs — flows through from the seed
     // untouched. Adding new editable fields here MUST keep that invariant.
 
-    final result = await _nostrClient.sendProfileAwaitOk(
-      profileContent: newContent,
-    );
+    final rawTags = (seed?.rawTags.isNotEmpty ?? false)
+        ? seed!.rawTags
+        : currentProfile?.rawTags ?? const <List<String>>[];
+    final result = rawTags.isEmpty
+        ? await _nostrClient.sendProfileAwaitOk(profileContent: newContent)
+        : await _nostrClient.sendProfileAwaitOk(
+            profileContent: newContent,
+            tags: rawTags,
+          );
 
     // Switch exhaustively over the typed result — no post-failure
     // connectedRelays snapshot needed.
@@ -672,6 +725,7 @@ class ProfileRepository {
     }
     final fresh = await fetchFreshProfile(
       pubkey: currentProfile.pubkey,
+      requireRawKind0: true,
     ).timeout(_publishSeedRelayTimeout, onTimeout: () => null);
     if (fresh == null) {
       return currentProfile;
@@ -1192,11 +1246,7 @@ class ProfileRepository {
       final phase3Watch = Stopwatch()..start();
       try {
         final events = await _nostrClient
-            .queryUsers(
-              trimmed,
-              limit: limit,
-              timeout: _nip50RelayQueryTimeout,
-            )
+            .queryUsers(trimmed, limit: limit, timeout: _nip50RelayQueryTimeout)
             .timeout(_nip50SearchTimeout);
         for (final event in events) {
           final profile = UserProfile.fromNostrEvent(event);
