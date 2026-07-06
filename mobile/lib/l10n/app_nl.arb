@@ -3756,7 +3756,6 @@
     "dmReelReplyViewChatA11yLabel": "Chat openen",
     "dmReelReplySentAnnouncement": "Antwoord verzonden",
     "dmReelReactionSentAnnouncement": "Gereageerd met {emoji}",
-    "dmReelReactionSentPill": "Reactie verzonden",
     "dmReelReplyFailed": "Verzenden mislukt",
     "emojiPickerSearchHint": "Zoeken",
     "emojiCategoryRecent": "Recent",
