@@ -10,23 +10,32 @@ part 'camera_permission_state.dart';
 
 /// BLoC for managing camera and microphone permissions.
 ///
-/// Permission prompting is owned by the recorder gate
-/// (`CameraPermissionGate`): a [CameraPermissionRequest] is only dispatched
-/// from the gate's explicit "Continue" action, so the native media permission
-/// dialog always happens in response to a user gesture on the recorder
-/// screen. Callers that navigate to the recorder no longer prompt themselves.
+/// A [CameraPermissionRequest] fires the native OS permission dialog directly —
+/// dispatched by `pushToCameraWithPermission` on the current page, or by
+/// `CameraPermissionGate` on direct navigation to the recorder. There is no
+/// in-app priming screen; the dialog always follows the user's camera gesture.
 ///
 /// Handles:
 /// - Checking current permission status
-/// - Requesting permissions via OS dialog (from the gate)
+/// - Requesting permissions via the OS dialog (from
+///   `pushToCameraWithPermission` on the current page, or the gate)
 /// - Caching status to avoid repeated OS calls
 /// - Refreshing status when app resumes from background
 ///
-/// Both [CameraPermissionRequest] and [CameraPermissionRefresh] use the
-/// `droppable()` transformer so duplicate requests/refreshes dispatched while
-/// one is already in flight are ignored. This replaces the previous in-flight
-/// boolean/future fields with the idiomatic bloc concurrency primitive and
-/// keeps all coordination out of mutable instance state.
+/// [CameraPermissionRefresh] uses `droppable()` so overlapping refreshes are
+/// ignored. [CameraPermissionRequest] uses `restartable()`: a new request
+/// supersedes an in-flight one. This matters because `permission_handler`'s
+/// native `request()` can hang and never complete when the Android permission
+/// dialog is dismissed with the back button — `droppable()` would then block
+/// every later request forever. `restartable()` lets the next camera tap
+/// abandon the stuck request and fire a fresh native dialog.
+///
+/// Accepted tradeoff of `restartable()`: on a fast double-tap, the second
+/// request supersedes the first while its dialog is still live, so a grant on
+/// that first dialog is dropped and that one tap resolves to nothing. It
+/// self-heals on the next tap (a refresh sees the OS grant and navigates), so
+/// the visible cost is a single dead tap on an uncommon race — preferred over
+/// permanently stranding the recorder on the back-dismiss hang.
 class CameraPermissionBloc
     extends Bloc<CameraPermissionEvent, CameraPermissionState> {
   CameraPermissionBloc({
@@ -35,7 +44,7 @@ class CameraPermissionBloc
   }) : _permissionsService = permissionsService,
        _skipLinuxBypass = skipLinuxBypass ?? false,
        super(const CameraPermissionInitial()) {
-    on<CameraPermissionRequest>(_onRequest, transformer: droppable());
+    on<CameraPermissionRequest>(_onRequest, transformer: restartable());
     on<CameraPermissionRefresh>(_onRefresh, transformer: droppable());
     on<CameraPermissionOpenSettings>(_onOpenSettings);
   }
@@ -57,13 +66,19 @@ class CameraPermissionBloc
       return;
     }
 
+    // Emit a distinct loading state so a denial that leaves the permission
+    // still requestable (canRequest -> canRequest) is observable as a real
+    // transition. Without it, the equal Loaded(canRequest) emit is suppressed
+    // by Equatable and the caller can't tell the request finished.
+    emit(const CameraPermissionLoading());
+
     try {
       final cameraStatus = await _permissionsService.requestCameraPermission();
 
       if (cameraStatus != PermissionStatus.granted) {
-        // Stay on the recorder gate with the resolved status so the gate can
-        // re-prompt (canRequest) or send the user to Settings
-        // (requiresSettings) instead of silently bouncing back to the feed.
+        // Surface the resolved status so the caller can re-prompt (canRequest)
+        // or send the user to Settings (requiresSettings) instead of silently
+        // bouncing back to the feed.
         emit(CameraPermissionLoaded(_cameraStatusFromPermission(cameraStatus)));
         return;
       }

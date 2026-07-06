@@ -17,14 +17,14 @@ import 'package:unified_logger/unified_logger.dart';
 
 /// A declarative gate widget that handles camera/microphone permissions.
 ///
-/// This gate owns permission prompting: a denied or blocked request keeps the
-/// user here on the matching prompt instead of bouncing back to the feed, so
-/// the native permission dialog only ever fires from the explicit Continue
-/// action below.
+/// On direct navigation to the recorder (quick actions, deep links) a
+/// still-requestable permission fires the native OS dialog immediately via
+/// [_onPermissionState] — no in-app priming screen. A denial that stays
+/// requestable pops back so the next camera tap re-prompts.
 ///
 /// Renders appropriate UI based on permission state:
 /// - loading: Shows a loading indicator
-/// - canRequest: Shows the prompt with a Continue button that requests access
+/// - canRequest: Shows a loading indicator while the native dialog is up
 /// - requiresSettings: Shows the prompt with a Go to Settings button
 /// - authorized: Renders the [child] (camera screen)
 /// - error: Shows an error screen with a Retry button
@@ -43,6 +43,10 @@ class CameraPermissionGate extends StatefulWidget {
 class _CameraPermissionGateState extends State<CameraPermissionGate>
     with WidgetsBindingObserver {
   bool _wasInBackground = false;
+
+  /// Guards the one auto-request per mount so a denial that stays requestable
+  /// doesn't immediately re-trigger the native dialog in a loop.
+  bool _autoRequested = false;
 
   @override
   void initState() {
@@ -72,6 +76,11 @@ class _CameraPermissionGateState extends State<CameraPermissionGate>
           category: LogCategory.video,
         );
         bloc.add(const CameraPermissionRefresh());
+      } else {
+        // Already resolved before the gate mounted (the app-level bloc warms
+        // the check at startup). The listener won't fire for this initial
+        // state, so drive the auto-request here.
+        _onPermissionState(bloc.state);
       }
     });
   }
@@ -114,6 +123,24 @@ class _CameraPermissionGateState extends State<CameraPermissionGate>
     }
   }
 
+  /// Drives the direct-request flow for a still-requestable permission:
+  /// fire the native OS dialog immediately (no in-app priming screen) the
+  /// first time, and pop back on a denial that leaves it requestable so the
+  /// next camera tap re-prompts. A permanent denial resolves to
+  /// [CameraPermissionStatus.requiresSettings] and is surfaced by the builder.
+  void _onPermissionState(CameraPermissionState state) {
+    if (!mounted) return;
+    if (state is! CameraPermissionLoaded) return;
+    if (state.status != CameraPermissionStatus.canRequest) return;
+
+    if (!_autoRequested) {
+      _autoRequested = true;
+      context.read<CameraPermissionBloc>().add(const CameraPermissionRequest());
+    } else {
+      _popBack();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<CameraPermissionBloc, CameraPermissionState>(
@@ -123,6 +150,7 @@ class _CameraPermissionGateState extends State<CameraPermissionGate>
           name: 'CameraPermissionGate',
           category: LogCategory.video,
         );
+        _onPermissionState(state);
       },
       builder: (context, state) {
         Log.debug(
@@ -142,8 +170,8 @@ class _CameraPermissionGateState extends State<CameraPermissionGate>
         }
 
         return switch (state) {
-          CameraPermissionInitial() => const _LoadingIndicator(),
-          CameraPermissionLoading() => const _LoadingIndicator(),
+          CameraPermissionInitial() => _LoadingIndicator(onClose: _popBack),
+          CameraPermissionLoading() => _LoadingIndicator(onClose: _popBack),
           CameraPermissionError() => _PermissionScreen(
             title: context.l10n.cameraPermissionErrorTitle,
             description: context.l10n.cameraPermissionErrorDescription,
@@ -157,15 +185,10 @@ class _CameraPermissionGateState extends State<CameraPermissionGate>
           ),
           CameraPermissionLoaded(:final status) => switch (status) {
             CameraPermissionStatus.authorized => widget.child,
-            CameraPermissionStatus.canRequest => _PermissionScreen(
-              title: context.l10n.cameraPermissionAllowAccessTitle,
-              description: context.l10n.cameraPermissionAllowAccessDescription,
-              buttonLabel: context.l10n.cameraPermissionContinue,
-              onAction: () {
-                context.read<CameraPermissionBloc>().add(
-                  const CameraPermissionRequest(),
-                );
-              },
+            // Requestable permission fires the native OS dialog directly via
+            // [_onPermissionState]; no in-app priming screen. The indicator
+            // covers the brief window while the dialog is up.
+            CameraPermissionStatus.canRequest => _LoadingIndicator(
               onClose: _popBack,
             ),
             CameraPermissionStatus.requiresSettings => _PermissionScreen(
@@ -186,14 +209,46 @@ class _CameraPermissionGateState extends State<CameraPermissionGate>
   }
 }
 
-/// Loading indicator centered on screen
+/// Centered loading indicator with an optional escape hatch.
+///
+/// The direct-navigation gate path (quick actions, deep links) can land here on
+/// a still-requestable permission whose native dialog was dismissed with the
+/// back button — the `permission_handler` hang that pins the bloc in
+/// [CameraPermissionLoading]. [onClose] lets the user bail back to the feed
+/// instead of being trapped on the spinner; re-entering re-fires the request.
 class _LoadingIndicator extends StatelessWidget {
-  const _LoadingIndicator();
+  const _LoadingIndicator({this.onClose});
+
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: CircularProgressIndicator(color: VineTheme.vineGreen),
+    return Scaffold(
+      backgroundColor: VineTheme.backgroundColor,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          const Center(
+            child: CircularProgressIndicator(color: VineTheme.vineGreen),
+          ),
+          if (onClose case final onClose?)
+            Align(
+              alignment: .topLeft,
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const .fromLTRB(16, 16, 0, 8),
+                  child: DivineIconButton(
+                    icon: .x,
+                    onPressed: onClose,
+                    size: .small,
+                    type: .ghost,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
