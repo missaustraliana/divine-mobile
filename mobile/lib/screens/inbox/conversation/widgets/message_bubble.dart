@@ -14,7 +14,6 @@ import 'package:models/models.dart' hide AspectRatio, LogCategory;
 import 'package:openvine/blocs/dm/conversation/conversation_bloc.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/providers/app_providers.dart';
-import 'package:openvine/providers/nostr_client_provider.dart';
 import 'package:openvine/providers/user_profile_providers.dart';
 import 'package:openvine/router/nav_extensions.dart';
 import 'package:openvine/screens/feed/dm_reply_context.dart';
@@ -582,11 +581,15 @@ class _VideoLinkPreview extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Re-key on the repository identity: videosRepositoryProvider yields a
+    // fresh instance when filter/aspect/host preferences change, and a bare
+    // ref.read inside create: would keep the stale one for the cubit's life.
+    final videosRepository = ref.watch(videosRepositoryProvider);
     return BlocProvider(
+      key: ValueKey(videosRepository),
       create: (_) => VideoLinkPreviewCubit(
         videoStableId: videoStableId,
-        videoEventService: ref.read(videoEventServiceProvider),
-        nostrClient: ref.read(nostrServiceProvider),
+        videosRepository: videosRepository,
         authorPubkey: authorPubkey,
         videoKind: videoKind,
       ),
@@ -651,8 +654,8 @@ const double _quotedPlayGlyphSize = 11;
 
 /// Compact WhatsApp-style quoted preview of the video a reply references.
 ///
-/// Reuses the [VideoLinkPreviewCubit] resolve harness (cache → relay fetch) so
-/// it can render even when the cited video was never seen locally, and swaps
+/// Reuses the [VideoLinkPreviewCubit] resolve harness so it can render even
+/// when the cited video was never seen locally, and swaps
 /// the full [_VideoCard] for a small thumbnail + label strip rendered above the
 /// reply text.
 class _QuotedVideoPreview extends ConsumerWidget {
@@ -670,11 +673,12 @@ class _QuotedVideoPreview extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final target = _videoTargetFromRef(quotedVideoRef);
     if (target == null) return const SizedBox.shrink();
+    final videosRepository = ref.watch(videosRepositoryProvider);
     return BlocProvider(
+      key: ValueKey(videosRepository),
       create: (_) => VideoLinkPreviewCubit(
         videoStableId: target.stableId,
-        videoEventService: ref.read(videoEventServiceProvider),
-        nostrClient: ref.read(nostrServiceProvider),
+        videosRepository: videosRepository,
         authorPubkey: target.authorPubkey,
         videoKind: target.videoKind,
       ),

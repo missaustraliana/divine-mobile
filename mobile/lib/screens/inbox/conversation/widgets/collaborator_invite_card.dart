@@ -12,7 +12,6 @@ import 'package:openvine/blocs/dm/conversation/collaborator_invite_actions_cubit
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/models/collaborator_invite.dart';
 import 'package:openvine/providers/app_providers.dart';
-import 'package:openvine/providers/nostr_client_provider.dart';
 import 'package:openvine/screens/comments/widgets/video_comment_player.dart';
 import 'package:openvine/screens/inbox/conversation/widgets/video_link_preview_cubit.dart';
 import 'package:openvine/services/collaborator_invite_state_store.dart';
@@ -145,6 +144,10 @@ class _CardChrome extends ConsumerWidget {
       maxVisibleVideoWidth,
     );
 
+    // Re-key the cubit on the repository identity: videosRepositoryProvider
+    // yields a fresh instance when filter/aspect/host preferences change.
+    final videosRepository = ref.watch(videosRepositoryProvider);
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Align(
@@ -165,12 +168,12 @@ class _CardChrome extends ConsumerWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: BlocProvider(
+            key: ValueKey(videosRepository),
             create: (_) => VideoLinkPreviewCubit(
               videoStableId: invite.videoDTag,
               authorPubkey: invite.creatorPubkey,
               videoKind: invite.videoKind,
-              videoEventService: ref.read(videoEventServiceProvider),
-              nostrClient: ref.read(nostrServiceProvider),
+              videosRepository: videosRepository,
             ),
             child: _InviteVideoContent(
               inviteThumbnailUrl: _inviteThumbnailUrl,
