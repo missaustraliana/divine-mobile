@@ -1744,5 +1744,40 @@ void main() {
         });
       });
     });
+
+    group('getRecentEventIdSigs', () {
+      test(
+        'returns (id, sig) pairs ordered by created_at descending',
+        () async {
+          final older = createEvent(content: 'older', createdAt: 1000);
+          final newer = createEvent(content: 'newer', createdAt: 2000);
+          await dao.upsertEvent(older);
+          await dao.upsertEvent(newer);
+
+          final pairs = await dao.getRecentEventIdSigs();
+
+          expect(pairs, [
+            (id: newer.id, sig: newer.sig),
+            (id: older.id, sig: older.sig),
+          ]);
+        },
+      );
+
+      test('respects the limit', () async {
+        for (var i = 0; i < 5; i++) {
+          await dao.upsertEvent(
+            createEvent(content: 'e$i', createdAt: 1000 + i),
+          );
+        }
+
+        final pairs = await dao.getRecentEventIdSigs(limit: 2);
+
+        expect(pairs, hasLength(2));
+      });
+
+      test('returns empty when no events exist', () async {
+        expect(await dao.getRecentEventIdSigs(), isEmpty);
+      });
+    });
   });
 }

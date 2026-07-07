@@ -2,6 +2,7 @@
 // ABOUTME: Handles relay lifecycle, message routing, authentication, and event filtering.
 
 import 'dart:async';
+import 'dart:collection';
 import 'dart:developer';
 
 import 'package:nostr_sdk/utils/relay_addr_util.dart';
@@ -383,6 +384,59 @@ class RelayPool {
     return null;
   }
 
+  /// Session-scoped, insertion-ordered set of `"id:sig"` keys whose Schnorr
+  /// signature has already been verified on this isolate. The same event
+  /// arriving again from another relay skips the ~0.3ms secp256k1 verify that
+  /// otherwise dominates cold start (signature verification was ~42% of
+  /// startup CPU in profiling). Eviction is oldest-inserted-first (FIFO); a
+  /// duplicate hit is not moved to most-recent, so it is not a true LRU — for
+  /// a bounded seen-set that distinction is immaterial.
+  ///
+  /// The signature is part of the key because a Nostr event id commits to
+  /// the event body only, *not* to `sig` — a relay can replay a known id
+  /// carrying a different, invalid signature. Keying by id alone would let
+  /// that copy skip verification; keying by `(id, sig)` forces a re-verify
+  /// whenever the signature differs. Only fresh network verifications are
+  /// recorded here, so a known/duplicate hit never masks an unverified copy.
+  static const int _verifiedEventKeysCap = 20000;
+  final LinkedHashSet<String> _verifiedEventKeys = LinkedHashSet<String>();
+
+  /// Optional lookup for `(event id, signature)` pairs already verified in a
+  /// *previous* session.
+  ///
+  /// Relays re-send events the app already downloaded and persisted, so on
+  /// every cold start those events arrive again and would be re-verified. The
+  /// app injects a lookup backed by its local event store (every persisted
+  /// event was verified before being written), letting [_onEvent] skip the
+  /// expensive Schnorr verify for a known id **only when the incoming
+  /// signature matches the one that was persisted** — the id alone does not
+  /// commit to `sig`. Must be a cheap, synchronous, side-effect-free test.
+  bool Function(String eventId, String signature)? isKnownVerifiedEvent;
+
+  /// Diagnostic counters for how [_onEvent] treated each incoming event's
+  /// signature. Read-only; read by the dedup tests to assert that the skip
+  /// branches actually fire. There is no production reader by design — the
+  /// periodic verify-stats log was removed to keep the hot path quiet; wire
+  /// these into a diagnostics surface if on-device skip-rate visibility is
+  /// ever needed.
+  int get verifiesPerformed => _verifiesPerformed;
+  int get verifiesSkippedKnown => _verifiesSkippedKnown;
+  int get verifiesSkippedSessionDup => _verifiesSkippedSessionDup;
+  int _verifiesPerformed = 0;
+  int _verifiesSkippedKnown = 0;
+  int _verifiesSkippedSessionDup = 0;
+
+  /// Records [key] (an `"id:sig"` pair) as verified, evicting the oldest once
+  /// the cap is hit.
+  void _markEventVerified(String key) {
+    _verifiedEventKeys
+      ..remove(key)
+      ..add(key);
+    if (_verifiedEventKeys.length > _verifiedEventKeysCap) {
+      _verifiedEventKeys.remove(_verifiedEventKeys.first);
+    }
+  }
+
   Future<void> _onEvent(Relay relay, List<dynamic> json) async {
     final messageType = _stringAt(relay, json, 0, 'message type');
     if (messageType == null) return;
@@ -414,9 +468,39 @@ class RelayPool {
         if (eventJson == null) return;
 
         final event = Event.fromJson(eventJson);
-        if (!event.isValid || !event.isSigned) {
+
+        // Cheap integrity check first: [Event.isValid] recomputes the
+        // sha256 id from the event's own content, so a tampered payload is
+        // rejected here without touching the expensive EC verifier.
+        if (!event.isValid) {
           log(
-            'Dropping relay event with invalid id or signature '
+            'Dropping relay event with invalid id '
+            'from ${relay.url}: eventId=${event.id}',
+          );
+          return;
+        }
+
+        // Skip the expensive Schnorr verify when this exact `(id, sig)` pair
+        // is already trusted. The event id commits to the body but not to
+        // `sig`, so trust is keyed by both — a replayed id carrying a
+        // different signature falls through to a full verify below.
+        //  - Pairs verified in a previous session (known to the injected
+        //    [isKnownVerifiedEvent] store) skip re-verify on cold start.
+        //  - Pairs verified earlier this session (a duplicate delivery of the
+        //    same event from another relay) skip re-verify.
+        // Only fresh network verifications are recorded in [_verifiedEventKeys]
+        // so a known/duplicate hit never masks an unverified network copy.
+        final verifyKey = '${event.id}:${event.sig}';
+        if (_verifiedEventKeys.contains(verifyKey)) {
+          _verifiesSkippedSessionDup++;
+        } else if (isKnownVerifiedEvent?.call(event.id, event.sig) ?? false) {
+          _verifiesSkippedKnown++;
+        } else if (event.isSigned) {
+          _markEventVerified(verifyKey);
+          _verifiesPerformed++;
+        } else {
+          log(
+            'Dropping relay event with invalid signature '
             'from ${relay.url}: eventId=${event.id}',
           );
           return;

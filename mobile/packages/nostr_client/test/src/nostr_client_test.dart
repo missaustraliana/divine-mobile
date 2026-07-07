@@ -130,6 +130,68 @@ void main() {
       });
     });
 
+    group('initialize seeds known-verified event ids', () {
+      late RelayPool realPool;
+
+      setUp(() {
+        RelayBase tempRelay(String url) => RelayBase(url, RelayStatus(url));
+        realPool = RelayPool(mockNostr, <EventFilter>[], tempRelay);
+        when(() => mockNostr.refreshPublicKey()).thenAnswer((_) async {});
+        when(() => mockNostr.relayPool).thenReturn(realPool);
+        when(mockRelayManager.initialize).thenAnswer((_) async {});
+      });
+
+      NostrClient buildClientWithDao(_MockNostrEventsDao dao) {
+        final dbClient = _MockAppDbClient();
+        final database = _MockAppDatabase();
+        when(() => dbClient.database).thenReturn(database);
+        when(() => database.nostrEventsDao).thenReturn(dao);
+        return NostrClient.forTesting(
+          nostr: mockNostr,
+          relayManager: mockRelayManager,
+          dbClient: dbClient,
+        );
+      }
+
+      test('wires the pool lookup from persisted (id, sig) pairs', () async {
+        final dao = _MockNostrEventsDao();
+        when(
+          dao.getRecentEventIdSigs,
+        ).thenAnswer((_) async => [(id: 'idA', sig: 'sigA')]);
+        final clientWithDb = buildClientWithDao(dao);
+
+        await clientWithDb.initialize();
+
+        final lookup = realPool.isKnownVerifiedEvent;
+        expect(lookup, isNotNull);
+        expect(lookup!('idA', 'sigA'), isTrue);
+        // A known id carrying a different signature is not trusted — the id
+        // does not commit to sig, so this must fall through to a full verify.
+        expect(lookup('idA', 'other-sig'), isFalse);
+        expect(lookup('never-seen', 'sigA'), isFalse);
+      });
+
+      test('leaves the lookup unset when there is no db client', () async {
+        final clientWithoutDb = NostrClient.forTesting(
+          nostr: mockNostr,
+          relayManager: mockRelayManager,
+        );
+
+        await clientWithoutDb.initialize();
+
+        expect(realPool.isKnownVerifiedEvent, isNull);
+      });
+
+      test('initialize still completes when seeding fails', () async {
+        final dao = _MockNostrEventsDao();
+        when(dao.getRecentEventIdSigs).thenThrow(Exception('boom'));
+        final clientWithDb = buildClientWithDao(dao);
+
+        await expectLater(clientWithDb.initialize(), completes);
+        expect(realPool.isKnownVerifiedEvent, isNull);
+      });
+    });
+
     group('queryEvents', () {
       test('caps concurrent WebSocket queries and releases slots', () async {
         final originalMaxConcurrentQueries = NostrClient.maxConcurrentQueries;

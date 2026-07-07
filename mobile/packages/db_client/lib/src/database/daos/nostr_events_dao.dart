@@ -623,4 +623,40 @@ class NostrEventsDao extends DatabaseAccessor<AppDatabase>
     ).getSingle();
     return result.read<int>('count');
   }
+
+  /// Returns the `(id, sig)` pairs of the most recently created events,
+  /// newest first, capped at [limit].
+  ///
+  /// Used to seed the relay pool's already-verified set: every event in this
+  /// table was signature-verified before being written, so re-verifying the
+  /// same events when relays re-send them on the next cold start is wasted
+  /// work. The signature is returned alongside the id because a Nostr event
+  /// id commits to the event body but not to `sig`, so trust must be keyed by
+  /// the exact `(id, sig)` pair that was verified — an id alone would let a
+  /// replayed id carrying a forged signature bypass verification.
+  ///
+  /// The default [limit] is intentionally large: on-device profiling showed
+  /// this seed take cold-start relay verify from ~37% of startup CPU to ~1%,
+  /// i.e. the re-send flood in this app approaches this scale, so a smaller
+  /// cap would re-introduce the expensive EC verify for the tail. The one-time
+  /// seed cost (~SQLite read + string/set builds) is negligible against the
+  /// per-event verify seconds it saves. Newest-first so the cap keeps the
+  /// most-likely-re-sent events.
+  Future<List<({String id, String sig})>> getRecentEventIdSigs({
+    int limit = 50000,
+  }) async {
+    final rows = await customSelect(
+      'SELECT id, sig FROM event ORDER BY created_at DESC LIMIT ?',
+      variables: [Variable.withInt(limit)],
+      readsFrom: {nostrEvents},
+    ).get();
+    return rows
+        .map(
+          (row) => (
+            id: row.read<String>('id'),
+            sig: row.read<String>('sig'),
+          ),
+        )
+        .toList();
+  }
 }
