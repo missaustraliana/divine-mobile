@@ -49,6 +49,8 @@ import 'package:videos_repository/videos_repository.dart';
 
 part 'video_providers.g.dart';
 
+const _maxEventRouterQueueDepth = 2000;
+
 /// Video filter builder for constructing relay-aware filters with server-side sorting
 @riverpod
 VideoFilterBuilder videoFilterBuilder(Ref ref) {
@@ -128,7 +130,13 @@ VideoEventService videoEventService(Ref ref) {
   final profileRepository = ref.watch(profileRepositoryProvider);
   final videoFilterBuilder = ref.watch(videoFilterBuilderProvider);
   final db = ref.watch(databaseProvider);
-  final eventRouter = EventRouter(db);
+  // Bound the ingestion backlog so a burst of relay events can't grow the
+  // queues without limit (a Phase-2 OOM source). 2000 sits well above
+  // steady-state depth; tune from the Phase-1 `ingest_queue_depth` telemetry.
+  final eventRouter = EventRouter(
+    db,
+    config: const EventRouterConfig(maxQueueDepth: _maxEventRouterQueueDepth),
+  );
   ref.onDispose(eventRouter.dispose);
 
   final likesRepository = ref.watch(likesRepositoryProvider);

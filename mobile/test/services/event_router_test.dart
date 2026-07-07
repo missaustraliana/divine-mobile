@@ -99,10 +99,7 @@ void main() {
       router.dispose();
       router = EventRouter(
         db,
-        config: const EventRouterConfig(
-          autoStart: false,
-          maxBatchSize: 1,
-        ),
+        config: const EventRouterConfig(autoStart: false, maxBatchSize: 1),
       );
 
       router.handleEvent(
@@ -124,10 +121,7 @@ void main() {
         router.dispose();
         router = EventRouter(
           db,
-          config: const EventRouterConfig(
-            autoStart: false,
-            maxBatchSize: 10,
-          ),
+          config: const EventRouterConfig(autoStart: false, maxBatchSize: 10),
           yieldToEventLoop: () async {
             yieldCount++;
             await Future<void>.delayed(Duration.zero);
@@ -143,10 +137,7 @@ void main() {
 
         expect(yieldCount, greaterThanOrEqualTo(2));
         for (final event in events) {
-          expect(
-            await db.nostrEventsDao.getEventById(event.id),
-            isNotNull,
-          );
+          expect(await db.nostrEventsDao.getEventById(event.id), isNotNull);
         }
       },
     );
@@ -230,15 +221,61 @@ void main() {
       expect(await db.nostrEventsDao.getEventById(event.id), isNull);
     });
 
+    test('queuedLength reflects the number of enqueued events', () {
+      router.handleEvent(
+        profileEvent(1, content: jsonEncode({'name': 'a'})),
+        priority: EventIngestionPriority.background,
+      );
+      router.handleEvent(
+        videoEvent(2),
+        priority: EventIngestionPriority.visible,
+      );
+
+      expect(router.queuedLength, equals(2));
+    });
+
+    test(
+      'shedLowPriority drops background and normal but keeps visible',
+      () async {
+        router.handleEvent(
+          videoEvent(1),
+          priority: EventIngestionPriority.background,
+        );
+        // Enqueued at the default (normal) priority.
+        router.handleEvent(videoEvent(2));
+        final visible = videoEvent(3);
+        router.handleEvent(visible, priority: EventIngestionPriority.visible);
+        expect(router.queuedLength, equals(3));
+
+        final dropped = router.shedLowPriority();
+
+        expect(dropped, equals(2));
+        expect(router.droppedEventCount, equals(2));
+        expect(router.queuedLength, equals(1));
+
+        // The retained visible event still persists on the next drain.
+        await router.drainForTesting();
+        expect(await db.nostrEventsDao.getEventById(visible.id), isNotNull);
+      },
+    );
+
+    test('shedLowPriority is a no-op after dispose', () {
+      router.handleEvent(
+        videoEvent(1),
+        priority: EventIngestionPriority.background,
+      );
+      router.dispose();
+
+      expect(router.shedLowPriority(), equals(0));
+      expect(router.droppedEventCount, equals(0));
+    });
+
     test(
       'handleEvent enqueues without synchronously persisting the event',
       () async {
         final event = videoEvent(99);
 
-        router.handleEvent(
-          event,
-          priority: EventIngestionPriority.background,
-        );
+        router.handleEvent(event, priority: EventIngestionPriority.background);
 
         // Enqueue is intentionally fire-and-forget. Persistence happens when the
         // cooperative router drain runs, so the relay callback can keep updating
@@ -250,5 +287,68 @@ void main() {
         expect(await db.nostrEventsDao.getEventById(event.id), isNotNull);
       },
     );
+
+    group('maxQueueDepth', () {
+      test('bounds the queue and drops events once the cap is exceeded', () {
+        router.dispose();
+        router = EventRouter(
+          db,
+          config: const EventRouterConfig(autoStart: false, maxQueueDepth: 500),
+        );
+
+        for (var i = 0; i < 5000; i++) {
+          router.handleEvent(
+            videoEvent(3000 + i),
+            priority: EventIngestionPriority.background,
+          );
+        }
+
+        expect(router.queuedLength, lessThanOrEqualTo(500));
+        expect(router.droppedEventCount, greaterThan(0));
+      });
+
+      test('drops oldest background events but never visible ones', () async {
+        router.dispose();
+        router = EventRouter(
+          db,
+          config: const EventRouterConfig(autoStart: false, maxQueueDepth: 10),
+        );
+
+        final visible = List.generate(5, (i) => videoEvent(4000 + i));
+        for (final event in visible) {
+          router.handleEvent(event, priority: EventIngestionPriority.visible);
+        }
+
+        // Flood background well past the cap to force drops.
+        for (var i = 0; i < 200; i++) {
+          router.handleEvent(
+            videoEvent(5000 + i),
+            priority: EventIngestionPriority.background,
+          );
+        }
+
+        expect(router.queuedLength, lessThanOrEqualTo(10));
+        expect(router.droppedEventCount, greaterThan(0));
+
+        // Every visible event survives the bound and still persists.
+        await router.drainForTesting();
+        for (final event in visible) {
+          expect(await db.nostrEventsDao.getEventById(event.id), isNotNull);
+        }
+      });
+
+      test('is unbounded by default so existing callers are unaffected', () {
+        // Default config leaves maxQueueDepth null.
+        for (var i = 0; i < 1000; i++) {
+          router.handleEvent(
+            videoEvent(6000 + i),
+            priority: EventIngestionPriority.background,
+          );
+        }
+
+        expect(router.queuedLength, equals(1000));
+        expect(router.droppedEventCount, equals(0));
+      });
+    });
   });
 }
