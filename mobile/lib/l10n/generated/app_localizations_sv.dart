@@ -8154,6 +8154,13 @@ class AppLocalizationsSv extends AppLocalizations {
       'Duplicera valt objekt';
 
   @override
+  String get videoEditorCombineLabel => 'Kombinera';
+
+  @override
+  String get videoEditorCombineDrawLayersSemanticLabel =>
+      'Kombinera valda teckningar till ett lager';
+
+  @override
   String get videoEditorSplitLabel => 'Dela';
 
   @override
@@ -8497,6 +8504,30 @@ class AppLocalizationsSv extends AppLocalizations {
       other: '$count klipp markerade',
       one: '1 klipp markerat',
       zero: 'Inga klipp markerade',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get videoEditorLayerMultiSelectSemanticLabel =>
+      'Välj flera teckningar';
+
+  @override
+  String get videoEditorLayerMultiSelectDoneSemanticLabel =>
+      'Klar med att välja teckningar';
+
+  @override
+  String get videoEditorDeleteSelectedDrawingsSemanticLabel =>
+      'Ta bort valda teckningar';
+
+  @override
+  String videoEditorLayerMultiSelectCountLabel(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count teckningar valda',
+      one: '1 teckning vald',
+      zero: 'Inga teckningar valda',
     );
     return '$_temp0';
   }

@@ -32,6 +32,7 @@ class TimelineOverlayPositionedItem extends StatelessWidget {
     required this.onLongPressMoveUpdate,
     required this.onLongPressEnd,
     super.key,
+    this.multiSelectState = OverlayMultiSelectState.none,
     this.onTrimChanged,
     this.onTrimDragChanged,
     this.snapPointsMs,
@@ -40,6 +41,9 @@ class TimelineOverlayPositionedItem extends StatelessWidget {
   final TimelineOverlayItem item;
   final bool isDragging;
   final bool isSelected;
+
+  /// Selection state while the timeline is in draw-layer multi-select mode.
+  final OverlayMultiSelectState multiSelectState;
   final int snappedStartMs;
   final double dragDeltaY;
   final double rowHeight;
@@ -88,6 +92,10 @@ class TimelineOverlayPositionedItem extends StatelessWidget {
         width: itemWidth + trimExpansion * 2,
         child: _OverlayItemGestureWrapper(
           semanticLabel: item.label,
+          // Unreachable while multi-selecting: entering the mode clears the
+          // single selection, so the trim-handle variant never coexists with a
+          // multi-select overlay.
+          multiSelectState: OverlayMultiSelectState.none,
           onTap: onTap,
           onLongPressStart: onLongPressStart,
           onLongPressMoveUpdate: onLongPressMoveUpdate,
@@ -114,6 +122,7 @@ class TimelineOverlayPositionedItem extends StatelessWidget {
       top: y,
       child: _OverlayItemGestureWrapper(
         semanticLabel: item.label,
+        multiSelectState: multiSelectState,
         onTap: onTap,
         onLongPressStart: onLongPressStart,
         onLongPressMoveUpdate: onLongPressMoveUpdate,
@@ -124,6 +133,7 @@ class TimelineOverlayPositionedItem extends StatelessWidget {
           height: rowHeight,
           color: color,
           isDragging: isDragging,
+          multiSelectState: multiSelectState,
         ),
       ),
     );
@@ -133,6 +143,7 @@ class TimelineOverlayPositionedItem extends StatelessWidget {
 class _OverlayItemGestureWrapper extends StatelessWidget {
   const _OverlayItemGestureWrapper({
     required this.semanticLabel,
+    required this.multiSelectState,
     required this.onTap,
     required this.onLongPressStart,
     required this.onLongPressMoveUpdate,
@@ -141,6 +152,7 @@ class _OverlayItemGestureWrapper extends StatelessWidget {
   });
 
   final String semanticLabel;
+  final OverlayMultiSelectState multiSelectState;
   final VoidCallback onTap;
   final VoidCallback onLongPressStart;
   final ValueChanged<LongPressMoveUpdateDetails> onLongPressMoveUpdate;
@@ -149,10 +161,26 @@ class _OverlayItemGestureWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isMultiSelecting = multiSelectState != OverlayMultiSelectState.none;
     return Semantics(
       label: semanticLabel,
-      hint: context.l10n.videoEditorTimelineLongPressToDragHint,
+      // Long-press drag is disabled while multi-selecting, so drop that hint.
+      hint: isMultiSelecting
+          ? null
+          : context.l10n.videoEditorTimelineLongPressToDragHint,
       button: true,
+      // Announce non-mergeable tiles as disabled — their tap is a no-op while
+      // multi-selecting — and only report a selected state on tiles that can
+      // actually be toggled.
+      enabled: multiSelectState == OverlayMultiSelectState.disabled
+          ? false
+          : null,
+      selected: switch (multiSelectState) {
+        OverlayMultiSelectState.none ||
+        OverlayMultiSelectState.disabled => null,
+        OverlayMultiSelectState.selected => true,
+        OverlayMultiSelectState.unselected => false,
+      },
       child: GestureDetector(
         onTap: onTap,
         onLongPressStart: (_) => onLongPressStart(),

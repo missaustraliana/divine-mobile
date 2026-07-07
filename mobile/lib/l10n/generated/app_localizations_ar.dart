@@ -8102,6 +8102,13 @@ class AppLocalizationsAr extends AppLocalizations {
       'تكرار العنصر المحدد';
 
   @override
+  String get videoEditorCombineLabel => 'دمج';
+
+  @override
+  String get videoEditorCombineDrawLayersSemanticLabel =>
+      'دمج الرسومات المحددة في طبقة واحدة';
+
+  @override
   String get videoEditorSplitLabel => 'تقسيم';
 
   @override
@@ -8439,6 +8446,29 @@ class AppLocalizationsAr extends AppLocalizations {
       other: 'تم تحديد $count مقاطع',
       one: 'تم تحديد مقطع واحد',
       zero: 'لم يتم تحديد مقاطع',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get videoEditorLayerMultiSelectSemanticLabel => 'تحديد عدة رسومات';
+
+  @override
+  String get videoEditorLayerMultiSelectDoneSemanticLabel =>
+      'إنهاء تحديد الرسومات';
+
+  @override
+  String get videoEditorDeleteSelectedDrawingsSemanticLabel =>
+      'حذف الرسومات المحددة';
+
+  @override
+  String videoEditorLayerMultiSelectCountLabel(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'تم تحديد $count رسمة',
+      one: 'تم تحديد رسم واحد',
+      zero: 'لم يتم تحديد أي رسم',
     );
     return '$_temp0';
   }

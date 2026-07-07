@@ -14142,6 +14142,18 @@ abstract class AppLocalizations {
   /// **'Duplicate selected item'**
   String get videoEditorDuplicateSelectedItemSemanticLabel;
 
+  /// No description provided for @videoEditorCombineLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Combine'**
+  String get videoEditorCombineLabel;
+
+  /// No description provided for @videoEditorCombineDrawLayersSemanticLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Combine selected drawings into one layer'**
+  String get videoEditorCombineDrawLayersSemanticLabel;
+
   /// No description provided for @videoEditorSplitLabel.
   ///
   /// In en, this message translates to:
@@ -14739,6 +14751,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count, plural, =0{No clips selected} =1{1 clip selected} other{{count} clips selected}}'**
   String videoEditorMultiSelectCountLabel(int count);
+
+  /// Accessibility label for the button that starts draw-layer multi-select mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Select multiple drawings'**
+  String get videoEditorLayerMultiSelectSemanticLabel;
+
+  /// Accessibility label for the button that exits draw-layer multi-select mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Done selecting drawings'**
+  String get videoEditorLayerMultiSelectDoneSemanticLabel;
+
+  /// Accessibility label for the button that deletes the selected drawings in draw-layer multi-select mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete selected drawings'**
+  String get videoEditorDeleteSelectedDrawingsSemanticLabel;
+
+  /// Header shown in the draw-layer multi-select action bar reporting how many drawings are selected.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No drawings selected} =1{1 drawing selected} other{{count} drawings selected}}'**
+  String videoEditorLayerMultiSelectCountLabel(int count);
 
   /// Label for the button that merges the selected clips into one.
   ///
