@@ -148,6 +148,25 @@ class _WideAspectRatioMock extends MockDivineCameraPlatform {
   }
 }
 
+/// Mock that reports a non-zero preview rotation, as the Android
+/// SurfaceProducer path does when the producer does not orient frames itself.
+class _RotatedPreviewMock extends MockDivineCameraPlatform {
+  @override
+  Future<CameraState> initializeCamera({
+    DivineCameraLens lens = DivineCameraLens.back,
+    DivineVideoQuality videoQuality = DivineVideoQuality.fhd,
+    bool enableScreenFlash = true,
+    bool mirrorFrontCameraOutput = false,
+    bool enableAutoLensSwitch = false,
+  }) async {
+    return const CameraState(
+      isInitialized: true,
+      textureId: 1,
+      previewRotationDegrees: 90,
+    );
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -231,6 +250,63 @@ void main() {
 
       expect(find.byType(FittedBox), findsOneWidget);
     });
+
+    testWidgets('rotates preview when previewRotationDegrees is non-zero', (
+      tester,
+    ) async {
+      DivineCameraPlatform.instance = _RotatedPreviewMock();
+      await camera.initialize();
+      await tester.pumpWidget(buildTestWidget());
+
+      final rotatedBox = tester.widget<RotatedBox>(find.byType(RotatedBox));
+      // 90 degrees clockwise = one quarter turn.
+      expect(rotatedBox.quarterTurns, 1);
+    });
+
+    testWidgets('does not rotate preview when previewRotationDegrees is zero', (
+      tester,
+    ) async {
+      await camera.initialize();
+      await tester.pumpWidget(buildTestWidget());
+
+      expect(find.byType(RotatedBox), findsNothing);
+    });
+
+    testWidgets(
+      'onTap coordinates stay in display space regardless of preview rotation',
+      (tester) async {
+        // The onTap point drives both the native focus call and the visual
+        // focus indicator, so it must stay in the displayed preview's space.
+        // The rotation-to-sensor mapping happens at the native boundary
+        // (DivineCamera.setFocusPoint), not here — a rotated preview must not
+        // shift the emitted point, or the indicator would jump away from the
+        // tap.
+        Offset? unrotated;
+        await camera.initialize();
+        await tester.pumpWidget(
+          buildTestWidget(onTap: (_, normalized) => unrotated = normalized),
+        );
+        final rect = tester.getRect(find.byType(GestureDetector));
+        final tapPoint =
+            rect.topLeft + Offset(rect.width * 0.3, rect.height * 0.25);
+        await tester.tapAt(tapPoint);
+        await tester.pump();
+
+        Offset? rotated;
+        DivineCameraPlatform.instance = _RotatedPreviewMock();
+        await camera.initialize();
+        await tester.pumpWidget(
+          buildTestWidget(onTap: (_, normalized) => rotated = normalized),
+        );
+        await tester.tapAt(tapPoint);
+        await tester.pump();
+
+        expect(unrotated, isNotNull);
+        expect(rotated, isNotNull);
+        expect(rotated!.dx, closeTo(unrotated!.dx, 0.0001));
+        expect(rotated!.dy, closeTo(unrotated!.dy, 0.0001));
+      },
+    );
 
     testWidgets('calls onTap callback with correct positions', (tester) async {
       await camera.initialize();

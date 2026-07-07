@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:divine_camera/divine_camera.dart';
 import 'package:divine_camera/divine_camera_method_channel.dart';
 import 'package:divine_camera/divine_camera_platform_interface.dart';
@@ -100,13 +102,22 @@ class MockDivineCameraPlatform
     return true;
   }
 
+  /// The last point handed to [setFocusPoint], for asserting the sensor-space
+  /// mapping DivineCamera applies before the native call.
+  Offset? capturedFocusPoint;
+
+  /// The last point handed to [setExposurePoint].
+  Offset? capturedExposurePoint;
+
   @override
   Future<bool> setFocusPoint(Offset offset) async {
+    capturedFocusPoint = offset;
     return true;
   }
 
   @override
   Future<bool> setExposurePoint(Offset offset) async {
+    capturedExposurePoint = offset;
     return true;
   }
 
@@ -120,8 +131,20 @@ class MockDivineCameraPlatform
     return level >= 1.0 && level <= 10.0;
   }
 
+  /// When set, [switchCamera] awaits this before completing, so a test can
+  /// hold a switch in flight and probe re-entrant calls.
+  Completer<void>? switchGate;
+
+  /// When true, [switchCamera] throws to exercise the native failure path
+  /// (e.g. a CameraX bind error surfaced as a [PlatformException]).
+  bool throwOnSwitch = false;
+
   @override
   Future<CameraState> switchCamera(DivineCameraLens lens) async {
+    await switchGate?.future;
+    if (throwOnSwitch) {
+      throw PlatformException(code: 'SWITCH_FAILED');
+    }
     return _state = _state.copyWith(lens: lens);
   }
 
@@ -410,6 +433,8 @@ void main() {
         );
 
         expect(success, isTrue);
+        // No preview rotation (default): the point passes through unchanged.
+        expect(mockPlatform.capturedFocusPoint, const Offset(0.5, 0.5));
       });
 
       test('sets exposure point successfully', () async {
@@ -420,7 +445,51 @@ void main() {
         );
 
         expect(success, isTrue);
+        expect(mockPlatform.capturedExposurePoint, const Offset(0.3, 0.7));
       });
+
+      test(
+        'maps focus/exposure onto sensor axes for a rotated preview',
+        () async {
+          // The tap is in the displayed (upright) preview's space; DivineCamera
+          // undoes the clockwise RotatedBox so native meters the right point.
+          const tap = Offset(0.3, 0.25);
+          final cases = <(int, Offset)>[
+            (90, const Offset(0.25, 0.7)), // (y, 1 - x)
+            (180, const Offset(0.7, 0.75)), // (1 - x, 1 - y)
+            (270, const Offset(0.75, 0.3)), // (1 - y, x)
+          ];
+          for (final (degrees, expected) in cases) {
+            final mock = _RotatedFocusMock(degrees);
+            DivineCameraPlatform.instance = mock;
+            await DivineCamera.instance.initialize();
+
+            await DivineCamera.instance.setFocusPoint(tap);
+            await DivineCamera.instance.setExposurePoint(tap);
+
+            expect(
+              mock.capturedFocusPoint!.dx,
+              closeTo(expected.dx, 0.0001),
+              reason: 'focus dx @ $degrees',
+            );
+            expect(
+              mock.capturedFocusPoint!.dy,
+              closeTo(expected.dy, 0.0001),
+              reason: 'focus dy @ $degrees',
+            );
+            expect(
+              mock.capturedExposurePoint!.dx,
+              closeTo(expected.dx, 0.0001),
+              reason: 'exposure dx @ $degrees',
+            );
+            expect(
+              mock.capturedExposurePoint!.dy,
+              closeTo(expected.dy, 0.0001),
+              reason: 'exposure dy @ $degrees',
+            );
+          }
+        },
+      );
 
       test('cancels focus and metering successfully', () async {
         await DivineCamera.instance.initialize();
@@ -473,6 +542,44 @@ void main() {
           expect(DivineCamera.instance.canSwitchCamera, isTrue);
         },
       );
+
+      test('ignores a re-entrant switch while one is in flight', () async {
+        await DivineCamera.instance.initialize();
+
+        final gate = Completer<void>();
+        mockPlatform.switchGate = gate;
+
+        final first = DivineCamera.instance.switchCamera();
+        // Second call arrives before the first resolves.
+        final second = await DivineCamera.instance.switchCamera();
+        expect(second, isFalse);
+
+        gate.complete();
+        expect(await first, isTrue);
+        expect(DivineCamera.instance.state.lens, DivineCameraLens.front);
+      });
+
+      test(
+        'resets isSwitchingCamera and stays switchable after a thrown switch',
+        () async {
+          await DivineCamera.instance.initialize();
+
+          mockPlatform.throwOnSwitch = true;
+          await expectLater(
+            DivineCamera.instance.switchCamera(),
+            throwsA(isA<PlatformException>()),
+          );
+
+          // A stuck flag would freeze the preview and, via the re-entrancy
+          // guard, block every later switch for the session.
+          expect(DivineCamera.instance.isSwitchingCamera, isFalse);
+
+          mockPlatform.throwOnSwitch = false;
+          final recovered = await DivineCamera.instance.switchCamera();
+          expect(recovered, isTrue);
+          expect(DivineCamera.instance.state.lens, DivineCameraLens.front);
+        },
+      );
     });
 
     group('setLens', () {
@@ -523,6 +630,25 @@ void main() {
           DivineCamera.instance.state.lens,
           DivineCameraLens.frontUltraWide,
         );
+      });
+
+      test('resets isSwitchingCamera after a thrown setLens', () async {
+        await DivineCamera.instance.initialize();
+
+        mockPlatform.throwOnSwitch = true;
+        await expectLater(
+          DivineCamera.instance.setLens(DivineCameraLens.ultraWide),
+          throwsA(isA<PlatformException>()),
+        );
+
+        expect(DivineCamera.instance.isSwitchingCamera, isFalse);
+
+        mockPlatform.throwOnSwitch = false;
+        final recovered = await DivineCamera.instance.setLens(
+          DivineCameraLens.ultraWide,
+        );
+        expect(recovered, isTrue);
+        expect(DivineCamera.instance.state.lens, DivineCameraLens.ultraWide);
       });
     });
 
@@ -1054,13 +1180,15 @@ void main() {
 
       final props = state.props;
 
-      expect(props.length, 20);
+      expect(props.length, 22);
       expect(props[0], isTrue); // isInitialized
       expect(props[1], isFalse); // isRecording
       expect(props[4], DivineCameraLens.back); // lens
       expect(props[14], 1); // textureId
+      expect(props[15], 0); // previewRotationDegrees
+      expect(props[16], isFalse); // previewHandlesTransform
       expect(
-        props[17],
+        props[19],
         DivineVideoStabilizationMode.off,
       ); // videoStabilizationMode
     });
@@ -1741,6 +1869,31 @@ void main() {
 
   // MethodChannelDivineCamera Tests
   _runMethodChannelTests();
+}
+
+/// Mock reporting a non-zero preview rotation with focus/exposure supported,
+/// to verify DivineCamera maps tap coords onto the sensor axes before the
+/// native focus/exposure call.
+class _RotatedFocusMock extends MockDivineCameraPlatform {
+  _RotatedFocusMock(this.degrees);
+
+  final int degrees;
+
+  @override
+  Future<CameraState> initializeCamera({
+    DivineCameraLens lens = DivineCameraLens.back,
+    DivineVideoQuality videoQuality = DivineVideoQuality.fhd,
+    bool enableScreenFlash = true,
+    bool mirrorFrontCameraOutput = false,
+    bool enableAutoLensSwitch = false,
+  }) async {
+    return CameraState(
+      isInitialized: true,
+      isFocusPointSupported: true,
+      isExposurePointSupported: true,
+      previewRotationDegrees: degrees,
+    );
+  }
 }
 
 /// Mock that doesn't support focus point

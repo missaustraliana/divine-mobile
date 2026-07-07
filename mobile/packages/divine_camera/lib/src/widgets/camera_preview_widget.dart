@@ -65,13 +65,23 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
     if (kIsWeb) return false;
     if (!_camera.lens.isFrontFacing) return false;
 
-    // On iOS/macOS, mirror preview only when native isn't mirroring
+    // Platform-specific mirror handling. These branches depend on the host OS
+    // via `dart:io` Platform, so they resolve differently under a widget test
+    // than on device (a macOS test host takes the Apple branch; Linux CI falls
+    // through to Android). They're verified on device, not in host tests, and
+    // excluded from coverage the same way across both arms.
     // coverage:ignore-start
+    // On iOS/macOS, mirror preview only when native isn't mirroring.
     if (Platform.isIOS || Platform.isMacOS) {
       return !_camera.mirrorFrontCameraOutput;
     }
+    // Android: mirror the selfie preview in Flutter only when the native
+    // producer doesn't apply its own transform matrix. On the API<29
+    // SurfaceTexture path (previewHandlesTransform == true) that matrix already
+    // carries the front-camera mirror, so mirroring again would double-flip it.
+    // On the API 29+ ImageReader path the matrix is dropped, so mirror here.
+    return !_camera.state.previewHandlesTransform;
     // coverage:ignore-end
-    return false;
   }
 
   @override
@@ -118,6 +128,11 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
     }
     // coverage:ignore-end
 
+    // This point stays in the displayed (upright) preview's coordinate space:
+    // it drives both the native focus call and the visual focus indicator. The
+    // display-rotation undo needed to map it onto the raw sensor axes happens
+    // at the native boundary (DivineCamera.setFocusPoint/setExposurePoint), so
+    // the indicator can keep positioning itself where the user tapped.
     final normalizedPosition = Offset(normalizedX, normalizedY);
 
     // Update focus point for indicator
@@ -205,6 +220,7 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
                 aspectRatio: aspectRatio,
                 fit: widget.fit,
                 shouldMirror: _isPreviewMirrored,
+                rotationDegrees: _camera.state.previewRotationDegrees,
               ),
             ),
             ValueListenableBuilder<Offset?>(
@@ -233,12 +249,17 @@ class _CameraPreview extends StatelessWidget {
     required this.aspectRatio,
     required this.fit,
     required this.shouldMirror,
+    required this.rotationDegrees,
   });
 
   final BoxConstraints constraints;
   final int textureId;
   final double aspectRatio;
   final BoxFit fit;
+
+  /// Clockwise rotation to apply to the raw preview texture so it renders
+  /// upright. Zero when the platform already delivers an oriented frame.
+  final int rotationDegrees;
 
   /// Whether to apply a horizontal flip transform to the preview.
   /// This is determined by the parent widget based on platform and settings.
@@ -247,6 +268,14 @@ class _CameraPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget preview = Texture(textureId: textureId);
+
+    // Rotate the raw sensor-oriented frame upright when the platform doesn't
+    // orient it itself (Android SurfaceProducer path). Applied before mirror so
+    // the horizontal flip stays horizontal on the upright image.
+    final quarterTurns = (rotationDegrees ~/ 90) % 4;
+    if (quarterTurns != 0) {
+      preview = RotatedBox(quarterTurns: quarterTurns, child: preview);
+    }
 
     // Mirror front camera preview (selfie mode)
     // This is a visual-only transform, the actual pixels remain "real-world"

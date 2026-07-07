@@ -26,6 +26,8 @@ class CameraState extends Equatable {
     this.isFocusPointSupported = false,
     this.isExposurePointSupported = false,
     this.textureId,
+    this.previewRotationDegrees = 0,
+    this.previewHandlesTransform = false,
     this.availableLenses = const [DivineCameraLens.back],
     this.currentLensMetadata,
     this.videoStabilizationMode = DivineVideoStabilizationMode.off,
@@ -56,6 +58,8 @@ class CameraState extends Equatable {
       isExposurePointSupported:
           map['isExposurePointSupported'] as bool? ?? false,
       textureId: map['textureId'] as int?,
+      previewRotationDegrees: map['previewRotationDegrees'] as int? ?? 0,
+      previewHandlesTransform: map['previewHandlesTransform'] as bool? ?? false,
       availableLenses: map['availableLenses'] != null
           ? DivineCameraLens.fromNativeStringList(
               map['availableLenses'] as List<dynamic>,
@@ -125,6 +129,19 @@ class CameraState extends Equatable {
   /// The texture ID for the camera preview (Android).
   final int? textureId;
 
+  /// Clockwise rotation (degrees) to apply to the preview texture so it renders
+  /// upright. Non-zero on Android when the Flutter surface producer does not
+  /// handle crop/rotation itself, in which case the raw camera frames arrive in
+  /// sensor orientation and the UI must rotate them.
+  final int previewRotationDegrees;
+
+  /// Whether the native surface producer already applies its transform matrix
+  /// to the preview (the Android API<29 SurfaceTexture path). When `true`, that
+  /// matrix carries both the rotation and the front-camera mirror, so the UI
+  /// must apply neither; when `false` (API 29+ ImageReader path) the UI
+  /// reconstructs both. Always `false` on non-Android platforms.
+  final bool previewHandlesTransform;
+
   /// List of all available camera lenses on this device.
   /// Includes front, back, ultraWide, telephoto, and macro if supported.
   final List<DivineCameraLens> availableLenses;
@@ -190,6 +207,8 @@ class CameraState extends Equatable {
     bool? isFocusPointSupported,
     bool? isExposurePointSupported,
     int? textureId,
+    int? previewRotationDegrees,
+    bool? previewHandlesTransform,
     List<DivineCameraLens>? availableLenses,
     CameraLensMetadata? currentLensMetadata,
     DivineVideoStabilizationMode? videoStabilizationMode,
@@ -214,6 +233,10 @@ class CameraState extends Equatable {
       isExposurePointSupported:
           isExposurePointSupported ?? this.isExposurePointSupported,
       textureId: textureId ?? this.textureId,
+      previewRotationDegrees:
+          previewRotationDegrees ?? this.previewRotationDegrees,
+      previewHandlesTransform:
+          previewHandlesTransform ?? this.previewHandlesTransform,
       availableLenses: availableLenses ?? this.availableLenses,
       currentLensMetadata: currentLensMetadata ?? this.currentLensMetadata,
       videoStabilizationMode:
@@ -244,6 +267,8 @@ class CameraState extends Equatable {
       'isFocusPointSupported': isFocusPointSupported,
       'isExposurePointSupported': isExposurePointSupported,
       'textureId': textureId,
+      'previewRotationDegrees': previewRotationDegrees,
+      'previewHandlesTransform': previewHandlesTransform,
       'availableLenses': availableLenses
           .map((l) => l.toNativeString())
           .toList(),
@@ -273,6 +298,8 @@ class CameraState extends Equatable {
         'isFocusPointSupported: $isFocusPointSupported, '
         'isExposurePointSupported: $isExposurePointSupported, '
         'textureId: $textureId, '
+        'previewRotationDegrees: $previewRotationDegrees, '
+        'previewHandlesTransform: $previewHandlesTransform, '
         'availableLenses: $availableLenses, '
         'currentLensMetadata: $currentLensMetadata, '
         'videoStabilizationMode: $videoStabilizationMode, '
@@ -298,6 +325,8 @@ class CameraState extends Equatable {
     isFocusPointSupported,
     isExposurePointSupported,
     textureId,
+    previewRotationDegrees,
+    previewHandlesTransform,
     availableLenses,
     currentLensMetadata,
     videoStabilizationMode,

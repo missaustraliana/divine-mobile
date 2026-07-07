@@ -163,22 +163,44 @@ class DivineCamera {
     return success;
   }
 
-  /// Sets the focus point in normalized coordinates (0.0-1.0).
+  /// Sets the focus point.
   ///
-  /// [offset] the focus point coordinates.
+  /// [offset] is a point in the displayed (upright) preview's normalized
+  /// coordinates (0.0-1.0), i.e. where the user tapped. It is mapped onto the
+  /// raw sensor axes here so a rotated preview focuses the right spot; see
+  /// [_sensorOrientedPoint].
   /// Returns true if successful.
   Future<bool> setFocusPoint(Offset offset) async {
     if (!_state.isFocusPointSupported) return false;
-    return _platform.setFocusPoint(offset);
+    return _platform.setFocusPoint(_sensorOrientedPoint(offset));
   }
 
-  /// Sets the exposure point in normalized coordinates (0.0-1.0).
+  /// Sets the exposure point.
   ///
-  /// [offset] the exposure point coordinates.
+  /// [offset] is a point in the displayed (upright) preview's normalized
+  /// coordinates (0.0-1.0); it is mapped onto the raw sensor axes here the same
+  /// way as [setFocusPoint].
   /// Returns true if successful.
   Future<bool> setExposurePoint(Offset offset) async {
     if (!_state.isExposurePointSupported) return false;
-    return _platform.setExposurePoint(offset);
+    return _platform.setExposurePoint(_sensorOrientedPoint(offset));
+  }
+
+  /// Maps a point normalized against the displayed (upright) preview back into
+  /// the raw sensor texture's coordinate space by undoing the clockwise
+  /// [CameraState.previewRotationDegrees] the UI applies to render the preview
+  /// upright (the Android ImageReader path). Native metering maps normalized
+  /// coords onto the un-rotated sensor, so without this a non-center tap on a
+  /// 90/270 preview would meter the wrong point. Returns the point unchanged
+  /// when no rotation applies (the common 0° / SurfaceTexture cases).
+  Offset _sensorOrientedPoint(Offset point) {
+    final quarterTurns = (_state.previewRotationDegrees ~/ 90) % 4;
+    return switch (quarterTurns) {
+      1 => Offset(point.dy, 1.0 - point.dx),
+      2 => Offset(1.0 - point.dx, 1.0 - point.dy),
+      3 => Offset(1.0 - point.dy, point.dx),
+      _ => point,
+    };
   }
 
   /// Cancels any active focus/metering lock and returns to continuous
@@ -207,19 +229,29 @@ class DivineCamera {
 
   /// Switches between front and back camera.
   ///
-  /// Returns true if successful.
+  /// Returns true if successful. Returns false while a switch is already in
+  /// flight: the native side now completes a switch on the incoming camera's
+  /// first frame, so a re-entrant call would clobber that pending completion
+  /// and target the wrong lens.
   Future<bool> switchCamera() async {
-    if (!_state.canSwitchCamera) return false;
+    if (!_state.canSwitchCamera || _state.isSwitchingCamera) return false;
     final newLens = _state.lens.opposite;
 
     // Set switching state to keep last frame visible
     _state = _state.copyWith(isSwitchingCamera: true);
     _notifyStateChanged();
 
-    _state = await _platform.switchCamera(newLens);
-    _state = _state.copyWith(isSwitchingCamera: false);
-    _notifyStateChanged();
-    return true;
+    // Reset the flag in `finally` so a thrown platform switch (e.g. a CameraX
+    // bind failure) doesn't leave `isSwitchingCamera` stuck true — which would
+    // both freeze the preview and, via the re-entrancy guard above, block every
+    // later switch for the session.
+    try {
+      _state = await _platform.switchCamera(newLens);
+      return true;
+    } finally {
+      _state = _state.copyWith(isSwitchingCamera: false);
+      _notifyStateChanged();
+    }
   }
 
   /// Sets the video stabilization mode.
@@ -246,19 +278,27 @@ class DivineCamera {
   /// Switches to a specific camera lens.
   ///
   /// [lens] the lens to switch to.
-  /// Returns true if successful.
+  /// Returns true if successful. Returns false while a switch is already in
+  /// flight, for the same reason as [switchCamera].
   Future<bool> setLens(DivineCameraLens lens) async {
     if (lens == _state.lens) return true;
-    if (!_state.availableLenses.contains(lens)) return false;
+    if (!_state.availableLenses.contains(lens) || _state.isSwitchingCamera) {
+      return false;
+    }
 
     // Set switching state to keep last frame visible
     _state = _state.copyWith(isSwitchingCamera: true);
     _notifyStateChanged();
 
-    _state = await _platform.switchCamera(lens);
-    _state = _state.copyWith(isSwitchingCamera: false);
-    _notifyStateChanged();
-    return true;
+    // Reset the flag in `finally` for the same reason as [switchCamera]: a
+    // thrown switch must not strand `isSwitchingCamera` true.
+    try {
+      _state = await _platform.switchCamera(lens);
+      return true;
+    } finally {
+      _state = _state.copyWith(isSwitchingCamera: false);
+      _notifyStateChanged();
+    }
   }
 
   /// Starts video recording.
