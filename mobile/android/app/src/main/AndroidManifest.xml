@@ -89,6 +89,26 @@
         android:theme="@style/NormalTheme"
         android:localeConfig="@xml/locales_config"
         android:networkSecurityConfig="@xml/network_security_config">
+        <!-- Render with Skia instead of Impeller. On-device profiling
+             (profile builds, feed scroll) measured all three options:
+             - Impeller/Vulkan: 17-27ms raster per frame, 37-46 FPS,
+               constant jank (many blur/saveLayer passes over a live
+               video texture).
+             - Impeller/OpenGLES: 5-8ms raster, 60 FPS, but video
+               textures intermittently render BLACK while scrolling to
+               the next feed item until the scroll settles - the known
+               Impeller GLES SurfaceTexture/external-texture bug class
+               (flutter/flutter#141636, #145531).
+             - Skia: 13-16ms raster, 60 FPS, correct video rendering.
+             Skia is the only backend that is both smooth and correct on
+             this device class, and it matches the engine debug builds
+             already use (see debug/AndroidManifest.xml). Skia on Android
+             is deprecated upstream - re-evaluate Impeller (Vulkan raster
+             cost and the GLES video-texture bug) on each Flutter
+             upgrade. -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
         <!-- FCM default notification channel -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"

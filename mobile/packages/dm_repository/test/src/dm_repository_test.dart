@@ -262,6 +262,48 @@ class _RecordingVerifyWorker implements DmVerifyWorker {
   }
 }
 
+/// Delegating [NostrSigner] whose [getPublicKey] suspends on [gate] — models a
+/// remote signer's slow `refreshPublicKey` RPC so tests can run
+/// `stopListening()` while a live wrap is parked inside
+/// `_handleGiftWrapEvent`, before its `_decryptRumor` call.
+class _GatedPubkeySigner implements NostrSigner {
+  _GatedPubkeySigner(this._inner, this.gate);
+
+  final NostrSigner _inner;
+  final Future<void> gate;
+
+  @override
+  Future<String?> getPublicKey() async {
+    await gate;
+    return _inner.getPublicKey();
+  }
+
+  @override
+  Future<Event?> signEvent(Event event) => _inner.signEvent(event);
+
+  @override
+  Future<Map<dynamic, dynamic>?> getRelays() => _inner.getRelays();
+
+  @override
+  Future<String?> encrypt(String pubkey, String plaintext) =>
+      _inner.encrypt(pubkey, plaintext);
+
+  @override
+  Future<String?> decrypt(String pubkey, String ciphertext) =>
+      _inner.decrypt(pubkey, ciphertext);
+
+  @override
+  Future<String?> nip44Encrypt(String pubkey, String plaintext) =>
+      _inner.nip44Encrypt(pubkey, plaintext);
+
+  @override
+  Future<String?> nip44Decrypt(String pubkey, String ciphertext) =>
+      _inner.nip44Decrypt(pubkey, ciphertext);
+
+  @override
+  void close() => _inner.close();
+}
+
 /// Test double for [DmSyncState] that stores values in memory and captures
 /// [recordSeen] calls for assertions.
 class _FakeDmSyncState implements DmSyncState {
@@ -4774,7 +4816,7 @@ void main() {
 
       test(
         'remote-signer drain verifies gift wraps off the main isolate and '
-        'closes the verify isolate when the drain ends (#5424)',
+        'keeps the shared verify isolate alive until account switch (#5424)',
         () async {
           when(() => mockNostrClient.connectedRelayCount).thenReturn(2);
 
@@ -4827,7 +4869,9 @@ void main() {
           ).called(1);
 
           // ...with both the outer wrap and the seal verified via the worker
-          // (i.e. off the main isolate), and the worker torn down afterwards.
+          // (i.e. off the main isolate). The key-less worker deliberately
+          // survives the drain so live-subscription / retry wraps keep
+          // verifying off the main isolate...
           expect(
             verifyWorker.verifiedKinds,
             containsAllInOrder(<int>[
@@ -4835,7 +4879,293 @@ void main() {
               EventKind.sealEventKind,
             ]),
           );
+          expect(verifyWorker.closed, isFalse);
+
+          // ...and is reclaimed on account switch so no worker leaks across
+          // users.
+          repository.setCredentials(
+            userPubkey: senderPub,
+            signer: LocalNostrSigner(senderPriv),
+            messageService: mockMessageService,
+          );
           expect(verifyWorker.closed, isTrue);
+        },
+      );
+
+      test(
+        'live-subscription wrap outside a drain lazily spawns the shared '
+        'verify isolate, reuses it, and verifies off the main isolate',
+        () async {
+          final wrap1 = await _buildGiftWrap(
+            rumor: rumorFor('live off-isolate verify', createdAt: 1700000500),
+            senderPrivateKey: senderPriv,
+            recipientPubkey: recipientPub,
+            outerCreatedAt: 1700000000,
+          );
+          final wrap2 = await _buildGiftWrap(
+            rumor: rumorFor('live reuse', createdAt: 1700000600),
+            senderPrivateKey: senderPriv,
+            recipientPubkey: recipientPub,
+            outerCreatedAt: 1700000100,
+          );
+
+          final controller = StreamController<Event>();
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+            ),
+          ).thenAnswer((_) => controller.stream);
+
+          var spawnCount = 0;
+          final verifyWorker = _RecordingVerifyWorker();
+          final repository = createRepository(
+            userPubkey: recipientPub,
+            // Production decryptor + non-isolate signer: the exact path that
+            // used to verify inline on the main isolate outside a drain.
+            signer: LocalNostrSigner(recipientPriv),
+            verifyIsolateSpawner: () async {
+              spawnCount++;
+              return verifyWorker;
+            },
+          );
+
+          await repository.startListening();
+          controller
+            ..add(wrap1)
+            ..add(wrap2);
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+
+          // Both wraps verified through one lazily-spawned worker (outer
+          // wrap + seal each, off the main isolate) and persisted.
+          expect(spawnCount, equals(1));
+          expect(
+            verifyWorker.verifiedKinds,
+            containsAllInOrder(<int>[
+              EventKind.giftWrap,
+              EventKind.sealEventKind,
+              EventKind.giftWrap,
+              EventKind.sealEventKind,
+            ]),
+          );
+          expect(
+            persistedGiftWrapIds,
+            containsAll(<String>[
+              wrap1.id,
+              wrap2.id,
+            ]),
+          );
+
+          await controller.close();
+          await repository.stopListening();
+        },
+      );
+
+      test(
+        'verify-isolate spawn failure falls back to inline verification '
+        'without respawning per wrap',
+        () async {
+          final wrap1 = await _buildGiftWrap(
+            rumor: rumorFor('spawn-fail inline 1', createdAt: 1700000500),
+            senderPrivateKey: senderPriv,
+            recipientPubkey: recipientPub,
+            outerCreatedAt: 1700000000,
+          );
+          final wrap2 = await _buildGiftWrap(
+            rumor: rumorFor('spawn-fail inline 2', createdAt: 1700000600),
+            senderPrivateKey: senderPriv,
+            recipientPubkey: recipientPub,
+            outerCreatedAt: 1700000100,
+          );
+
+          final controller = StreamController<Event>();
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+            ),
+          ).thenAnswer((_) => controller.stream);
+
+          var spawnAttempts = 0;
+          final repository = createRepository(
+            userPubkey: recipientPub,
+            signer: LocalNostrSigner(recipientPriv),
+            verifyIsolateSpawner: () async {
+              spawnAttempts++;
+              throw StateError('spawn refused');
+            },
+          );
+
+          await repository.startListening();
+          controller
+            ..add(wrap1)
+            ..add(wrap2);
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+
+          // One failed spawn attempt, then inline verification — both wraps
+          // still decrypt and persist.
+          expect(spawnAttempts, equals(1));
+          expect(
+            persistedGiftWrapIds,
+            containsAll(<String>[
+              wrap1.id,
+              wrap2.id,
+            ]),
+          );
+
+          await controller.close();
+          await repository.stopListening();
+        },
+      );
+
+      test(
+        'stopListening closes the shared verify isolate (the production '
+        'disposal path — provider rebuilds never hit _resetState)',
+        () async {
+          final wrap = await _buildGiftWrap(
+            rumor: rumorFor('closed on stop', createdAt: 1700000500),
+            senderPrivateKey: senderPriv,
+            recipientPubkey: recipientPub,
+            outerCreatedAt: 1700000000,
+          );
+
+          final controller = StreamController<Event>();
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+            ),
+          ).thenAnswer((_) => controller.stream);
+
+          final verifyWorker = _RecordingVerifyWorker();
+          final repository = createRepository(
+            userPubkey: recipientPub,
+            signer: LocalNostrSigner(recipientPriv),
+            verifyIsolateSpawner: () async => verifyWorker,
+          );
+
+          await repository.startListening();
+          controller.add(wrap);
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+
+          expect(verifyWorker.verifiedKinds, isNotEmpty);
+          expect(verifyWorker.closed, isFalse);
+
+          await controller.close();
+          await repository.stopListening();
+
+          expect(verifyWorker.closed, isTrue);
+        },
+      );
+
+      test(
+        'a verify-isolate spawn in flight across stopListening is closed, '
+        'never installed',
+        () async {
+          final wrap = await _buildGiftWrap(
+            rumor: rumorFor('stale spawn', createdAt: 1700000500),
+            senderPrivateKey: senderPriv,
+            recipientPubkey: recipientPub,
+            outerCreatedAt: 1700000000,
+          );
+
+          final controller = StreamController<Event>();
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+            ),
+          ).thenAnswer((_) => controller.stream);
+
+          final staleWorker = _RecordingVerifyWorker();
+          final spawnGate = Completer<void>();
+          final repository = createRepository(
+            userPubkey: recipientPub,
+            signer: LocalNostrSigner(recipientPriv),
+            verifyIsolateSpawner: () async {
+              await spawnGate.future;
+              return staleWorker;
+            },
+          );
+
+          await repository.startListening();
+          controller.add(wrap);
+          await Future<void>.delayed(Duration.zero);
+
+          // Stop while the spawn is still blocked, then release it. The
+          // generation bump must invalidate the late spawn so its worker is
+          // closed instead of being installed as a leak nothing ever closes.
+          await controller.close();
+          await repository.stopListening();
+          spawnGate.complete();
+          await Future<void>.delayed(Duration.zero);
+
+          expect(staleWorker.closed, isTrue);
+          // The stale worker never verified anything — the wrap it was
+          // spawned for fell back to inline verification.
+          expect(staleWorker.verifiedKinds, isEmpty);
+        },
+      );
+
+      test(
+        'a wrap suspended at refreshPublicKey across stopListening does not '
+        're-spawn the verify isolate into the torn-down repository',
+        () async {
+          final wrap = await _buildGiftWrap(
+            rumor: rumorFor('post-stop respawn', createdAt: 1700000500),
+            senderPrivateKey: senderPriv,
+            recipientPubkey: recipientPub,
+            outerCreatedAt: 1700000000,
+          );
+
+          final controller = StreamController<Event>();
+          when(
+            () => mockNostrClient.subscribe(
+              any(),
+              subscriptionId: any(named: 'subscriptionId'),
+            ),
+          ).thenAnswer((_) => controller.stream);
+
+          // Models a remote signer whose refreshPublicKey RPC is slow: the
+          // wrap parks inside _handleGiftWrapEvent, *before* _decryptRumor
+          // (and thus before any verify-isolate spawn starts).
+          final rpcGate = Completer<void>();
+          final spawnedWorkers = <_RecordingVerifyWorker>[];
+          final repository = createRepository(
+            userPubkey: recipientPub,
+            signer: _GatedPubkeySigner(
+              LocalNostrSigner(recipientPriv),
+              rpcGate.future,
+            ),
+            verifyIsolateSpawner: () async {
+              final worker = _RecordingVerifyWorker();
+              spawnedWorkers.add(worker);
+              return worker;
+            },
+          );
+
+          await repository.startListening();
+          controller.add(wrap);
+          await Future<void>.delayed(Duration.zero);
+
+          // Terminal stop (the provider-dispose path) while the wrap is
+          // parked at the RPC — then the RPC resolves. Without the post-await
+          // session recheck the resumed wrap re-spawns a worker whose
+          // generation guard sees only post-stop values, installing a worker
+          // into the orphaned repository that nothing ever closes.
+          await controller.close();
+          await repository.stopListening();
+          rpcGate.complete();
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+
+          expect(spawnedWorkers, isEmpty);
+          // The torn-down session persists nothing; the wrap re-arrives via
+          // the next session's subscription window / history drain.
+          expect(persistedGiftWrapIds, isNot(contains(wrap.id)));
         },
       );
 
