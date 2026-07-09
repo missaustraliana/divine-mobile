@@ -2547,6 +2547,16 @@ class DmRepository {
       throw ArgumentError.value(content, 'content', 'must not be empty');
     }
 
+    // Send gate (#176): block before building or enqueuing a doomed intent.
+    // NIP17MessageService.sendRumor is the authoritative choke point (it also
+    // covers the drain replay); this earlier check avoids storing a queue row
+    // that would only ever re-fail the gate.
+    if (!await _messageService!.canSendTo(recipientPubkey)) {
+      return const NIP17SendResult.blocked(
+        'blocked: recipient not permitted by send policy',
+      );
+    }
+
     final rumorTags = <List<String>>[
       ...additionalTags,
       if (replyToId != null) ['e', replyToId],
@@ -3456,6 +3466,23 @@ class DmRepository {
       throw ArgumentError.value(content, 'content', 'must not be empty');
     }
 
+    // Send gate (#176) — group all-or-nothing: a restricted sender (protected
+    // minor) may only message a group where EVERY recipient is approved.
+    // Per-recipient gating in sendRumor alone would still deliver to the
+    // approved participants, so an attacker could p-tag the minor with a pinned
+    // decoy to slip content to the rest. Refuse the whole send if any recipient
+    // is blocked — before building or enqueuing anything.
+    for (final pubkey in recipientPubkeys) {
+      if (!await _messageService!.canSendTo(pubkey)) {
+        return [
+          for (final _ in recipientPubkeys)
+            const NIP17SendResult.blocked(
+              'blocked: group contains a non-approved recipient',
+            ),
+        ];
+      }
+    }
+
     final participants = [_userPubkey, ...recipientPubkeys]..sort();
     final conversationId = computeConversationId(participants);
     final outgoingDao = _outgoingDmsDao;
@@ -3463,6 +3490,12 @@ class DmRepository {
     final rumors = <Event>[];
     final results = <NIP17SendResult>[];
 
+    // Delivery below is per-recipient and NOT atomic: a mid-loop publish
+    // failure can leave the group partially delivered. That is a reliability/UX
+    // concern only, not a safety leak for the #176 restriction — the
+    // all-or-nothing gate above already guarantees EVERY recipient is approved,
+    // so a partial send can only ever reach approved recipients, never a
+    // blocked one.
     for (final pubkey in recipientPubkeys) {
       final rumorTags = <List<String>>[
         ...additionalTags,
@@ -3776,6 +3809,13 @@ class DmRepository {
     if (fileUrl.trim().isEmpty) {
       throw ArgumentError.value(fileUrl, 'fileUrl', 'must not be empty');
     }
+
+    // Protected-minor gate (#176): the file path intentionally relies on the
+    // single authoritative choke point in `sendRumor` (via sendPrivateMessage)
+    // rather than adding its own pre-check like sendMessage/sendGroupMessage. A
+    // blocked recipient is refused there before any publish; the extra pre-gate
+    // on the text paths is only an early-out to avoid enqueuing a doomed 1:1/
+    // group intent, which the single-shot file send does not create.
 
     final additionalTags = <List<String>>[
       ['file-type', fileMetadata.fileType],

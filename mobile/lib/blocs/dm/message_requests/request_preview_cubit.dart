@@ -5,8 +5,9 @@ import 'package:bloc/bloc.dart';
 import 'package:dm_repository/dm_repository.dart';
 import 'package:equatable/equatable.dart';
 import 'package:models/models.dart';
+import 'package:openvine/blocs/dm/minor_dm_approval.dart';
 
-enum RequestPreviewStatus { loading, loaded, error }
+enum RequestPreviewStatus { loading, loaded, error, denied }
 
 class RequestPreviewState extends Equatable {
   const RequestPreviewState({
@@ -48,20 +49,58 @@ class RequestPreviewCubit extends Cubit<RequestPreviewState> {
   RequestPreviewCubit({
     required DmRepository dmRepository,
     required this.conversationId,
+    required bool Function() isDmRestricted,
+    required bool Function(String) isApprovedRecipient,
     List<String> initialParticipantPubkeys = const [],
   }) : _dmRepository = dmRepository,
+       _isDmRestricted = isDmRestricted,
+       _isApprovedRecipient = isApprovedRecipient,
        _initialParticipantPubkeys = initialParticipantPubkeys,
        super(const RequestPreviewState());
 
   final DmRepository _dmRepository;
+
+  /// Whether the current user is DM-restricted (#176), read at load time.
+  final bool Function() _isDmRestricted;
+
+  /// Whether a counterparty is an approved official recipient (#176).
+  final bool Function(String) _isApprovedRecipient;
+
   final List<String> _initialParticipantPubkeys;
 
   /// The conversation ID this preview is for.
   final String conversationId;
 
   /// Loads message count and resolves participant pubkeys if needed.
+  ///
+  /// The #176 gate runs BEFORE any repository read and checks only the
+  /// route-provided pubkeys: resolving counterparties from the DB is itself
+  /// a read of hidden request data, so a DM-restricted user arriving without
+  /// route extras (a stale or direct `/inbox/message-requests/:id` URL)
+  /// fails closed via the predicate's empty-list branch instead of being
+  /// looked up. In-app navigation always passes extras, so only direct
+  /// links are denied this way — the view bounces them to the inbox, where
+  /// the filtered request list still reaches anything they may access.
   Future<void> load() async {
     try {
+      if (_isDmRestricted() &&
+          !allParticipantsApprovedForMinor(
+            _initialParticipantPubkeys,
+            _isApprovedRecipient,
+          )) {
+        if (!isClosed) {
+          emit(state.copyWith(status: RequestPreviewStatus.denied));
+        }
+        return;
+      }
+
+      // Use provided pubkeys if available, otherwise load from DB. Only
+      // non-restricted users reach the DB fallback: a restricted user with
+      // empty extras was already denied above.
+      final pubkeys = _initialParticipantPubkeys.isNotEmpty
+          ? _initialParticipantPubkeys
+          : await _resolveParticipants();
+
       final messageCount = await _dmRepository.countMessagesInConversation(
         conversationId,
       );
@@ -69,11 +108,6 @@ class RequestPreviewCubit extends Cubit<RequestPreviewState> {
         conversationId,
         limit: 10,
       );
-
-      // Use provided pubkeys if available, otherwise load from DB.
-      final pubkeys = _initialParticipantPubkeys.isNotEmpty
-          ? _initialParticipantPubkeys
-          : await _resolveParticipants();
 
       if (!isClosed) {
         emit(

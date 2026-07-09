@@ -3,6 +3,7 @@
 // ABOUTME: (kind 14 rumor → kind 13 seal → kind 1059 gift wrap)
 // ABOUTME: Works with any NostrSigner (local keys, Keycast RPC, Amber, etc.)
 
+import 'package:dm_repository/src/dm_send_policy.dart';
 import 'package:dm_repository/src/gift_wrap_build_worker.dart';
 import 'package:flutter/foundation.dart' show compute;
 import 'package:meta/meta.dart';
@@ -52,11 +53,13 @@ class NIP17MessageService {
     required NostrSigner signer,
     required String senderPublicKey,
     required NostrClient nostrService,
+    DmSendPolicy? sendPolicy,
     @visibleForTesting GiftWrapBuilder? giftWrapBuilder,
     @visibleForTesting IsolateGiftWrapBatchBuilder? isolateGiftWrapBatchBuilder,
   }) : _signer = signer,
        _senderPublicKey = senderPublicKey,
        _nostrService = nostrService,
+       _sendPolicy = sendPolicy ?? allowAllDmSendPolicy,
        _giftWrapBuilder = giftWrapBuilder ?? GiftWrapUtil.getGiftWrapEvent,
        _isolateGiftWrapBatchBuilder =
            isolateGiftWrapBatchBuilder ?? _computeGiftWrapBatch;
@@ -64,6 +67,7 @@ class NIP17MessageService {
   final NostrSigner _signer;
   final String _senderPublicKey;
   final NostrClient _nostrService;
+  final DmSendPolicy _sendPolicy;
   final GiftWrapBuilder _giftWrapBuilder;
   final IsolateGiftWrapBatchBuilder _isolateGiftWrapBatchBuilder;
 
@@ -76,6 +80,15 @@ class NIP17MessageService {
 
   /// Access to the underlying NostrService for relay management
   NostrClient get nostrService => _nostrService;
+
+  /// Whether the injected [DmSendPolicy] permits delivering to
+  /// [recipientPubkey]. Exposed so `DmRepository` can gate BEFORE enqueue
+  /// (avoid storing a doomed intent) and enforce group all-or-nothing before
+  /// any per-recipient send. The per-send gate in [sendRumor] remains the
+  /// authoritative choke point (covers the drain replay); this is the earlier,
+  /// cheaper check.
+  Future<bool> canSendTo(String recipientPubkey) =>
+      _sendPolicy(recipientPubkey);
 
   /// Builds a single NIP-17 gift wrap for [receiverPublicKey] from
   /// [rumorEvent].
@@ -256,6 +269,22 @@ class NIP17MessageService {
     List<String>? targetRelays,
   }) async {
     try {
+      // Send gate (#176): the lowest recipient-delivering primitive, so every
+      // publisher — direct send, group fan-out, drain replay, reactions,
+      // file — is covered at one seam. A protected minor's policy blocks any
+      // recipient outside the approved official set. Checked before any wrap
+      // build or publish, so a blocked send leaks no metadata to relays and
+      // performs no signing work.
+      if (!await _sendPolicy(recipientPubkey)) {
+        Log.info(
+          'NIP-17 send blocked by policy for recipient',
+          category: LogCategory.system,
+        );
+        return const NIP17SendResult.blocked(
+          'blocked: recipient not permitted by send policy',
+        );
+      }
+
       Log.info(
         'Sending NIP-17 encrypted message to recipient',
         category: LogCategory.system,

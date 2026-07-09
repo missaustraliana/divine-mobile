@@ -6,7 +6,9 @@ import 'package:db_client/db_client.dart';
 import 'package:dm_repository/dm_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:openvine/blocs/dm/minor_dm_approval.dart';
 import 'package:openvine/providers/app_providers.dart';
+import 'package:openvine/providers/protected_minor_providers.dart';
 import 'package:openvine/providers/user_profile_providers.dart';
 import 'package:openvine/screens/inbox/conversation/conversation_page.dart';
 import 'package:openvine/screens/inbox/conversation/conversation_view.dart';
@@ -61,6 +63,28 @@ void main() {
       );
     });
 
+    group('allParticipantsApprovedForMinor (#176 route-guard predicate)', () {
+      test('empty participant list fails closed, not vacuously approved', () {
+        // `[].every(...)` is vacuously true; a protected minor must NOT be let
+        // into a degenerate zero-counterparty thread. Must fail closed.
+        expect(allParticipantsApprovedForMinor(const [], (_) => true), isFalse);
+      });
+
+      test('every counterparty approved -> allowed', () {
+        expect(
+          allParticipantsApprovedForMinor(const ['a', 'b'], (_) => true),
+          isTrue,
+        );
+      });
+
+      test('any non-approved counterparty -> blocked', () {
+        expect(
+          allParticipantsApprovedForMinor(const ['a', 'b'], (p) => p == 'a'),
+          isFalse,
+        );
+      });
+    });
+
     group('renders', () {
       testWidgets('renders $ConversationView', (tester) async {
         await tester.pumpWidget(
@@ -71,6 +95,7 @@ void main() {
             ),
             mockAuthService: mockAuthService,
             additionalOverrides: [
+              isDmRestrictedProvider.overrideWithValue(false),
               dmRepositoryProvider.overrideWithValue(mockDmRepository),
               fetchUserProfileProvider(
                 otherPubkey,

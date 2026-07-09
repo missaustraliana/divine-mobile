@@ -50,11 +50,15 @@ void main() {
 
     RequestPreviewCubit buildCubit({
       List<String> initialParticipantPubkeys = const [],
+      bool isDmRestricted = false,
+      bool Function(String)? isApprovedRecipient,
     }) {
       return RequestPreviewCubit(
         dmRepository: mockDmRepository,
         conversationId: conversationId,
         initialParticipantPubkeys: initialParticipantPubkeys,
+        isDmRestricted: () => isDmRestricted,
+        isApprovedRecipient: isApprovedRecipient ?? (_) => true,
       );
     }
 
@@ -185,6 +189,9 @@ void main() {
         'emits error when loading fails',
         setUp: () {
           when(
+            () => mockDmRepository.getConversation(any()),
+          ).thenAnswer((_) async => null);
+          when(
             () => mockDmRepository.countMessagesInConversation(any()),
           ).thenThrow(Exception('db error'));
         },
@@ -194,6 +201,88 @@ void main() {
           const RequestPreviewState(status: RequestPreviewStatus.error),
         ],
         errors: () => [isA<Exception>()],
+      );
+    });
+
+    group('protected-minor gate (#176)', () {
+      blocTest<RequestPreviewCubit, RequestPreviewState>(
+        'restricted + non-approved counterparty (provided pubkeys) is denied '
+        'before any request data is read',
+        build: () => buildCubit(
+          initialParticipantPubkeys: [otherPubkey],
+          isDmRestricted: true,
+          isApprovedRecipient: (_) => false,
+        ),
+        act: (cubit) => cubit.load(),
+        expect: () => [
+          const RequestPreviewState(status: RequestPreviewStatus.denied),
+        ],
+        verify: (_) {
+          // The whole point of the gate: no hidden request metadata is read
+          // for a conversation the current user may not access.
+          verifyNever(() => mockDmRepository.getConversation(any()));
+          verifyNever(
+            () => mockDmRepository.countMessagesInConversation(any()),
+          );
+          verifyNever(
+            () =>
+                mockDmRepository.getMessages(any(), limit: any(named: 'limit')),
+          );
+        },
+      );
+
+      blocTest<RequestPreviewCubit, RequestPreviewState>(
+        'restricted + no route extras (direct or stale URL) fails closed '
+        'without any repository read, even with all counterparties approved',
+        // Approval cannot rescue this path: knowing the counterparty would
+        // itself require reading the conversation. No repository stubs on
+        // purpose — any read here is a regression and fails the test
+        // (mocktail missing-stub + verifyNever).
+        build: () => buildCubit(
+          isDmRestricted: true,
+          isApprovedRecipient: (_) => true,
+        ),
+        act: (cubit) => cubit.load(),
+        expect: () => [
+          const RequestPreviewState(status: RequestPreviewStatus.denied),
+        ],
+        verify: (_) {
+          verifyNever(() => mockDmRepository.getConversation(any()));
+          verifyNever(
+            () => mockDmRepository.countMessagesInConversation(any()),
+          );
+          verifyNever(
+            () =>
+                mockDmRepository.getMessages(any(), limit: any(named: 'limit')),
+          );
+        },
+      );
+
+      blocTest<RequestPreviewCubit, RequestPreviewState>(
+        'restricted + all counterparties approved loads normally',
+        setUp: () {
+          when(
+            () => mockDmRepository.countMessagesInConversation(any()),
+          ).thenAnswer((_) async => 2);
+          when(
+            () =>
+                mockDmRepository.getMessages(any(), limit: any(named: 'limit')),
+          ).thenAnswer((_) async => [inviteMessage]);
+        },
+        build: () => buildCubit(
+          initialParticipantPubkeys: [otherPubkey],
+          isDmRestricted: true,
+          isApprovedRecipient: (p) => p == otherPubkey,
+        ),
+        act: (cubit) => cubit.load(),
+        expect: () => [
+          const RequestPreviewState(
+            status: RequestPreviewStatus.loaded,
+            messageCount: 2,
+            participantPubkeys: [otherPubkey],
+            messages: [inviteMessage],
+          ),
+        ],
       );
     });
   });

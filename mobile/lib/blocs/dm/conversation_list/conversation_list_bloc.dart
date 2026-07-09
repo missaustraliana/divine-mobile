@@ -12,6 +12,7 @@ import 'package:dm_repository/dm_repository.dart';
 import 'package:equatable/equatable.dart';
 import 'package:follow_repository/follow_repository.dart';
 import 'package:models/models.dart';
+import 'package:openvine/blocs/dm/conversation_list/protected_minor_inbox_gate.dart';
 import 'package:rxdart/rxdart.dart';
 
 part 'conversation_list_event.dart';
@@ -23,10 +24,12 @@ class ConversationListBloc
     required DmRepository dmRepository,
     required FollowRepository followRepository,
     ContentBlocklistRepository? contentBlocklistRepository,
+    ProtectedMinorInboxGate? protectedMinorInboxGate,
     Duration recomputeDebounce = _defaultRecomputeDebounce,
   }) : _dmRepository = dmRepository,
        _followRepository = followRepository,
        _blocklistRepository = contentBlocklistRepository,
+       _protectedMinorInboxGate = protectedMinorInboxGate,
        _recomputeDebounce = recomputeDebounce,
        super(const ConversationListState()) {
     on<ConversationListStarted>(_onStarted, transformer: restartable());
@@ -43,6 +46,7 @@ class ConversationListBloc
   final DmRepository _dmRepository;
   final FollowRepository _followRepository;
   final ContentBlocklistRepository? _blocklistRepository;
+  final ProtectedMinorInboxGate? _protectedMinorInboxGate;
 
   /// Window over which bursty conversation writes are coalesced before the
   /// list is re-composed. The combined stream re-runs `classifyPotentialRequests`
@@ -95,7 +99,7 @@ class ConversationListBloc
     // Combining ensures requests are never truncated by pagination
     // and follow-list changes are handled automatically.
     await emit.forEach(
-      Rx.combineLatest5(
+      Rx.combineLatest6(
         _dmRepository.watchAcceptedConversations(limit: state.currentLimit),
         _dmRepository.watchPotentialRequests(),
         _followRepository.followingStream.startWith(const []),
@@ -107,7 +111,13 @@ class ConversationListBloc
         // empty pre-auth pubkey would misroute every 1:1. This re-fires the
         // handler once the real identity arrives. See #5374.
         _dmRepository.userPubkeyStream.startWith(_dmRepository.userPubkey),
-        (accepted, potentialRequests, _, isRestoring, userPubkey) => (
+        // Stream 6: protected-minor verdict changes (#176). A receive-time
+        // revalidation that flips a counterparty's approval fires here so the
+        // list re-filters and a just-revoked official drops, even though no
+        // conversation row changed. Pass-through (never emits) when unrestricted.
+        (_protectedMinorInboxGate?.changes ?? const Stream<void>.empty())
+            .startWith(null),
+        (accepted, potentialRequests, _, isRestoring, userPubkey, _) => (
           accepted: accepted,
           potentialRequests: potentialRequests,
           isRestoring: isRestoring,
@@ -150,20 +160,40 @@ class ConversationListBloc
             ? split.requests
             : const <DmConversation>[];
 
+        final blocklistedInbox =
+            _blocklistRepository?.filterBlockedConversations(
+              inboxConversations,
+              userPubkey: userPubkey,
+            ) ??
+            inboxConversations;
+        final blocklistedRequests =
+            _blocklistRepository?.filterBlockedConversations(
+              requests,
+              userPubkey: userPubkey,
+            ) ??
+            requests;
+
+        // Protected-minor inbound filter (#176): hide conversations whose
+        // counterparty (all non-self participants) is not an approved official
+        // recipient. Pass-through for a non-restricted user. Applied after the
+        // blocklist filter so both hidden sets compose.
+        final visibleInbox =
+            _protectedMinorInboxGate?.filter(
+              blocklistedInbox,
+              userPubkey: userPubkey,
+            ) ??
+            blocklistedInbox;
+        final visibleRequests =
+            _protectedMinorInboxGate?.filter(
+              blocklistedRequests,
+              userPubkey: userPubkey,
+            ) ??
+            blocklistedRequests;
+
         return state.copyWith(
           status: ConversationListStatus.loaded,
-          conversations:
-              _blocklistRepository?.filterBlockedConversations(
-                inboxConversations,
-                userPubkey: userPubkey,
-              ) ??
-              inboxConversations,
-          requestConversations:
-              _blocklistRepository?.filterBlockedConversations(
-                requests,
-                userPubkey: userPubkey,
-              ) ??
-              requests,
+          conversations: visibleInbox,
+          requestConversations: visibleRequests,
           potentialRequests: data.potentialRequests,
           hasMore: data.accepted.length == state.currentLimit,
           isLoadingMore: false,
