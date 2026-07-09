@@ -10,6 +10,7 @@ import 'package:openvine/extensions/video_editor_history_extensions.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/models/divine_video_clip.dart';
 import 'package:openvine/models/timeline_overlay_item.dart';
+import 'package:openvine/models/video_editor/transition_geometry.dart';
 import 'package:openvine/widgets/video_editor/main_editor/video_editor_scope.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/controls/video_editor_timeline_control_bar.dart';
 import 'package:openvine/widgets/video_editor/timeline_editor/strips/video_editor_timeline_clip_strip.dart';
@@ -51,6 +52,11 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
   /// Cached total duration from clip editor — used by scroll listeners
   /// that fire outside the build phase.
   Duration _totalDuration = Duration.zero;
+
+  /// Cached loop-wrap display geometry from the last build (suspended while
+  /// trimming, matching the strip) — used by the scroll/pinch mappings that
+  /// fire outside build so the playhead lines up with the shortened strip.
+  LoopWrapDisplay _wrapDisplay = LoopWrapDisplay.none;
 
   /// Playhead time derived from scroll offset — always matches the visual
   /// playhead regardless of zoom level.
@@ -127,10 +133,19 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
         ? clips[currentClipIndex].id
         : null;
 
-    _totalDuration = totalDuration;
+    // With a loop transition, the display axis differs from the raw clip sum:
+    // the wrap-consumed head/tail plays inside the blend seam region appended
+    // at the end (see [LoopWrapDisplay]). Suspended while trimming, matching
+    // the clip strip. `displayDuration` equals `totalDuration` without a wrap.
+    final wrapDisplay = trimmingClipId != null
+        ? LoopWrapDisplay.none
+        : LoopWrapDisplay.fromClips(clips);
+    final displayDuration = wrapDisplay.displayTotal(clips);
+    _totalDuration = displayDuration;
+    _wrapDisplay = wrapDisplay;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final halfScreen = screenWidth / 2;
-    final totalWidth = _contentWidth(totalDuration);
+    final totalWidth = _contentWidth(displayDuration);
 
     final hasSelectedOverlay = context.select(
       (TimelineOverlayBloc b) => b.state.selectedItemId != null,
@@ -149,7 +164,10 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
         BlocListener<ClipEditorBloc, ClipEditorState>(
           listenWhen: (prev, curr) => prev.totalDuration != curr.totalDuration,
           listener: (context, state) {
-            _totalDuration = state.totalDuration;
+            // _totalDuration is not updated here: build recomputes it on every
+            // rebuild (all its inputs are in the context.select record above)
+            // and, unlike this listener, correctly suspends the loop-wrap
+            // shortening while a trim gesture is active.
             final overlayBloc = context.read<TimelineOverlayBloc>();
             overlayBloc.add(
               TimelineOverlayTotalDurationChanged(state.totalDuration),
@@ -295,7 +313,7 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
                     maxHeight: TimelineConstants.height,
                     child: VideoEditorTimelineInteractiveBody(
                       playheadPosition: _playheadPosition,
-                      totalDuration: totalDuration,
+                      totalDuration: displayDuration,
                       formatPosition: (pos) {
                         final totalSeconds = pos.inMilliseconds / 1000.0;
                         final minutes = totalSeconds ~/ 60;
@@ -930,6 +948,7 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
             _scrollController.offset,
             _pixelsPerSecond,
             _totalDuration,
+            wrap: _wrapDisplay,
           )
         : Duration.zero;
 
@@ -940,6 +959,7 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
         clips,
         anchorPosition,
         newPps,
+        wrap: _wrapDisplay,
       );
       _scrollController.jumpTo(
         newOffset.clamp(0, _scrollController.position.maxScrollExtent),
@@ -967,6 +987,7 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
         context.read<ClipEditorBloc>().state.clips,
         position,
         _pixelsPerSecond,
+        wrap: _wrapDisplay,
       );
 
   /// Inverse of [_positionToScrollOffset]: maps a [scrollOffset] back to a
@@ -977,6 +998,7 @@ class _VideoEditorTimelineState extends State<VideoEditorTimelineScaffold> {
         scrollOffset,
         _pixelsPerSecond,
         _totalDuration,
+        wrap: _wrapDisplay,
       );
 
   void _syncScrollToPosition(Duration position, Duration totalDuration) {
