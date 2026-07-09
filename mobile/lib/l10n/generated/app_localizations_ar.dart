@@ -8358,14 +8358,6 @@ class AppLocalizationsAr extends AppLocalizations {
   String get videoEditorDrawToolPencilSemanticLabel => 'أداة القلم';
 
   @override
-  String videoEditorLayerReorderLabel(int index) {
-    return 'إعادة ترتيب الطبقة $index';
-  }
-
-  @override
-  String get videoEditorLayerReorderHint => 'اضغط مطولاً لإعادة الترتيب';
-
-  @override
   String get videoEditorShowTimelineSemanticLabel => 'إظهار الجدول الزمني';
 
   @override
