@@ -604,6 +604,7 @@ void main() {
           isA<ClipEditorState>()
               .having((s) => s.isEditing, 'isEditing', isFalse)
               .having((s) => s.isSplitting, 'isSplitting', isTrue)
+              .having((s) => s.splittingClipId, 'splittingClipId', 'split-me')
               .having((s) => s.isTrimDragging, 'isTrimDragging', isFalse),
           isA<ClipEditorState>()
               .having((s) => s.clips, 'clips', hasLength(2))
@@ -625,8 +626,70 @@ void main() {
               ),
           isA<ClipEditorState>()
               .having((s) => s.clips, 'clips', hasLength(2))
-              .having((s) => s.isSplitting, 'isSplitting', isFalse),
+              .having((s) => s.isSplitting, 'isSplitting', isFalse)
+              .having((s) => s.splittingClipId, 'splittingClipId', isNull),
         ],
+      );
+
+      // A queued split must hit the clip captured at dispatch, not whatever is
+      // selected when the (sequential) handler runs.
+      blocTest<ClipEditorBloc, ClipEditorState>(
+        'splits the clip named by the event, not the current selection',
+        build: () => buildBloc(splitClip: _fakeSplitClip),
+        seed: () => ClipEditorState(
+          clips: [
+            _createClip(id: 'a', duration: const Duration(seconds: 4)),
+            _createClip(id: 'b', duration: const Duration(seconds: 4)),
+          ],
+        ),
+        act: (bloc) => bloc.add(
+          const ClipEditorSplitRequested(
+            clipId: 'b',
+            splitPosition: Duration(seconds: 2),
+          ),
+        ),
+        wait: const Duration(milliseconds: 1),
+        verify: (bloc) {
+          final clips = bloc.state.clips;
+          expect(clips, hasLength(3));
+          // 'a' (the selected clip) is untouched; 'b' was split into two.
+          expect(clips.first.id, equals('a'));
+          expect(clips.any((c) => c.id == 'b'), isFalse);
+        },
+      );
+
+      // A queued split on a clip *before* the current selection must not shift
+      // the selection onto a different clip — currentClipIndex follows the same
+      // clip after the inserted tail pushes later indices down.
+      blocTest<ClipEditorBloc, ClipEditorState>(
+        'keeps the selection on the same clip when an earlier clip is split',
+        build: () => buildBloc(splitClip: _fakeSplitClip),
+        seed: () => ClipEditorState(
+          currentClipIndex: 2,
+          clips: [
+            _createClip(id: 'a', duration: const Duration(seconds: 4)),
+            _createClip(id: 'b', duration: const Duration(seconds: 4)),
+            _createClip(id: 'c', duration: const Duration(seconds: 4)),
+          ],
+        ),
+        act: (bloc) => bloc.add(
+          const ClipEditorSplitRequested(
+            clipId: 'a',
+            splitPosition: Duration(seconds: 2),
+          ),
+        ),
+        wait: const Duration(milliseconds: 1),
+        verify: (bloc) {
+          final state = bloc.state;
+          // 'a' became two clips, so 'c' moved from index 2 to index 3.
+          expect(state.clips, hasLength(4));
+          expect(state.clips.last.id, equals('c'));
+          // The selection still points at 'c', not the clip now at index 2.
+          expect(
+            state.clips[state.currentClipIndex].id,
+            equals('c'),
+          );
+        },
       );
 
       test('uses state splitPosition for resulting clip durations', () async {
@@ -812,7 +875,7 @@ void main() {
           );
 
           // The split future always resolves now, so isSplitting resets and the
-          // droppable() transformer no longer wedges the next split request.
+          // sequential() transformer runs the next split request in turn.
           bloc
             ..emit(
               bloc.state.copyWith(
@@ -1943,13 +2006,20 @@ void main() {
           const ClipEditorAudioExtractionRequested(clipTitle: 'Test'),
         ),
         expect: () => [
-          isA<ClipEditorState>().having(
-            (s) => s.isExtractingAudio,
-            'isExtractingAudio',
-            isTrue,
-          ),
+          isA<ClipEditorState>()
+              .having((s) => s.isExtractingAudio, 'isExtractingAudio', isTrue)
+              .having(
+                (s) => s.extractingAudioClipId,
+                'extractingAudioClipId',
+                'clip-local',
+              ),
           isA<ClipEditorState>()
               .having((s) => s.isExtractingAudio, 'isExtractingAudio', isFalse)
+              .having(
+                (s) => s.extractingAudioClipId,
+                'extractingAudioClipId',
+                isNull,
+              )
               .having((s) => s.clips.first.volume, 'volume', 0)
               .having(
                 (s) => s.lastAudioExtraction,
@@ -1971,6 +2041,150 @@ void main() {
           verify(
             () => mockService.extractAudio(
               videoPath: '/path/clip-local.mp4',
+              speed: any(named: 'speed'),
+            ),
+          ).called(1);
+        },
+      );
+
+      // A queued extraction must hit the clip captured at dispatch, not
+      // whatever is selected when the (sequential) handler runs.
+      blocTest<ClipEditorBloc, ClipEditorState>(
+        'extracts audio from the clip named by the event, not the selection',
+        build: () {
+          when(
+            () => mockService.extractAudio(
+              videoPath: any(named: 'videoPath'),
+              speed: any(named: 'speed'),
+            ),
+          ).thenAnswer(
+            (_) async => const AudioExtractionResult(
+              audioFilePath: '/tmp/audio.m4a',
+              duration: 5,
+              fileSize: 12345,
+              sha256Hash: 'abc123',
+              mimeType: 'audio/mp4',
+            ),
+          );
+          return buildBloc(audioExtractionService: mockService);
+        },
+        seed: () => ClipEditorState(
+          clips: [
+            _createClipWithFile(id: 'a'),
+            _createClipWithFile(id: 'b'),
+          ],
+        ),
+        act: (bloc) => bloc.add(
+          const ClipEditorAudioExtractionRequested(
+            clipId: 'b',
+            clipTitle: 'Test',
+          ),
+        ),
+        wait: const Duration(milliseconds: 1),
+        verify: (bloc) {
+          final clips = bloc.state.clips;
+          // 'b' (named by the event) is muted; 'a' (selected) is untouched.
+          expect(clips.firstWhere((c) => c.id == 'b').volume, equals(0));
+          expect(clips.firstWhere((c) => c.id == 'a').volume, equals(1.0));
+          verify(
+            () => mockService.extractAudio(
+              videoPath: '/path/b.mp4',
+              speed: any(named: 'speed'),
+            ),
+          ).called(1);
+        },
+      );
+
+      // Regression: a rapid double-tap of Extract on the same clip enqueues two
+      // requests (sequential handler). The second must be deduped once the
+      // first mutes the clip, so it does not extract again and add a duplicate
+      // audio track.
+      blocTest<ClipEditorBloc, ClipEditorState>(
+        'dedupes a queued re-extraction of an already-extracted clip',
+        build: () {
+          when(
+            () => mockService.extractAudio(
+              videoPath: any(named: 'videoPath'),
+              speed: any(named: 'speed'),
+            ),
+          ).thenAnswer(
+            (_) async => const AudioExtractionResult(
+              audioFilePath: '/tmp/audio.m4a',
+              duration: 5,
+              fileSize: 12345,
+              sha256Hash: 'abc123',
+              mimeType: 'audio/mp4',
+            ),
+          );
+          return buildBloc(audioExtractionService: mockService);
+        },
+        seed: () => ClipEditorState(clips: [_createClipWithFile(id: 'b')]),
+        act: (bloc) => bloc
+          ..add(
+            const ClipEditorAudioExtractionRequested(
+              clipId: 'b',
+              clipTitle: 'Test',
+            ),
+          )
+          ..add(
+            const ClipEditorAudioExtractionRequested(
+              clipId: 'b',
+              clipTitle: 'Test',
+            ),
+          ),
+        wait: const Duration(milliseconds: 1),
+        verify: (bloc) {
+          expect(bloc.state.clips.single.volume, equals(0));
+          expect(bloc.state.extractedAudioClipIds, contains('b'));
+          // Extraction ran exactly once despite two queued requests.
+          verify(
+            () => mockService.extractAudio(
+              videoPath: any(named: 'videoPath'),
+              speed: any(named: 'speed'),
+            ),
+          ).called(1);
+        },
+      );
+
+      // A deliberate re-extraction after a manual un-mute must still run — the
+      // dedupe guard is lifted once the clip's volume is restored.
+      blocTest<ClipEditorBloc, ClipEditorState>(
+        're-extracts after the clip is manually un-muted',
+        build: () {
+          when(
+            () => mockService.extractAudio(
+              videoPath: any(named: 'videoPath'),
+              speed: any(named: 'speed'),
+            ),
+          ).thenAnswer(
+            (_) async => const AudioExtractionResult(
+              audioFilePath: '/tmp/audio.m4a',
+              duration: 5,
+              fileSize: 12345,
+              sha256Hash: 'abc123',
+              mimeType: 'audio/mp4',
+            ),
+          );
+          return buildBloc(audioExtractionService: mockService);
+        },
+        seed: () => ClipEditorState(
+          clips: [_createClipWithFile(id: 'b')],
+          extractedAudioClipIds: const {'b'},
+        ),
+        act: (bloc) => bloc.add(
+          const ClipEditorAudioExtractionRequested(
+            clipId: 'b',
+            clipTitle: 'Test',
+          ),
+        ),
+        wait: const Duration(milliseconds: 1),
+        verify: (bloc) {
+          // 'b' seeded at default volume 1.0 (un-muted), so extraction runs
+          // even though it is already in extractedAudioClipIds.
+          expect(bloc.state.clips.single.volume, equals(0));
+          verify(
+            () => mockService.extractAudio(
+              videoPath: any(named: 'videoPath'),
               speed: any(named: 'speed'),
             ),
           ).called(1);
