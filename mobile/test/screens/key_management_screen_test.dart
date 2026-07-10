@@ -3,9 +3,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:golden_toolkit/golden_toolkit.dart';
 import 'package:openvine/l10n/generated/app_localizations.dart';
+import 'package:openvine/providers/protected_minor_providers.dart';
 import 'package:openvine/screens/key_management_screen.dart';
 import 'package:openvine/services/auth_service.dart';
 
@@ -44,6 +48,17 @@ class _FakeKeyManagementAuthService extends Fake implements AuthService {
 
   @override
   Future<String?> exportNsec({String? biometricPrompt}) async => null;
+
+  int importFromNsecCallCount = 0;
+
+  @override
+  Future<AuthResult> importFromNsec(
+    String nsec, {
+    String? biometricPrompt,
+  }) async {
+    importFromNsecCallCount++;
+    return const AuthResult(success: true);
+  }
 }
 
 void main() {
@@ -73,11 +88,17 @@ void main() {
           );
     });
 
-    Future<void> pumpSubject(WidgetTester tester) async {
+    Future<void> pumpSubject(
+      WidgetTester tester, {
+      bool restricted = false,
+    }) async {
       await tester.pumpWidget(
         testMaterialApp(
           home: const KeyManagementScreen(),
           mockAuthService: authService,
+          additionalOverrides: [
+            isKeyManagementRestrictedProvider.overrideWithValue(restricted),
+          ],
         ),
       );
       await tester.pumpAndSettle();
@@ -169,6 +190,140 @@ void main() {
           ),
           findsOneWidget,
         );
+      },
+    );
+
+    testWidgets(
+      'hides nsec export and key import for a protected minor',
+      (tester) async {
+        final l10n = lookupAppLocalizations(const Locale('en'));
+        // Local, exportable key: without the gate the copy-nsec action would
+        // show, so this proves the gate — not canExportLocalNsec — hides it.
+        authService = _FakeKeyManagementAuthService(
+          currentNpub: testNpub,
+          authenticationSource: AuthenticationSource.divineOAuth,
+          canExportLocalNsec: true,
+        );
+
+        await pumpSubject(tester, restricted: true);
+
+        expect(find.text(l10n.keyManagementRestrictedTitle), findsOneWidget);
+        expect(find.text(l10n.keyManagementRestrictedBody), findsOneWidget);
+
+        expect(
+          find.text(l10n.keyManagementCopyNsec, skipOffstage: false),
+          findsNothing,
+        );
+        expect(
+          find.text(l10n.keyManagementBackupTitle, skipOffstage: false),
+          findsNothing,
+        );
+        expect(
+          find.text(l10n.keyManagementImportButton, skipOffstage: false),
+          findsNothing,
+        );
+        expect(
+          find.text(l10n.keyManagementImportTitle, skipOffstage: false),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets(
+      'shows nsec export and key import for a normal account',
+      (tester) async {
+        final l10n = lookupAppLocalizations(const Locale('en'));
+        authService = _FakeKeyManagementAuthService(
+          currentNpub: testNpub,
+          authenticationSource: AuthenticationSource.divineOAuth,
+          canExportLocalNsec: true,
+        );
+
+        await pumpSubject(tester);
+
+        expect(
+          find.text(l10n.keyManagementCopyNsec, skipOffstage: false),
+          findsOneWidget,
+        );
+        expect(
+          find.text(l10n.keyManagementImportButton, skipOffstage: false),
+          findsOneWidget,
+        );
+        expect(find.text(l10n.keyManagementRestrictedTitle), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'does not import the key when the gate flips to restricted while the '
+      'confirmation dialog is open',
+      (tester) async {
+        final l10n = lookupAppLocalizations(const Locale('en'));
+        final restrictedFlip = StateProvider<bool>((ref) => false);
+        authService = _FakeKeyManagementAuthService(
+          currentNpub: testNpub,
+          authenticationSource: AuthenticationSource.importedKeys,
+          canExportLocalNsec: true,
+        );
+
+        // Tall surface so the import button is fully hittable (the screen is a
+        // long ListView; on the default 800x600 it sits at the viewport edge).
+        tester.view.physicalSize = const Size(1080, 2400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        // The import-confirm dialog pops via go_router's context.pop, so the
+        // screen must be hosted inside a GoRouter, not a plain MaterialApp.
+        final router = GoRouter(
+          routes: [
+            GoRoute(
+              path: '/',
+              builder: (context, state) => const KeyManagementScreen(),
+            ),
+          ],
+        );
+        await tester.pumpWidget(
+          testProviderScope(
+            mockAuthService: authService,
+            additionalOverrides: [
+              isKeyManagementRestrictedProvider.overrideWith(
+                (ref) => ref.watch(restrictedFlip),
+              ),
+            ],
+            child: MaterialApp.router(
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              routerConfig: router,
+              theme: ThemeData.dark(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Start the import: enter an nsec and open the confirmation dialog.
+        await tester.enterText(find.byType(TextField), 'nsec1${'0' * 58}');
+        await tester.ensureVisible(
+          find.text(l10n.keyManagementImportButton),
+        );
+        await tester.tap(find.text(l10n.keyManagementImportButton));
+        await tester.pumpAndSettle();
+        expect(
+          find.text(l10n.keyManagementConfirmImportTitle),
+          findsOneWidget,
+        );
+
+        // Gate flips to restricted while the dialog is still open.
+        final container = ProviderScope.containerOf(
+          tester.element(find.byType(KeyManagementScreen)),
+        );
+        container.read(restrictedFlip.notifier).state = true;
+        await tester.pump();
+
+        // Confirm the already-open dialog; the raw-key call must be gated.
+        await tester.tap(find.text(l10n.keyManagementImportConfirm));
+        await tester.pumpAndSettle();
+
+        expect(authService.importFromNsecCallCount, isZero);
       },
     );
   });
