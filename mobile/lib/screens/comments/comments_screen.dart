@@ -157,6 +157,7 @@ abstract final class CommentsScreen {
     ValueChanged<int>? onCommentCountChanged,
   }) {
     final container = ProviderScope.containerOf(context, listen: false);
+    final draggableController = DraggableScrollableController();
 
     // Synchronously available repositories / services.
     final commentsRepository = container.read(commentsRepositoryProvider);
@@ -190,10 +191,11 @@ abstract final class CommentsScreen {
     return context
         .showVideoPausingVineBottomSheet<void>(
           snap: true,
-          snapSizes: const [0.7, 0.93],
-          initialChildSize: 0.7,
-          minChildSize: 0.5,
-          maxChildSize: 0.93,
+          snapSizes: _CommentsSheetSizing.snapSizes,
+          initialChildSize: _CommentsSheetSizing.initial,
+          minChildSize: _CommentsSheetSizing.min,
+          maxChildSize: _CommentsSheetSizing.max,
+          draggableController: draggableController,
           // Wrap the whole sheet subtree in a MultiBlocProvider so every slot
           // (title, trailing, bottomInput, buildScrollBody) shares the same
           // three blocs. BlocProvider owns lifecycle — it closes each BLoC
@@ -289,7 +291,9 @@ abstract final class CommentsScreen {
           // Wrap the input so the keyboard is dropped the instant the sheet
           // starts dismissing (drag / scrim / back), otherwise iOS leaves it
           // stranded over the feed below (#5604).
-          bottomInput: const UnfocusOnSheetDismiss(child: _MainCommentInput()),
+          bottomInput: UnfocusOnSheetDismiss(
+            child: MainCommentInput(draggableController: draggableController),
+          ),
           buildScrollBody: (scrollController) {
             activeScrollController = scrollController;
             return CommentsSheetLoadTelemetry(
@@ -301,10 +305,41 @@ abstract final class CommentsScreen {
             );
           },
         )
-        .whenComplete(
-          surfaceTelemetry.completeDismissed,
-        );
+        .whenComplete(() {
+          surfaceTelemetry.completeDismissed();
+          disposeCommentsSheetController(draggableController);
+        });
   }
+}
+
+/// Disposes the comments sheet's [DraggableScrollableController] safely.
+///
+/// The sheet future resolves at pop-start — before the sheet unmounts and
+/// detaches the controller — so a focus-driven expand
+/// ([_MainCommentInputState._expandSheetForKeyboard]) may still be animating.
+/// `DraggableScrollableController.dispose` does not stop that animation, so its
+/// ticks would keep calling `notifyListeners` on the disposed controller and
+/// trip the "used after disposed" assert while the sheet animates out. Cancel
+/// any in-flight animation first — `jumpTo` is the documented cancel path — so
+/// nothing ticks after disposal.
+///
+/// Public-by-test only: production callers should use [CommentsScreen.show].
+@visibleForTesting
+void disposeCommentsSheetController(
+  DraggableScrollableController controller,
+) {
+  if (controller.isAttached) {
+    controller.jumpTo(controller.size);
+  }
+  controller.dispose();
+}
+
+abstract final class _CommentsSheetSizing {
+  static const min = 0.5;
+  static const initial = 0.7;
+  static const max = 0.93;
+  static const List<double> snapSizes = [initial, max];
+  static const focusExpandDuration = Duration(milliseconds: 250);
 }
 
 /// Wires the composer / reactions outbox signals into [CommentsListBloc] store
@@ -384,10 +419,7 @@ class OutboxBridges extends StatelessWidget {
     );
   }
 
-  static bool _idSetsEqual(
-    Map<String, Object?> a,
-    Map<String, Object?> b,
-  ) {
+  static bool _idSetsEqual(Map<String, Object?> a, Map<String, Object?> b) {
     if (a.length != b.length) return false;
     for (final key in a.keys) {
       if (!b.containsKey(key)) return false;
@@ -569,16 +601,28 @@ class _CommentsScreenBody extends StatelessWidget {
 }
 
 /// Main comment input widget that reads from [CommentComposerBloc] state.
-class _MainCommentInput extends ConsumerStatefulWidget {
-  const _MainCommentInput();
+///
+/// Public-by-test only: production callers should use [CommentsScreen.show].
+@visibleForTesting
+class MainCommentInput extends ConsumerStatefulWidget {
+  const MainCommentInput({required this.draggableController, super.key});
+
+  final DraggableScrollableController draggableController;
 
   @override
-  ConsumerState<_MainCommentInput> createState() => _MainCommentInputState();
+  ConsumerState<MainCommentInput> createState() => _MainCommentInputState();
 }
 
-class _MainCommentInputState extends ConsumerState<_MainCommentInput> {
+class _MainCommentInputState extends ConsumerState<MainCommentInput> {
   late final TextEditingController _controller;
   late final FocusNode _focusNode;
+
+  /// Guards against restarting the expand animation on every intermediate
+  /// frame while it is climbing. Reset by [_expandWindowTimer], never by the
+  /// [DraggableScrollableController.animateTo] future — see
+  /// [_expandSheetForKeyboard].
+  bool _isExpanding = false;
+  Timer? _expandWindowTimer;
 
   @override
   void initState() {
@@ -586,13 +630,68 @@ class _MainCommentInputState extends ConsumerState<_MainCommentInput> {
     final state = context.read<CommentComposerBloc>().state;
     _controller = TextEditingController(text: state.mainInputText);
     _focusNode = FocusNode();
+    _focusNode.addListener(_handleFocusChanged);
+    widget.draggableController.addListener(_handleSheetSizeChanged);
   }
 
   @override
   void dispose() {
+    _expandWindowTimer?.cancel();
+    widget.draggableController.removeListener(_handleSheetSizeChanged);
+    _focusNode.removeListener(_handleFocusChanged);
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  void _handleFocusChanged() {
+    if (_focusNode.hasFocus) {
+      _expandSheetForKeyboard();
+    }
+  }
+
+  void _handleSheetSizeChanged() {
+    final controller = widget.draggableController;
+    if (!_focusNode.hasFocus ||
+        !controller.isAttached ||
+        controller.size >= _CommentsSheetSizing.initial) {
+      return;
+    }
+
+    _expandSheetForKeyboard();
+  }
+
+  void _expandSheetForKeyboard() {
+    if (_isExpanding) return;
+    final controller = widget.draggableController;
+    if (!controller.isAttached || controller.size >= _CommentsSheetSizing.max) {
+      return;
+    }
+
+    _isExpanding = true;
+    controller.animateTo(
+      _CommentsSheetSizing.max,
+      duration: _CommentsSheetSizing.focusExpandDuration,
+      curve: Curves.easeOut,
+    );
+
+    // The future from `animateTo` never completes when a user drag cancels the
+    // animation (the underlying TickerFuture only resolves its `orCancel`
+    // path), so releasing the latch on that future would strand `_isExpanding`
+    // and silently disable the re-clamp for the rest of the sheet session.
+    // Release it on a duration-matched timer instead, then re-check so a drag
+    // that left the focused sheet below the safe size gets clamped back up.
+    _expandWindowTimer?.cancel();
+    _expandWindowTimer = Timer(
+      _CommentsSheetSizing.focusExpandDuration,
+      _onExpandWindowElapsed,
+    );
+  }
+
+  void _onExpandWindowElapsed() {
+    if (!mounted) return;
+    _isExpanding = false;
+    _handleSheetSizeChanged();
   }
 
   @override
@@ -701,9 +800,7 @@ class _MainCommentInputState extends ConsumerState<_MainCommentInput> {
               // reply (E tag without matching P tag). Cancel reply mode
               // instead so the user can re-target a still-visible comment.
               if (replyToAuthorPubkey == null) {
-                composer.add(
-                  CommentReplyToggled(state.activeReplyCommentId!),
-                );
+                composer.add(CommentReplyToggled(state.activeReplyCommentId!));
                 return;
               }
               composer.add(

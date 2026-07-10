@@ -18,6 +18,8 @@ import 'package:openvine/blocs/comments/comment_composer/comment_composer_bloc.d
 import 'package:openvine/blocs/comments/comment_reactions/comment_reactions_bloc.dart';
 import 'package:openvine/blocs/comments/comments_list/comments_list_bloc.dart';
 import 'package:openvine/blocs/comments/comments_surface_performance_telemetry.dart';
+import 'package:openvine/features/feature_flags/models/feature_flag.dart';
+import 'package:openvine/features/feature_flags/providers/feature_flag_providers.dart';
 import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/nostr_client_provider.dart';
@@ -225,6 +227,7 @@ void main() {
       CommentComposerState? composerState,
       VideoEvent? videoEvent,
       int? initialCommentCount,
+      DraggableScrollableController? draggableController,
     }) {
       if (listState != null) {
         when(() => mockListBloc.state).thenReturn(listState);
@@ -233,30 +236,62 @@ void main() {
         when(() => mockComposerBloc.state).thenReturn(composerState);
       }
 
+      final effectiveDraggableController =
+          draggableController ?? DraggableScrollableController();
+      if (draggableController == null) {
+        addTearDown(effectiveDraggableController.dispose);
+      }
+
+      final content = draggableController == null
+          ? _CommentsScreenTestContent(
+              videoEvent: videoEvent ?? testVideoEvent,
+              sheetScrollController: scrollController,
+              initialCommentCount: initialCommentCount ?? 0,
+              draggableController: effectiveDraggableController,
+            )
+          : DraggableScrollableSheet(
+              controller: effectiveDraggableController,
+              expand: false,
+              initialChildSize: 0.7,
+              minChildSize: 0.5,
+              maxChildSize: 0.93,
+              snap: true,
+              snapSizes: const [0.7, 0.93],
+              builder: (context, sheetScrollController) =>
+                  _CommentsScreenTestContent(
+                    videoEvent: videoEvent ?? testVideoEvent,
+                    sheetScrollController: sheetScrollController,
+                    initialCommentCount: initialCommentCount ?? 0,
+                    draggableController: effectiveDraggableController,
+                  ),
+            );
+
       return ProviderScope(
         overrides: [
           socialServiceProvider.overrideWithValue(mockSocialService),
           authServiceProvider.overrideWithValue(mockAuthService),
           nostrServiceProvider.overrideWithValue(mockNostrClient),
+          isFeatureEnabledProvider(
+            FeatureFlag.videoReplies,
+          ).overrideWithValue(false),
         ],
         child: MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
-          home: Scaffold(
-            body: MultiBlocProvider(
-              providers: [
-                BlocProvider<CommentsListBloc>.value(value: mockListBloc),
-                BlocProvider<CommentComposerBloc>.value(
-                  value: mockComposerBloc,
-                ),
-                BlocProvider<CommentReactionsBloc>.value(
-                  value: mockReactionsBloc,
-                ),
-              ],
-              child: _CommentsScreenTestContent(
-                videoEvent: videoEvent ?? testVideoEvent,
-                sheetScrollController: scrollController,
-                initialCommentCount: initialCommentCount ?? 0,
+          home: MediaQuery(
+            data: const MediaQueryData(size: Size(800, 600)),
+            child: Scaffold(
+              body: MultiBlocProvider(
+                providers: [
+                  BlocProvider<CommentsListBloc>.value(value: mockListBloc),
+                  BlocProvider<CommentComposerBloc>.value(
+                    value: mockComposerBloc,
+                  ),
+                  BlocProvider<CommentReactionsBloc>.value(
+                    value: mockReactionsBloc,
+                  ),
+                ],
+                child: content,
               ),
             ),
           ),
@@ -475,6 +510,159 @@ void main() {
                 as CommentTextChanged;
         expect(captured.text, 'Test comment');
       });
+
+      testWidgets('expands sheet to max when the composer gains focus', (
+        tester,
+      ) async {
+        final draggableController = DraggableScrollableController();
+        addTearDown(draggableController.dispose);
+        final comment = CommentBuilder()
+            .withId(TestCommentIds.comment1Id)
+            .withContent('Visible comment')
+            .build();
+        final listState = CommentsListState(
+          rootEventId: testVideoEventId,
+          rootAuthorPubkey: testVideoAuthorPubkey,
+          status: CommentsStatus.success,
+          commentsById: {comment.id: comment},
+        );
+
+        await tester.pumpWidget(
+          buildTestWidget(
+            draggableController: draggableController,
+            listState: listState,
+            composerState: const CommentComposerState(
+              mainInputText: 'ready to send',
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(draggableController.size, 0.7);
+
+        await tester.tap(find.byType(TextField).first);
+        await tester.pumpAndSettle();
+
+        // The sheet fraction reaching max is the guard that keeps the fixed
+        // chrome + composer + keyboard padding inside the visible region;
+        // button presence alone wouldn't prove that.
+        expect(draggableController.size, closeTo(0.93, 0.001));
+        // The keyboard-dismiss affordance is focus-gated, so its presence
+        // confirms focus actually took effect (not just that a node exists).
+        expect(
+          find.bySemanticsIdentifier('hide_comment_keyboard_button'),
+          findsOneWidget,
+        );
+        // Draft text survives the focus-driven expand.
+        expect(find.text('ready to send'), findsOneWidget);
+      });
+
+      testWidgets('keeps focused composer from settling below safe snap size', (
+        tester,
+      ) async {
+        final draggableController = DraggableScrollableController();
+        addTearDown(draggableController.dispose);
+        final comment = CommentBuilder()
+            .withId(TestCommentIds.comment1Id)
+            .withContent('Visible comment')
+            .build();
+        final listState = CommentsListState(
+          rootEventId: testVideoEventId,
+          rootAuthorPubkey: testVideoAuthorPubkey,
+          status: CommentsStatus.success,
+          commentsById: {comment.id: comment},
+        );
+
+        await tester.pumpWidget(
+          buildTestWidget(
+            draggableController: draggableController,
+            listState: listState,
+          ),
+        );
+        await tester.pump();
+
+        await tester.tap(find.byType(TextField).first);
+        await tester.pumpAndSettle();
+        expect(draggableController.size, closeTo(0.93, 0.001));
+
+        draggableController.jumpTo(0.5);
+        await tester.pumpAndSettle();
+
+        expect(draggableController.size, closeTo(0.93, 0.001));
+      });
+
+      testWidgets('re-clamps after an interrupted focus expand', (
+        tester,
+      ) async {
+        final draggableController = DraggableScrollableController();
+        addTearDown(draggableController.dispose);
+        final comment = CommentBuilder()
+            .withId(TestCommentIds.comment1Id)
+            .withContent('Visible comment')
+            .build();
+        final listState = CommentsListState(
+          rootEventId: testVideoEventId,
+          rootAuthorPubkey: testVideoAuthorPubkey,
+          status: CommentsStatus.success,
+          commentsById: {comment.id: comment},
+        );
+
+        await tester.pumpWidget(
+          buildTestWidget(
+            draggableController: draggableController,
+            listState: listState,
+          ),
+        );
+        await tester.pump();
+
+        // Kick off the focus-driven expand but do NOT let it settle.
+        await tester.tap(find.byType(TextField).first);
+        await tester.pump(); // apply focus + start the expand animation
+        await tester.pump(const Duration(milliseconds: 80)); // mid-flight
+        expect(draggableController.size, greaterThan(0.7));
+        expect(draggableController.size, lessThan(0.93));
+
+        // Interrupt the in-flight expand while the composer stays focused.
+        // `jumpTo` calls `startActivity`, which cancels the running `animateTo`
+        // (a real drag would do the same but also drops focus). That
+        // cancellation never resolves the `animateTo` future, so a latch
+        // released on that future strands and permanently disables the
+        // re-clamp for the rest of the sheet session.
+        draggableController.jumpTo(0.5);
+        await tester.pump();
+        expect(draggableController.size, lessThan(0.7));
+
+        // Elapse past the expand window (250ms) so the latch releases and
+        // re-checks, then settle the re-clamp animation. With focus retained,
+        // the sheet must return to max.
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pumpAndSettle();
+        expect(draggableController.size, closeTo(0.93, 0.001));
+      });
+
+      testWidgets('hide keyboard keeps draft text available', (tester) async {
+        final draggableController = DraggableScrollableController();
+        addTearDown(draggableController.dispose);
+
+        await tester.pumpWidget(
+          buildTestWidget(draggableController: draggableController),
+        );
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField).first, 'draft reply');
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.bySemanticsIdentifier('hide_comment_keyboard_button'),
+        );
+        await tester.pump();
+
+        expect(find.text('draft reply'), findsOneWidget);
+        expect(
+          find.bySemanticsIdentifier('hide_comment_keyboard_button'),
+          findsNothing,
+        );
+      });
     });
 
     group('reply toggling', () {
@@ -529,8 +717,11 @@ void main() {
         await tester.pumpAndSettle();
 
         final l10n = lookupAppLocalizations(const Locale('en'));
+        final generatedAuthorName = UserProfile.generatedNameFor(
+          TestCommentIds.author1Pubkey,
+        );
         expect(
-          find.text('${l10n.commentReplyToPrefix} TestUser'),
+          find.text('${l10n.commentReplyToPrefix} $generatedAuthorName'),
           findsOneWidget,
         );
         expect(_divineIcon(DivineIconName.x), findsWidgets);
@@ -803,6 +994,67 @@ void main() {
         },
       );
     });
+
+    group('sheet controller disposal', () {
+      testWidgets(
+        'cancels an in-flight expand before disposing so no '
+        '"used after disposed" assert fires',
+        (tester) async {
+          final controller = DraggableScrollableController();
+
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Scaffold(
+                body: DraggableScrollableSheet(
+                  controller: controller,
+                  expand: false,
+                  initialChildSize: 0.7,
+                  minChildSize: 0.5,
+                  maxChildSize: 0.93,
+                  snap: true,
+                  snapSizes: const [0.7, 0.93],
+                  builder: (context, scrollController) => ListView(
+                    controller: scrollController,
+                    children: const [SizedBox(height: 2000)],
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.pump();
+          expect(controller.isAttached, isTrue);
+
+          // Arm a focus-style expand and interrupt it mid-flight, exactly as a
+          // scrim / back dismiss does while _expandSheetForKeyboard is still
+          // animating. The sheet future disposes the controller at pop-start,
+          // before the sheet unmounts and detaches it.
+          controller.animateTo(
+            0.93,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOut,
+          );
+          await tester.pump(); // start the animation
+          await tester.pump(const Duration(milliseconds: 80)); // mid-flight
+          expect(controller.size, greaterThan(0.7));
+          expect(controller.size, lessThan(0.93));
+
+          disposeCommentsSheetController(controller);
+
+          // Advance past where the leftover animation ticks would have fired.
+          // The plain-dispose path notifies the disposed controller on each
+          // tick and throws; the cancel-first path leaves nothing ticking.
+          for (var i = 0; i < 6; i++) {
+            await tester.pump(const Duration(milliseconds: 40));
+          }
+          expect(tester.takeException(), isNull);
+
+          // Unmounting the still-mounted sheet detaches the disposed
+          // controller; that path must stay clean too.
+          await tester.pumpWidget(const SizedBox());
+          expect(tester.takeException(), isNull);
+        },
+      );
+    });
   });
 }
 
@@ -815,11 +1067,13 @@ class _CommentsScreenTestContent extends StatelessWidget {
     required this.videoEvent,
     required this.sheetScrollController,
     required this.initialCommentCount,
+    required this.draggableController,
   });
 
   final VideoEvent videoEvent;
   final ScrollController sheetScrollController;
   final int initialCommentCount;
+  final DraggableScrollableController draggableController;
 
   @override
   Widget build(BuildContext context) {
@@ -837,105 +1091,9 @@ class _CommentsScreenTestContent extends StatelessWidget {
               scrollController: sheetScrollController,
             ),
           ),
-          _MainCommentInputTest(),
+          MainCommentInput(draggableController: draggableController),
         ],
       ),
-    );
-  }
-}
-
-/// Test version of main comment input that reads from the composer bloc.
-class _MainCommentInputTest extends StatefulWidget {
-  @override
-  State<_MainCommentInputTest> createState() => _MainCommentInputTestState();
-}
-
-class _MainCommentInputTestState extends State<_MainCommentInputTest> {
-  late final TextEditingController _controller;
-  late final FocusNode _focusNode;
-
-  @override
-  void initState() {
-    super.initState();
-    final state = context.read<CommentComposerBloc>().state;
-    _controller = TextEditingController(text: state.mainInputText);
-    _focusNode = FocusNode();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return BlocConsumer<CommentComposerBloc, CommentComposerState>(
-      listenWhen: (prev, next) =>
-          prev.activeReplyCommentId != next.activeReplyCommentId,
-      listener: (context, state) {
-        if (state.activeReplyCommentId != null) {
-          _focusNode.requestFocus();
-        }
-      },
-      buildWhen: (prev, next) =>
-          prev.mainInputText != next.mainInputText ||
-          prev.replyInputText != next.replyInputText ||
-          prev.activeReplyCommentId != next.activeReplyCommentId,
-      builder: (context, state) {
-        final isReplyMode = state.activeReplyCommentId != null;
-        final inputText = isReplyMode
-            ? state.replyInputText
-            : state.mainInputText;
-
-        if (_controller.text != inputText) {
-          _controller.text = inputText;
-          _controller.selection = TextSelection.collapsed(
-            offset: inputText.length,
-          );
-        }
-
-        String? replyToDisplayName;
-        String? replyToAuthorPubkey;
-        if (isReplyMode) {
-          final listState = context.read<CommentsListBloc>().state;
-          final replyComment =
-              listState.commentsById[state.activeReplyCommentId];
-          if (replyComment != null) {
-            replyToAuthorPubkey = replyComment.authorPubkey;
-            replyToDisplayName = 'TestUser';
-          }
-        }
-
-        return CommentInput(
-          controller: _controller,
-          focusNode: _focusNode,
-          replyToDisplayName: replyToDisplayName,
-          onChanged: (text) {
-            context.read<CommentComposerBloc>().add(
-              CommentTextChanged(text, commentId: state.activeReplyCommentId),
-            );
-          },
-          onSubmit: () {
-            if (isReplyMode) {
-              context.read<CommentComposerBloc>().add(
-                CommentSubmitted(
-                  parentCommentId: state.activeReplyCommentId,
-                  parentAuthorPubkey: replyToAuthorPubkey,
-                ),
-              );
-            } else {
-              context.read<CommentComposerBloc>().add(const CommentSubmitted());
-            }
-          },
-          onCancelReply: () {
-            context.read<CommentComposerBloc>().add(
-              CommentReplyToggled(state.activeReplyCommentId!),
-            );
-          },
-        );
-      },
     );
   }
 }
