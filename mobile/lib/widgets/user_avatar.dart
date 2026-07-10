@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:openvine/widgets/avatar_failure_cache.dart';
 import 'package:openvine/widgets/vine_cached_image.dart';
 import 'package:unified_logger/unified_logger.dart';
 
@@ -129,6 +130,10 @@ class UserAvatar extends StatelessWidget {
     }
 
     if (_hasNetworkImage && _isSvgImageUrl) {
+      if (AvatarFailureCache.instance.isFailed(imageUrl!)) {
+        return _buildPlaceholder();
+      }
+
       return SvgPicture.network(
         imageUrl!,
         fit: BoxFit.cover,
@@ -138,18 +143,27 @@ class UserAvatar extends StatelessWidget {
             'Avatar SVG failed to load URL: $imageUrl - Error: $error',
             name: 'UserAvatar',
           );
+          AvatarFailureCache.instance.recordFailureForError(imageUrl!, error);
           return _buildPlaceholder();
         },
       );
     }
 
     if (_hasNetworkImage) {
+      if (AvatarFailureCache.instance.isFailed(imageUrl!)) {
+        return _buildPlaceholder();
+      }
+
       return VineCachedImage(
         imageUrl: imageUrl!,
         placeholder: (context, url) => _buildPlaceholder(),
         errorWidget: (context, url, error) {
-          if (error.toString().contains('Invalid image data') ||
-              error.toString().contains('Image codec failed')) {
+          final failureKind = AvatarFailureCache.instance.recordFailureForError(
+            url,
+            error,
+          );
+
+          if (failureKind == AvatarFailureKind.deterministic) {
             UnifiedLogger.warning(
               '🖼️ Invalid image data for avatar URL: $url - Error: $error',
               name: 'UserAvatar',
