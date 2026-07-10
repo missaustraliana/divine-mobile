@@ -27,6 +27,7 @@ import 'package:openvine/services/auth_service.dart' show AuthState;
 import 'package:openvine/services/broken_video_tracker.dart';
 import 'package:openvine/services/collaborator_invite_service.dart';
 import 'package:openvine/services/content_deletion_service.dart';
+import 'package:openvine/services/dead_media_feed_guard.dart';
 import 'package:openvine/services/event_api_client.dart';
 import 'package:openvine/services/event_router.dart';
 import 'package:openvine/services/nsfw_content_filter.dart';
@@ -384,12 +385,30 @@ VideoMetadataUpdateService videoMetadataUpdateService(Ref ref) {
   );
 }
 
-/// Broken video tracker service for filtering non-functional videos
-@riverpod
+/// Broken video tracker service for filtering non-functional videos.
+///
+/// `keepAlive: true` so this stays the single app-session-stable instance —
+/// [videoEventServiceProvider] attaches it to `VideoEventService` for
+/// `filterVideoList`, and [deadMediaFeedGuardProvider] must mark broken
+/// videos on that *same* instance. Without `keepAlive`, this autodisposes
+/// once its initial watchers drop, so a later read can rebuild a fresh
+/// tracker that `VideoEventService` never sees — the home feed would then
+/// mark an item broken without it ever being filtered. See #5953 review.
+@Riverpod(keepAlive: true)
 Future<BrokenVideoTracker> brokenVideoTracker(Ref ref) async {
   final tracker = BrokenVideoTracker();
   await tracker.initialize();
   return tracker;
+}
+
+/// Guard that HEAD-confirms a feed item's media is a hard 404 and marks it
+/// broken so the home feed can skip past + persistently prune it. Reuses the
+/// singleton [brokenVideoTrackerProvider] so a mark here is visible to every
+/// surface's `filterVideoList`. See #5953.
+@riverpod
+Future<DeadMediaFeedGuard> deadMediaFeedGuard(Ref ref) async {
+  final tracker = await ref.watch(brokenVideoTrackerProvider.future);
+  return DeadMediaFeedGuard(brokenVideoTracker: tracker);
 }
 
 /// Provider for VideoLocalStorage instance (SQLite-backed)
