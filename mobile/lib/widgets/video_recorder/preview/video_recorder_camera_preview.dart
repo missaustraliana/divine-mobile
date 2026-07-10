@@ -1,6 +1,8 @@
 // ABOUTME: Camera preview widget with animated aspect ratio transitions and grid overlay
 // ABOUTME: Handles tap-to-focus and displays rule-of-thirds grid during non-recording state
 
+import 'dart:ui' as ui;
+
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -53,7 +55,11 @@ class VideoRecorderCameraPreview extends StatelessWidget {
                 child: ClipRRect(
                   clipBehavior: .hardEdge,
                   borderRadius: borderRadius,
-                  child: _StackItems(enableTapToFocus: enableTapToFocus),
+                  // The blur wraps the whole stack from above its camera-rebuild
+                  // [ValueKey], so a switch's rebuild doesn't dispose the ramp.
+                  child: _CameraSwitchBlur(
+                    child: _StackItems(enableTapToFocus: enableTapToFocus),
+                  ),
                 ),
               );
             },
@@ -103,8 +109,11 @@ class _CameraPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sensorAspectRatio = context.select(
-      (VideoRecorderBloc b) => b.state.cameraSensorAspectRatio,
+    final (:sensorAspectRatio, :textureId) = context.select(
+      (VideoRecorderBloc b) => (
+        sensorAspectRatio: b.state.cameraSensorAspectRatio,
+        textureId: b.state.previewTextureId,
+      ),
     );
 
     return FittedBox(
@@ -120,10 +129,70 @@ class _CameraPreview extends StatelessWidget {
             if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux)
               const SizedBox.shrink()
             else
-              VideoRecorderMobilePreview(enableTapToFocus: enableTapToFocus),
+              // Keyed on the texture id: a facing flip rebinds the incoming
+              // camera onto a fresh texture, so a changed id remounts the
+              // preview to pick up its frames. Neither this remount nor the
+              // camera-rebuild remount of the enclosing Stack resets the switch
+              // blur — it lives above [_StackItems], so its ramp-out plays over
+              // the new frame.
+              VideoRecorderMobilePreview(
+                key: ValueKey(textureId),
+                enableTapToFocus: enableTapToFocus,
+              ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Softens a front/back lens switch: while the preview is frozen on its last
+/// frame (see [VideoRecorderBlocState.isSwitchingCamera]) this ramps a gaussian
+/// blur over it, then deblurs as the new lens's first frames arrive — the same
+/// cue the native camera app uses to hide the hard cut and the new sensor's
+/// initial unfocused frames.
+///
+/// Wraps the preview stack from above its camera-rebuild [ValueKey], so the
+/// ramp survives the remount a switch triggers and deblurs over the new frame.
+class _CameraSwitchBlur extends StatelessWidget {
+  const _CameraSwitchBlur({required this.child});
+
+  final Widget child;
+
+  /// Peak gaussian sigma applied to the frozen frame mid-switch. Deliberately
+  /// moderate — a full-screen blur pass over the camera texture is
+  /// raster-thread work, and it only runs for the brief switch transition.
+  static const double _peakBlurSigma = 16;
+
+  /// Blur ramp duration each way. Kept short so the new lens is revealed
+  /// quickly once the deblur starts.
+  static const Duration _rampDuration = Duration(milliseconds: 50);
+
+  /// Below this sigma the blur is visually a no-op; skip the filter layer so
+  /// there is zero blur cost at rest and once the deblur completes.
+  static const double _blurEpsilon = 0.1;
+
+  @override
+  Widget build(BuildContext context) {
+    final isSwitching = context.select(
+      (VideoRecorderBloc b) => b.state.isSwitchingCamera,
+    );
+    // Under reduced motion, snap the blur in/out instead of ramping it.
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: isSwitching ? _peakBlurSigma : 0),
+      duration: reduceMotion ? Duration.zero : _rampDuration,
+      curve: Curves.easeOut,
+      child: child,
+      builder: (context, sigma, child) {
+        if (sigma < _blurEpsilon) return child!;
+        return ClipRect(
+          child: ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+            child: child,
+          ),
+        );
+      },
     );
   }
 }
