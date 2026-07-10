@@ -177,6 +177,61 @@ void main() {
       expect(service, isA<WatermarkDownloadService>());
     });
 
+    group('deleteStaleWatermarkRenders', () {
+      late Directory tempDir;
+
+      setUp(() {
+        tempDir = Directory.systemTemp.createTempSync('watermark_stale_test_');
+      });
+
+      tearDown(() {
+        if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+      });
+
+      test('removes only aged watermark renders', () {
+        final oldMtime = DateTime.now().subtract(const Duration(hours: 2));
+        final stale1 = File('${tempDir.path}/watermarked_111.mp4')
+          ..writeAsStringSync('a')
+          ..setLastModifiedSync(oldMtime);
+        final stale2 = File('${tempDir.path}/watermarked_222.mp4')
+          ..writeAsStringSync('b')
+          ..setLastModifiedSync(oldMtime);
+        final unrelatedVideo = File('${tempDir.path}/merged_333.mp4')
+          ..writeAsStringSync('c')
+          ..setLastModifiedSync(oldMtime);
+        final unrelatedImage = File('${tempDir.path}/watermarked_444.jpg')
+          ..writeAsStringSync('d')
+          ..setLastModifiedSync(oldMtime);
+
+        service.deleteStaleWatermarkRenders(tempDir);
+
+        expect(stale1.existsSync(), isFalse);
+        expect(stale2.existsSync(), isFalse);
+        expect(unrelatedVideo.existsSync(), isTrue);
+        expect(unrelatedImage.existsSync(), isTrue);
+      });
+
+      test('keeps renders younger than the stale window', () {
+        // A dismissed save can still be rendering into this file, and a
+        // completed save's file may still be presented in the share sheet.
+        final recent = File('${tempDir.path}/watermarked_555.mp4')
+          ..writeAsStringSync('e');
+
+        service.deleteStaleWatermarkRenders(tempDir);
+
+        expect(recent.existsSync(), isTrue);
+      });
+
+      test('does not throw when the directory does not exist', () {
+        final missing = Directory('${tempDir.path}/missing');
+
+        expect(
+          () => service.deleteStaleWatermarkRenders(missing),
+          returnsNormally,
+        );
+      });
+    });
+
     group('downloadOriginal', () {
       test('saves a cached video file successfully', () async {
         final tempDir = await Directory.systemTemp.createTemp(

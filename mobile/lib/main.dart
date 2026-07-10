@@ -120,6 +120,7 @@ import 'package:openvine/widgets/app_lifecycle_handler.dart';
 import 'package:openvine/widgets/dm_restriction_gate_sync.dart';
 import 'package:openvine/widgets/geo_blocking_gate.dart';
 import 'package:openvine/widgets/upload_failure_sheet.dart';
+import 'package:openvine/widgets/vine_cached_image.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permissions_service/permissions_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -1456,6 +1457,10 @@ Future<void> _initializeVideoCacheManifest() async {
     task: () async {
       try {
         await initializeMediaCache();
+        // Trim the image cache back under its byte budget too (unawaited so
+        // it never blocks startup). The video cache is handled inside
+        // initializeMediaCache().
+        unawaited(openVineImageCache.enforceCacheLimits());
       } catch (e) {
         Log.error(
           '[STARTUP] Video cache initialization failed: $e',
