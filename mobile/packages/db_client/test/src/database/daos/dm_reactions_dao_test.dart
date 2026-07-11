@@ -319,6 +319,131 @@ void main() {
     });
 
     test(
+      'markBlocked marks the row blocked, clears rumor json, and drops it '
+      'from the retryable set so the sweep and a re-tap never re-drive it',
+      () async {
+        await insertPending();
+
+        await dao.markBlocked(id: _pendingId, ownerPubkey: _ownerA);
+
+        final row = await dao.getById(id: _pendingId, ownerPubkey: _ownerA);
+        expect(row!.publishStatus, equals('blocked'));
+        expect(
+          row.rumorEventJson,
+          isNull,
+          reason: 'A blocked send is terminal; no rumor is kept for retry.',
+        );
+        // Still live (not soft-deleted) so it renders as a settled own chip.
+        expect(row.isDeleted, isFalse);
+
+        final retryable = await dao.getRetryableOwnReactions(
+          ownerPubkey: _ownerA,
+        );
+        expect(
+          retryable.map((r) => r.id),
+          isNot(contains(_pendingId)),
+          reason:
+              'blocked is neither failed nor pending, and has no rumor '
+              'json — excluded on both predicates.',
+        );
+      },
+    );
+
+    test(
+      'getRetryableOwnReactions returns failed and pending own reactions '
+      'with stored rumor json',
+      () async {
+        // A pending own reaction (interrupted send).
+        await insertPending();
+
+        // A failed own reaction on a different target message.
+        const failedId =
+            '2222222222222222222222222222222222222222222222222222222222222222';
+        const otherTarget =
+            '3333333333333333333333333333333333333333333333333333333333333333';
+        await dao.insertOwnReactionSuperseding(
+          placeholderId: failedId,
+          conversationId: _conversationId,
+          targetMessageId: otherTarget,
+          targetMessageAuthor: _targetAuthor,
+          reactorPubkey: _reactorA,
+          emoji: '😀',
+          createdAt: 1_700_000_100,
+          ownerPubkey: _ownerA,
+          rumorEventJson: '{"id":"$failedId"}',
+        );
+        await dao.markFailed(placeholderId: failedId, ownerPubkey: _ownerA);
+
+        final retryable = await dao.getRetryableOwnReactions(
+          ownerPubkey: _ownerA,
+        );
+
+        expect(
+          retryable.map((r) => r.id),
+          containsAll(<String>[_pendingId, failedId]),
+        );
+        expect(retryable.every((r) => r.rumorEventJson != null), isTrue);
+      },
+    );
+
+    test(
+      'getRetryableOwnReactions excludes sent, deleted, incoming, and other '
+      "owners' reactions",
+      () async {
+        // Sent own reaction: swap clears json + marks sent.
+        await insertPending();
+        await dao.swapPlaceholderId(
+          placeholderId: _pendingId,
+          realRumorId: _sentId,
+          ownerPubkey: _ownerA,
+        );
+
+        // Soft-deleted own reaction (superseded / removed).
+        const deletedId =
+            '4444444444444444444444444444444444444444444444444444444444444444';
+        const deletedTarget =
+            '5555555555555555555555555555555555555555555555555555555555555555';
+        await dao.insertOwnReactionSuperseding(
+          placeholderId: deletedId,
+          conversationId: _conversationId,
+          targetMessageId: deletedTarget,
+          targetMessageAuthor: _targetAuthor,
+          reactorPubkey: _reactorA,
+          emoji: '😀',
+          createdAt: 1_700_000_100,
+          ownerPubkey: _ownerA,
+          rumorEventJson: '{"id":"$deletedId"}',
+        );
+        await dao.softDelete(id: deletedId, ownerPubkey: _ownerA);
+
+        // Incoming reaction from someone else (publishStatus null, no json).
+        await dao.upsertIncoming(
+          id: _giftWrapId,
+          conversationId: _conversationId,
+          targetMessageId: _targetMessageId,
+          targetMessageAuthor: _ownerA,
+          reactorPubkey: _reactorB,
+          emoji: '❤️',
+          createdAt: 1_700_000_200,
+          giftWrapId: _giftWrapId,
+          ownerPubkey: _ownerA,
+        );
+
+        // A pending reaction belonging to a different owner.
+        await insertPending(
+          ownerPubkey: _ownerB,
+          reactorPubkey: _ownerB,
+        );
+
+        final retryable = await dao.getRetryableOwnReactions(
+          ownerPubkey: _ownerA,
+        );
+
+        expect(retryable, isEmpty);
+      },
+    );
+
+    test(
       'softDelete hides row from live queries but preserves record',
       () async {
         await insertPending(id: _sentId);
@@ -342,6 +467,86 @@ void main() {
             )
             .first;
         expect(after, isEmpty);
+      },
+    );
+
+    test(
+      'markOwnDeletionPending hides the row, stores the deletion rumor, and '
+      'surfaces it in getRetryableOwnDeletions (not the add retry set)',
+      () async {
+        await insertPending();
+
+        await dao.markOwnDeletionPending(
+          id: _pendingId,
+          ownerPubkey: _ownerA,
+          deletionRumorJson: '{"kind":5}',
+        );
+
+        // Hidden from the live chip stream.
+        final live = await dao
+            .watchForConversation(
+              conversationId: _conversationId,
+              ownerPubkey: _ownerA,
+            )
+            .first;
+        expect(live, isEmpty);
+
+        // Excluded from the ADD retry set (it is soft-deleted)...
+        expect(
+          await dao.getRetryableOwnReactions(ownerPubkey: _ownerA),
+          isEmpty,
+        );
+
+        // ...but surfaced in the DELETION retry set, carrying the kind-5 rumor.
+        final deletions = await dao.getRetryableOwnDeletions(
+          ownerPubkey: _ownerA,
+        );
+        expect(deletions, hasLength(1));
+        expect(deletions.first.id, _pendingId);
+        expect(deletions.first.rumorEventJson, contains('"kind":5'));
+      },
+    );
+
+    test(
+      'markDeletionSent clears the deletion from the retry set',
+      () async {
+        await insertPending();
+        await dao.markOwnDeletionPending(
+          id: _pendingId,
+          ownerPubkey: _ownerA,
+          deletionRumorJson: '{"kind":5}',
+        );
+
+        await dao.markDeletionSent(id: _pendingId, ownerPubkey: _ownerA);
+
+        expect(
+          await dao.getRetryableOwnDeletions(ownerPubkey: _ownerA),
+          isEmpty,
+        );
+        final row = await dao.getById(id: _pendingId, ownerPubkey: _ownerA);
+        expect(row, isNotNull);
+        expect(row!.rumorEventJson, isNull);
+      },
+    );
+
+    test(
+      'getRetryableOwnDeletions is owner-scoped',
+      () async {
+        await insertPending(ownerPubkey: _ownerB, reactorPubkey: _ownerB);
+        await dao.markOwnDeletionPending(
+          id: _pendingId,
+          ownerPubkey: _ownerB,
+          deletionRumorJson: '{"kind":5}',
+        );
+
+        expect(
+          await dao.getRetryableOwnDeletions(ownerPubkey: _ownerA),
+          isEmpty,
+        );
+        expect(
+          await dao.getRetryableOwnDeletions(ownerPubkey: _ownerB),
+          hasLength(1),
+        );
       },
     );
 

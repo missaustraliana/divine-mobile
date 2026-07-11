@@ -32,6 +32,7 @@ class DmReactionPublishResult {
     required this.success,
     required this.rumorId,
     this.errorMessage,
+    this.optimisticInsertSucceeded = false,
   });
 
   /// Whether the gift-wrap publish landed for the recipient.
@@ -42,6 +43,14 @@ class DmReactionPublishResult {
 
   /// One-line summary for logs; never user-facing copy.
   final String? errorMessage;
+
+  /// Whether the durable optimistic row was written to the DAO before the
+  /// publish attempt. When `true`, even a failed publish leaves a persisted
+  /// row the chip render + retry sweep can recover — so the cubit keeps the
+  /// optimistic chip instead of dropping it as an orphan while the DAO stream
+  /// catches up. `false` only when the repo was uninitialized or the insert
+  /// itself failed (no durable row exists).
+  final bool optimisticInsertSucceeded;
 }
 
 /// Outcome of ingesting an incoming wrapped reaction/deletion rumor, used by
@@ -58,6 +67,32 @@ enum DmReactionWrapOutcome {
   /// synced). Must NOT be recorded so it re-decrypts on a later launch once the
   /// target exists — preserving eventual consistency.
   deferred,
+}
+
+/// A pending/failed own reaction the retry sweep can re-drive, projected from
+/// its `dm_message_reactions` row.
+@immutable
+class DmReactionRetryTarget {
+  /// Construct a retry target.
+  const DmReactionRetryTarget({
+    required this.rumorId,
+    required this.targetMessageAuthor,
+    required this.publishStatus,
+    required this.createdAt,
+  });
+
+  /// Reaction rumor id — the argument `retry` expects.
+  final String rumorId;
+
+  /// Author of the reacted message — the reaction's gift-wrap recipient.
+  final String targetMessageAuthor;
+
+  /// Persisted publish status: `'failed'` or `'pending'`.
+  final String publishStatus;
+
+  /// Rumor `created_at` (unix seconds). Lets the sweep hold back a still-in-
+  /// flight `'pending'` reaction until its original publish has resolved.
+  final int createdAt;
 }
 
 /// Repository for DM emoji reactions.
@@ -236,16 +271,27 @@ class DmReactionsRepository {
       targetMessageAuthor: targetMessageAuthor,
     );
 
-    // Emit a NIP-09 kind-5 deletion on the wire for each superseded prior
-    // reaction. Fire-and-forget and kept OUTSIDE the DAO transaction — a
-    // stalled relay socket must never block the local optimistic write.
+    // Durably remove each superseded prior reaction (cap-at-one emoji swap):
+    // route it through the same `deletion_pending` + sweep machinery as an
+    // explicit un-react so a flaky/offline relay can't strand the old emoji on
+    // the recipient. Only the durable DAO write is awaited; the wire publish is
+    // fire-and-forget inside the helper, kept OUTSIDE the optimistic insert
+    // transaction so a stalled socket never blocks the local write.
+    //
+    // Intentional ordering tradeoff: the removal commits before the new
+    // emoji's fan-out below is confirmed, so a hard-failed swap degrades into
+    // a bare removal on the recipient rather than rolling back to the old
+    // emoji. That matches the sender's view — the old row is already
+    // soft-deleted locally and the new emoji stays as a retryable failed
+    // chip — whereas a wire rollback would desync the two sides. Recovery is
+    // re-tapping (or the sweep re-driving) the new emoji.
     for (final priorId in superseded) {
-      unawaited(
-        _publishKind5Deletion(
-          reactionEventId: priorId,
-          recipients: recipients,
-          messageService: messageService,
-        ),
+      await _durablyDeleteReaction(
+        rumorId: priorId,
+        recipients: recipients,
+        messageService: messageService,
+        reportSite:
+            DmReactionsRepositoryReportableSites.publishSupersedeDeletion,
       );
     }
 
@@ -254,6 +300,7 @@ class DmReactionsRepository {
         messageService: messageService,
         rumor: rumor,
         recipients: recipients,
+        awaitRecipientOk: true,
       );
       switch (result) {
         case NIP17SendSuccess():
@@ -270,16 +317,43 @@ class DmReactionsRepository {
               site: DmReactionsRepositoryReportableSites.publishSwapPlaceholder,
             );
           }
-          return DmReactionPublishResult(success: true, rumorId: rumorId);
-        case NIP17SendFailure(:final error):
-          await _reactionsDao.markFailed(
-            placeholderId: rumorId,
-            ownerPubkey: _userPubkey,
+          return DmReactionPublishResult(
+            success: true,
+            rumorId: rumorId,
+            optimisticInsertSucceeded: true,
           );
+        case NIP17SendFailure(
+          :final error,
+          :final retryablePending,
+          :final blocked,
+        ):
+          // Policy-blocked (#176): terminal and non-retryable — retrying only
+          // re-hits the same policy. Mark 'blocked' so the sweep and a chip
+          // re-tap both leave it alone (unlike 'failed', which they re-drive).
+          if (blocked) {
+            await _reactionsDao.markBlocked(
+              id: rumorId,
+              ownerPubkey: _userPubkey,
+            );
+          } else if (retryablePending) {
+            // Unconfirmed (frame written, no relay OK): keep the row 'pending'
+            // so it stays a dim, sweep-retryable chip — a lost OK is not proof
+            // of loss. Only a confirmed rejection/error flips it to 'failed'.
+            await _reactionsDao.markPending(
+              id: rumorId,
+              ownerPubkey: _userPubkey,
+            );
+          } else {
+            await _reactionsDao.markFailed(
+              placeholderId: rumorId,
+              ownerPubkey: _userPubkey,
+            );
+          }
           return DmReactionPublishResult(
             success: false,
             rumorId: rumorId,
             errorMessage: error,
+            optimisticInsertSucceeded: true,
           );
       }
     } on Object catch (e) {
@@ -295,6 +369,7 @@ class DmReactionsRepository {
         success: false,
         rumorId: rumorId,
         errorMessage: e.toString(),
+        optimisticInsertSucceeded: true,
       );
     }
   }
@@ -363,6 +438,7 @@ class DmReactionsRepository {
         messageService: messageService,
         rumor: rumor,
         recipients: recipients,
+        awaitRecipientOk: true,
       );
       switch (result) {
         case NIP17SendSuccess():
@@ -371,16 +447,39 @@ class DmReactionsRepository {
             realRumorId: rumorId,
             ownerPubkey: _userPubkey,
           );
-          return DmReactionPublishResult(success: true, rumorId: rumorId);
-        case NIP17SendFailure(:final error):
-          await _reactionsDao.markFailed(
-            placeholderId: rumorId,
-            ownerPubkey: _userPubkey,
+          return DmReactionPublishResult(
+            success: true,
+            rumorId: rumorId,
+            optimisticInsertSucceeded: true,
           );
+        case NIP17SendFailure(
+          :final error,
+          :final retryablePending,
+          :final blocked,
+        ):
+          // Policy-blocked (#176): terminal — flip the row out of the
+          // retryable pending/failed set so the sweep and a chip re-tap stop
+          // re-driving a send the policy will always refuse.
+          if (blocked) {
+            await _reactionsDao.markBlocked(
+              id: rumorId,
+              ownerPubkey: _userPubkey,
+            );
+          } else if (!retryablePending) {
+            // Confirmed rejection/error: flip to 'failed' so the chip is
+            // tappable again. A soft (retryablePending) failure instead
+            // falls through untouched, leaving the pre-send 'pending' so
+            // the sweep keeps re-driving it.
+            await _reactionsDao.markFailed(
+              placeholderId: rumorId,
+              ownerPubkey: _userPubkey,
+            );
+          }
           return DmReactionPublishResult(
             success: false,
             rumorId: rumorId,
             errorMessage: error,
+            optimisticInsertSucceeded: true,
           );
       }
     } on Object catch (e) {
@@ -397,8 +496,31 @@ class DmReactionsRepository {
     }
   }
 
-  /// Soft-delete an own reaction locally and emit a NIP-09 kind-5
-  /// deletion on the wire. Returns after the local update.
+  /// List this user's own outgoing reactions still awaiting durable delivery
+  /// (publish `'failed'`, or `'pending'` from an interrupted send), for the
+  /// foreground retry sweep to re-drive via [retry]. Returns empty when
+  /// credentials have not been wired.
+  Future<List<DmReactionRetryTarget>> retryableReactions() async {
+    if (_userPubkey.isEmpty) return const [];
+    final rows = await _reactionsDao.getRetryableOwnReactions(
+      ownerPubkey: _userPubkey,
+    );
+    return rows
+        .map(
+          (r) => DmReactionRetryTarget(
+            rumorId: r.id,
+            targetMessageAuthor: r.targetMessageAuthor,
+            publishStatus: r.publishStatus ?? 'pending',
+            createdAt: r.createdAt,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  /// Soft-delete an own reaction locally and durably (re)deliver its NIP-09
+  /// kind-5 deletion on the wire. Returns after the local update; the wire
+  /// publish is durable — a failed/offline attempt is re-driven by the retry
+  /// sweep via [retryDeletion] rather than being dropped.
   Future<void> removeOwn({
     required String rumorId,
     required String targetMessageAuthor,
@@ -409,29 +531,219 @@ class DmReactionsRepository {
       id: rumorId,
       ownerPubkey: _userPubkey,
     );
-    try {
-      await _reactionsDao.softDelete(id: rumorId, ownerPubkey: _userPubkey);
-    } on Object catch (e, st) {
-      _errorReporter?.call(
-        e,
-        st,
-        site: DmReactionsRepositoryReportableSites.removeOwnSoftDelete,
-      );
-      return;
-    }
     final recipients = row != null
         ? await _resolveWrapRecipients(
             conversationId: row.conversationId,
             targetMessageAuthor: targetMessageAuthor,
           )
         : <String>[targetMessageAuthor];
+
+    await _durablyDeleteReaction(
+      rumorId: rumorId,
+      recipients: recipients,
+      messageService: messageService,
+      reportSite: DmReactionsRepositoryReportableSites.removeOwnSoftDelete,
+    );
+  }
+
+  /// Soft-delete the reaction row [rumorId] locally and durably record its
+  /// NIP-09 kind-5 deletion, then fire the first (non-blocking) delivery
+  /// attempt. Shared by the explicit un-react ([removeOwn]) and the cap-at-one
+  /// emoji-swap supersede in [publish].
+  ///
+  /// The kind-5 is built once so every (re)delivery replays an identical event
+  /// — recipients treat repeats as idempotent. The `deletion_pending` row is
+  /// awaited (durability boundary) so a crash before it lands can't lose the
+  /// removal; the wire publish itself is `unawaited` and re-driven by the sweep
+  /// via [retryDeletion] on any failed/offline attempt. That unawaited first
+  /// attempt can race a concurrent sweep's [retryDeletion] on the same
+  /// kind-5; both replay the identical stored event, so the worst case is a
+  /// redundant (idempotent) publish, not a divergent delete. On a DAO write
+  /// failure the deletion is reported to [reportSite] and skipped (no wire
+  /// attempt).
+  Future<void> _durablyDeleteReaction({
+    required String rumorId,
+    required List<String> recipients,
+    required NIP17MessageService messageService,
+    required String reportSite,
+  }) async {
+    if (recipients.isEmpty) return;
+    final deletion = messageService.buildRumor(
+      recipientPubkey: recipients.first,
+      content: '',
+      eventKind: EventKind.eventDeletion,
+      additionalTags: [
+        ['e', rumorId],
+        ['k', EventKind.reaction.toString()],
+      ],
+    );
+
+    try {
+      await _reactionsDao.markOwnDeletionPending(
+        id: rumorId,
+        ownerPubkey: _userPubkey,
+        deletionRumorJson: jsonEncode(deletion.toJson()),
+      );
+    } on Object catch (e, st) {
+      _errorReporter?.call(e, st, site: reportSite);
+      return;
+    }
+
     unawaited(
-      _publishKind5Deletion(
-        reactionEventId: rumorId,
+      _driveDeletion(
+        rumorId: rumorId,
+        deletion: deletion,
         recipients: recipients,
         messageService: messageService,
       ),
     );
+  }
+
+  /// List this user's own reaction removals still awaiting durable kind-5
+  /// delivery, for the foreground/reconnect retry sweep to re-drive via
+  /// [retryDeletion]. Empty when credentials have not been wired.
+  Future<List<DmReactionRetryTarget>> retryableDeletions() async {
+    if (_userPubkey.isEmpty) return const [];
+    final rows = await _reactionsDao.getRetryableOwnDeletions(
+      ownerPubkey: _userPubkey,
+    );
+    return rows
+        .map(
+          (r) => DmReactionRetryTarget(
+            rumorId: r.id,
+            targetMessageAuthor: r.targetMessageAuthor,
+            publishStatus: r.publishStatus ?? '',
+            createdAt: r.createdAt,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  /// Retry a previously-failed/interrupted own reaction removal by replaying
+  /// the stored kind-5 rumor. Clears the pending-deletion marker on a
+  /// confirmed publish; leaves it pending otherwise so the sweep tries again.
+  Future<DmReactionPublishResult> retryDeletion({
+    required String rumorId,
+    required String targetMessageAuthor,
+  }) async {
+    final messageService = _messageService;
+    if (messageService == null || _userPubkey.isEmpty) {
+      return DmReactionPublishResult(
+        success: false,
+        rumorId: rumorId,
+        errorMessage: 'Repository not initialized',
+      );
+    }
+    final row = await _reactionsDao.getById(
+      id: rumorId,
+      ownerPubkey: _userPubkey,
+    );
+    final deletionJson = row?.rumorEventJson;
+    if (row == null || deletionJson == null) {
+      return DmReactionPublishResult(
+        success: false,
+        rumorId: rumorId,
+        errorMessage: 'No stored deletion to retry',
+      );
+    }
+    final deletion = Event.fromJson(
+      jsonDecode(deletionJson) as Map<String, dynamic>,
+    );
+    final recipients = await _resolveWrapRecipients(
+      conversationId: row.conversationId,
+      targetMessageAuthor: targetMessageAuthor,
+    );
+    try {
+      final result = await _fanOutRumor(
+        messageService: messageService,
+        rumor: deletion,
+        recipients: recipients,
+        awaitRecipientOk: true,
+      );
+      switch (result) {
+        case NIP17SendSuccess():
+          await _reactionsDao.markDeletionSent(
+            id: rumorId,
+            ownerPubkey: _userPubkey,
+          );
+          return DmReactionPublishResult(
+            success: true,
+            rumorId: rumorId,
+            optimisticInsertSucceeded: true,
+          );
+        case NIP17SendFailure(:final error, :final blocked):
+          // A policy-blocked recipient can never receive the kind-5 — and
+          // never received the reaction it removes — so the removal is moot.
+          // Terminalize it (mirroring the blocked handling on the add path) so
+          // the sweep stops re-driving a send the policy will always refuse.
+          if (blocked) {
+            await _reactionsDao.markDeletionSent(
+              id: rumorId,
+              ownerPubkey: _userPubkey,
+            );
+            return DmReactionPublishResult(
+              success: true,
+              rumorId: rumorId,
+              optimisticInsertSucceeded: true,
+            );
+          }
+          return DmReactionPublishResult(
+            success: false,
+            rumorId: rumorId,
+            errorMessage: error,
+            optimisticInsertSucceeded: true,
+          );
+      }
+    } on Object catch (e) {
+      Log.warning(
+        'DM reaction deletion retry threw: $e',
+        category: LogCategory.system,
+      );
+      return DmReactionPublishResult(
+        success: false,
+        rumorId: rumorId,
+        errorMessage: e.toString(),
+        optimisticInsertSucceeded: true,
+      );
+    }
+  }
+
+  /// Publish [deletion] (OK-confirmed) and clear the pending-deletion marker
+  /// on a confirmed send OR a policy block; on any other non-success the
+  /// `'deletion_pending'` row is left for the retry sweep to re-drive.
+  ///
+  /// A blocked recipient can never receive the kind-5 — and never received the
+  /// reaction it removes — so the removal is moot and terminalizing it stops
+  /// the sweep re-driving a send the policy will always refuse (symmetric with
+  /// the blocked handling on the add path).
+  Future<void> _driveDeletion({
+    required String rumorId,
+    required Event deletion,
+    required List<String> recipients,
+    required NIP17MessageService messageService,
+  }) async {
+    try {
+      final result = await _fanOutRumor(
+        messageService: messageService,
+        rumor: deletion,
+        recipients: recipients,
+        awaitRecipientOk: true,
+      );
+      final terminal =
+          result is NIP17SendSuccess ||
+          (result is NIP17SendFailure && result.blocked);
+      if (terminal) {
+        await _reactionsDao.markDeletionSent(
+          id: rumorId,
+          ownerPubkey: _userPubkey,
+        );
+      }
+    } on Object catch (e) {
+      Log.warning(
+        'DM reaction deletion publish threw: $e',
+        category: LogCategory.system,
+      );
+    }
   }
 
   /// Persist an incoming kind-7 reaction rumor. Called from
@@ -599,103 +911,146 @@ class DmReactionsRepository {
     required NIP17MessageService messageService,
     required Event rumor,
     required String recipientPubkey,
+    bool awaitRecipientOk = false,
   }) {
     return messageService
-        .sendRumor(rumorEvent: rumor, recipientPubkey: recipientPubkey)
+        .sendRumor(
+          rumorEvent: rumor,
+          recipientPubkey: recipientPubkey,
+          awaitRecipientOk: awaitRecipientOk,
+        )
         .timeout(
           _publishTimeout,
+          // A hung socket is inconclusive, not a confirmed rejection — the
+          // frame may already be written. Keep it retryable-pending so the
+          // sweep re-drives it rather than parking a red failed chip.
           onTimeout: () => NIP17SendResult.failure(
             'Reaction publish timed out after '
             '${_publishTimeout.inSeconds}s',
+            retryablePending: true,
           ),
         );
   }
 
-  /// Resolve the gift-wrap recipient set for a reaction in [conversationId].
+  /// Resolve the gift-wrap recipient set for a reaction in [conversationId]:
+  /// every conversation participant except the current user.
   ///
-  /// For a group conversation, returns every participant except the current
-  /// user (the wrap fans out to all members). For a 1:1 (or when the
-  /// conversation can't be resolved), returns `[targetMessageAuthor]` so the
-  /// behavior is byte-identical to the pre-group path.
+  /// Resolved from the conversation's participant set, **not** from
+  /// [targetMessageAuthor]. Reacting to your OWN message makes you the target
+  /// author, and addressing the wrap to the author would send the reaction
+  /// only back to yourself — the counterparty would never receive it (the
+  /// "react to own message isn't delivered" bug). For a 1:1 this yields the
+  /// single other participant; for a group, every other member.
+  ///
+  /// Falls back to [_fallbackWrapRecipients] only when the conversation can't
+  /// be resolved (no [ConversationsDao] wired, row missing, or malformed
+  /// participants).
   Future<List<String>> _resolveWrapRecipients({
     required String conversationId,
     required String targetMessageAuthor,
   }) async {
     final dao = _conversationsDao;
-    if (dao == null) return [targetMessageAuthor];
+    if (dao == null) return _fallbackWrapRecipients(targetMessageAuthor);
     try {
       final convo = await dao.getConversation(
         conversationId,
         ownerPubkey: _userPubkey,
       );
-      if (convo == null || !convo.isGroup) return [targetMessageAuthor];
+      if (convo == null) return _fallbackWrapRecipients(targetMessageAuthor);
       final decoded = jsonDecode(convo.participantPubkeys);
-      if (decoded is! List) return [targetMessageAuthor];
+      if (decoded is! List) {
+        return _fallbackWrapRecipients(targetMessageAuthor);
+      }
       final others = decoded
           .whereType<String>()
           .where((p) => p != _userPubkey)
           .toList();
-      return others.isEmpty ? [targetMessageAuthor] : others;
+      return others.isEmpty
+          ? _fallbackWrapRecipients(targetMessageAuthor)
+          : others;
     } on Object {
-      return [targetMessageAuthor];
+      return _fallbackWrapRecipients(targetMessageAuthor);
     }
   }
 
+  /// Recipient set to use when the conversation can't be resolved. The reacted
+  /// message's author is the only counterparty we can name — but when that is
+  /// the current user (reacting to your OWN message), naming self would send
+  /// the reaction only back to yourself and never to the counterparty (the
+  /// "react to own message isn't delivered" bug). There is no counterparty to
+  /// name in that degenerate case, so return empty — the send reports
+  /// no-recipients and stays retryable — rather than silently self-delivering.
+  /// Unreachable in prod: real 1:1/group conversations always store their
+  /// participants, so [_resolveWrapRecipients] resolves before reaching here.
+  List<String> _fallbackWrapRecipients(String targetMessageAuthor) =>
+      targetMessageAuthor == _userPubkey
+      ? const <String>[]
+      : <String>[targetMessageAuthor];
+
   /// Wrap [rumor] to each of [recipients] (each send also self-wraps for
   /// cross-device recovery; self-wrap copies dedupe on the rumor id at the
-  /// receiver). Succeeds if any recipient wrap lands.
+  /// receiver). Terminal success ONLY when EVERY recipient wrap lands.
+  ///
+  /// A group reaction persists as one row that can't track per-recipient
+  /// delivery, so a partial fan-out (one member confirmed, another timed
+  /// out/rejected) must NOT report success — the caller would mark the row
+  /// `sent` and clear its stored rumor, leaving the missed member's wrap
+  /// unrecoverable. Instead any non-confirming recipient makes the whole
+  /// fan-out a retryable failure; the sweep re-drives the full rumor and the
+  /// receiver-side dedup on rumor id makes re-delivery to already-confirmed
+  /// members idempotent.
+  ///
+  /// [awaitRecipientOk] requires the relay's NIP-20 `OK true` for each
+  /// recipient wrap before it counts as landed (see
+  /// [NIP17MessageService.sendRumor]). Reaction sends/retries opt in so a
+  /// flaky relay's frame-accept false positive can't mark an undelivered
+  /// reaction as sent.
+  ///
+  /// Aggregate failure classification:
+  /// - every failure is a policy [NIP17SendResult.blocked] → aggregate blocked
+  ///   (terminal, non-retryable — the non-blocked members all confirmed).
+  /// - otherwise → a retryable failure whose `retryablePending` is `true` only
+  ///   when every failure is itself soft (`retryablePending`); a single hard
+  ///   rejection/offline member makes the whole fan-out hard-failed so the
+  ///   sweep re-drives it without the in-flight min-age hold.
   Future<NIP17SendResult> _fanOutRumor({
     required NIP17MessageService messageService,
     required Event rumor,
     required List<String> recipients,
+    bool awaitRecipientOk = false,
   }) async {
-    NIP17SendResult? lastSuccess;
-    NIP17SendResult? lastFailure;
+    if (recipients.isEmpty) {
+      return const NIP17SendResult.failure('No reaction wrap recipients');
+    }
+    NIP17SendSuccess? lastSuccess;
+    final failures = <NIP17SendFailure>[];
     for (final recipient in recipients) {
       final result = await _sendRumorWithTimeout(
         messageService: messageService,
         rumor: rumor,
         recipientPubkey: recipient,
+        awaitRecipientOk: awaitRecipientOk,
       );
       switch (result) {
         case NIP17SendSuccess():
           lastSuccess = result;
         case NIP17SendFailure():
-          lastFailure = result;
+          failures.add(result);
       }
     }
-    return lastSuccess ??
-        lastFailure ??
-        const NIP17SendResult.failure('No reaction wrap recipients');
-  }
-
-  Future<void> _publishKind5Deletion({
-    required String reactionEventId,
-    required List<String> recipients,
-    required NIP17MessageService messageService,
-  }) async {
-    if (recipients.isEmpty) return;
-    try {
-      final deletion = messageService.buildRumor(
-        recipientPubkey: recipients.first,
-        content: '',
-        eventKind: EventKind.eventDeletion,
-        additionalTags: [
-          ['e', reactionEventId],
-          ['k', EventKind.reaction.toString()],
-        ],
-      );
-      await _fanOutRumor(
-        messageService: messageService,
-        rumor: deletion,
-        recipients: recipients,
-      );
-    } on Object catch (e) {
-      Log.warning(
-        'DM reaction kind-5 deletion threw: $e',
-        category: LogCategory.system,
-      );
+    if (failures.isEmpty) {
+      // Every recipient confirmed — terminal success.
+      return lastSuccess ??
+          const NIP17SendResult.failure('No reaction wrap recipients');
     }
+    final summary = failures.map((f) => f.error).join('; ');
+    if (failures.every((f) => f.blocked)) {
+      return NIP17SendResult.blocked(summary);
+    }
+    return NIP17SendResult.failure(
+      summary,
+      retryablePending: failures.every((f) => f.retryablePending),
+    );
   }
 
   /// Resolve the conversation id for an incoming reaction.
@@ -737,6 +1092,7 @@ class DmReactionsRepository {
       'pending' => DmReactionPublishStatus.pending,
       'failed' => DmReactionPublishStatus.failed,
       'sent' => DmReactionPublishStatus.sent,
+      'blocked' => DmReactionPublishStatus.blocked,
       _ => DmReactionPublishStatus.received,
     };
     return DmReaction(

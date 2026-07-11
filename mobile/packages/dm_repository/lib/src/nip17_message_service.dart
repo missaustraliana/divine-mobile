@@ -253,8 +253,21 @@ class NIP17MessageService {
     return Event(_senderPublicKey, eventKind, rumorTags, content);
   }
 
+  /// OK-confirmation window for the recipient wrap when [sendRumor] runs
+  /// with `awaitRecipientOk: true` (reaction sends). Kept under the reaction
+  /// path's outer 15 s publish cap so the confirmation resolves with headroom
+  /// for the subsequent self-wrap before the caller's timeout fires.
+  static const Duration _recipientOkConfirmTimeout = Duration(seconds: 10);
+
   /// Wrap and publish a pre-built [rumorEvent] to the recipient and to
   /// ourselves (self-addressed gift wrap for cross-device recovery).
+  ///
+  /// When [awaitRecipientOk] is `true`, the recipient wrap publish requires
+  /// the relay's NIP-20 `OK true` before it counts as landed, instead of the
+  /// default frame-accept. A bare frame-accept is a false positive on a flaky
+  /// single relay — it reports success even though the relay never stored the
+  /// event — so reaction sends (which have no durable message-style retry
+  /// queue) opt in to confirmation. Message sends keep the default.
   ///
   /// Self-wrap failure is intentionally non-fatal — the message has
   /// already been delivered to the recipient at that point, and
@@ -267,6 +280,7 @@ class NIP17MessageService {
     required Event rumorEvent,
     required String recipientPubkey,
     List<String>? targetRelays,
+    bool awaitRecipientOk = false,
   }) async {
     try {
       // Send gate (#176): the lowest recipient-delivering primitive, so every
@@ -331,6 +345,97 @@ class NIP17MessageService {
       // who only read their own inbox relays actually receive it); fall
       // back to the default pool otherwise. The no-targetRelays call shape
       // is kept identical to preserve existing behavior.
+      if (awaitRecipientOk) {
+        // OK-confirm path (reactions): require the relay's NIP-20 OK before
+        // reporting delivery, but keep this device's own durability
+        // independent of it.
+        final outcome = (targetRelays != null && targetRelays.isNotEmpty)
+            ? await _nostrService.publishEventAwaitOk(
+                giftWrapEvent,
+                targetRelays: targetRelays,
+                timeout: _recipientOkConfirmTimeout,
+              )
+            : await _nostrService.publishEventAwaitOk(
+                giftWrapEvent,
+                timeout: _recipientOkConfirmTimeout,
+              );
+
+        // Classify the outcome BEFORE deciding on the self-wrap. Three cases:
+        //  * explicit OK-false → hard rejection: the recipient definitely did
+        //    not get it.
+        //  * nothing reached any relay (offline) → the send definitively did
+        //    not happen.
+        //  * frame written to a relay but no OK within the window →
+        //    inconclusive soft-unconfirmed; it may already be delivered.
+        final rejected = outcome.rejectedBy.isNotEmpty;
+        final reachedNoRelay =
+            outcome.acceptedBy.isEmpty &&
+            outcome.rejectedBy.isEmpty &&
+            outcome.noResponseFrom.isEmpty;
+        final softUnconfirmed = !rejected && !reachedNoRelay;
+
+        // Publish the self-addressed wrap ONLY when the recipient confirmed OR
+        // the send is soft-unconfirmed (frame written, OK lost/late — the
+        // recipient may already have the reaction). On a hard rejection or an
+        // offline no-relay-reached the recipient definitely did not get it, so
+        // a self-wrap would surface a phantom reaction on the sender's other
+        // devices / reinstall (ingested via persistIncoming as a plain
+        // `received` row with no retry metadata). The self-wrap is p-tagged to
+        // the sender only, so publishing it on a soft-unconfirmed send never
+        // double-delivers to the counterparty.
+        // Short-circuit `&&`: when the gate is false the self-wrap publish is
+        // never awaited, so it is skipped entirely on rejected / reachedNoRelay.
+        final selfWrapPublished =
+            (outcome.confirmed || softUnconfirmed) &&
+            await _publishSelfWrap(
+              nostr: nostr,
+              rumorEvent: rumorEvent,
+              prebuiltSelfWrap: prebuiltSelfWrap,
+            );
+
+        if (outcome.confirmed) {
+          Log.info(
+            'Successfully published NIP-17 reaction '
+            '(selfWrapPublished=$selfWrapPublished)',
+            category: LogCategory.system,
+          );
+          return NIP17SendResult.success(
+            rumorEventId: rumorEvent.id,
+            messageEventId: giftWrapEvent.id,
+            recipientPubkey: recipientPubkey,
+            selfWrapPublished: selfWrapPublished,
+          );
+        }
+
+        // Not confirmed. The caller's chip + retry follow from the sub-case:
+        //  * rejected → mark failed (terminal-ish; failed rows skip the sweep's
+        //    in-flight min-age guard so they re-drive immediately).
+        //  * reachedNoRelay (offline) → mark failed so the sweep re-drives it
+        //    the instant connectivity returns.
+        //  * softUnconfirmed → keep a dim, sweep-retryable 'pending' chip
+        //    (a lost OK is not proof of loss).
+        final String errorMsg;
+        if (rejected) {
+          errorMsg = 'Reaction rejected by relay: ${outcome.summary}';
+        } else if (reachedNoRelay) {
+          errorMsg = 'Reaction not sent: no relay reached';
+        } else {
+          errorMsg = 'Reaction recipient OK unconfirmed: ${outcome.summary}';
+        }
+        Log.warning(
+          'NIP-17 reaction recipient publish unconfirmed '
+          '(rumor=${rumorEvent.id}, recipient=$recipientPubkey, '
+          '${outcome.summary}); selfWrapPublished=$selfWrapPublished',
+          category: LogCategory.system,
+        );
+        return NIP17SendResult.failure(
+          errorMsg,
+          retryablePending: softUnconfirmed,
+        );
+      }
+
+      // Frame-accept path (messages): a WebSocket-accepted frame counts as
+      // sent, and the self-wrap runs only after the recipient publish lands.
       final sentEvent = (targetRelays != null && targetRelays.isNotEmpty)
           ? await _nostrService.publishEvent(
               giftWrapEvent,

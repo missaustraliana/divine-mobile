@@ -5,6 +5,7 @@
 import 'dart:async';
 
 import 'package:collaborator_repository/collaborator_repository.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dm_repository/dm_repository.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -29,6 +30,7 @@ import 'package:openvine/services/collaborator_invite_state_store.dart';
 import 'package:openvine/services/collaborator_response_service.dart';
 import 'package:openvine/services/content_deletion_service.dart';
 import 'package:openvine/services/content_reporting_service.dart';
+import 'package:openvine/services/dm_reaction_retry_service.dart';
 import 'package:openvine/services/draft_storage_service.dart';
 import 'package:openvine/services/hashtag_cache_service.dart';
 import 'package:openvine/services/hashtag_service.dart';
@@ -43,6 +45,17 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:unified_logger/unified_logger.dart';
 
 part 'social_providers.g.dart';
+
+/// Reconnect trigger for the DM retry sweeps (messages, reactions, removals):
+/// emits once each time `connectivity_plus` reports any non-`none` result, so
+/// work queued during a brief network drop is re-driven the moment
+/// connectivity returns — without waiting for an app-foreground transition.
+/// The sweeps short-circuit when nothing is retryable. Shared by the message
+/// and reaction retry providers so the trigger shape stays in one place.
+Stream<void> _dmRetryConnectivityTriggerStream() => Connectivity()
+    .onConnectivityChanged
+    .where((results) => results.any((r) => r != ConnectivityResult.none))
+    .map<void>((_) {});
 
 final collaboratorResponseServiceProvider =
     Provider<CollaboratorResponseService>((ref) {
@@ -191,11 +204,18 @@ OutgoingDmRetryService? outgoingDmRetryService(Ref ref) {
   final foregroundController = StreamController<bool>();
   ref.onDispose(foregroundController.close);
 
+  // Re-drive undelivered messages the moment connectivity returns, not only on
+  // app-foreground transitions — a message queued during a brief network drop
+  // would otherwise sit undelivered until the app is backgrounded and
+  // re-foregrounded.
+  final retryTriggerStream = _dmRetryConnectivityTriggerStream();
+
   final service = OutgoingDmRetryService(
     dmRepository: dmRepository,
     outgoingDmsDao: db.outgoingDmsDao,
     userPubkey: userPubkey,
     appForegroundStream: foregroundController.stream,
+    retryTriggerStream: retryTriggerStream,
   );
 
   // initialize() subscribes to the controller's stream synchronously
@@ -205,6 +225,75 @@ OutgoingDmRetryService? outgoingDmRetryService(Ref ref) {
   service.initialize().catchError((e) {
     Log.error(
       'Failed to initialize OutgoingDmRetryService',
+      name: 'AppProviders',
+      error: e,
+    );
+  });
+
+  ref.listen<bool>(appForegroundProvider, (_, next) {
+    if (!foregroundController.isClosed) {
+      foregroundController.add(next);
+    }
+  }, fireImmediately: true);
+
+  ref.onDispose(service.dispose);
+  return service;
+}
+
+/// Auto-sweep service that re-drives undelivered DM reactions (publish failed
+/// or interrupted mid-send) on app-foreground transitions via
+/// [DmReactionsRepository.retry].
+///
+/// Gives reactions the durable delivery that DM messages already get from
+/// [OutgoingDmRetryService] + the `outgoing_dms` queue: a reaction whose
+/// recipient gift wrap failed to land (common on a flaky relay) is otherwise
+/// lost with no automatic recovery. keepAlive with no UI consumer, so it is
+/// read eagerly at app shell startup (`main.dart`) to wire the foreground
+/// subscription.
+///
+/// Returns null until the user is authenticated and the Nostr session is
+/// ready — the same readiness the reaction repository's `setCredentials`
+/// needs before a retry can publish.
+@Riverpod(keepAlive: true)
+DmReactionRetryService? dmReactionRetryService(Ref ref) {
+  final authService = ref.watch(authServiceProvider);
+
+  // Watch auth state to rebuild on sign-in / sign-out / account switch.
+  ref.watch(currentAuthStateProvider);
+
+  final userPubkey = authService.currentPublicKeyHex;
+  if (userPubkey == null) return null;
+
+  // Gate on matching Nostr readiness so the reaction repository's
+  // setCredentials has run by the time the first foreground sweep fires.
+  final readiness = ref.watch(nostrSessionProvider);
+  if (!readiness.isReadyForActiveClient || readiness.pubkey != userPubkey) {
+    return null;
+  }
+
+  final reactionsRepository = ref.watch(dmReactionsRepositoryProvider);
+
+  // Bridge the synchronous AppForeground notifier into a Stream<bool> so the
+  // service's contract stays free of Riverpod types and is easy to drive from
+  // unit tests.
+  final foregroundController = StreamController<bool>();
+  ref.onDispose(foregroundController.close);
+
+  // Re-drive undelivered reactions/removals the moment connectivity returns,
+  // not only on app-foreground transitions — a reaction left during a brief
+  // network drop would otherwise sit undelivered until the app is backgrounded
+  // and re-foregrounded.
+  final retryTriggerStream = _dmRetryConnectivityTriggerStream();
+
+  final service = DmReactionRetryService(
+    reactionsRepository: reactionsRepository,
+    appForegroundStream: foregroundController.stream,
+    retryTriggerStream: retryTriggerStream,
+  );
+
+  service.initialize().catchError((e) {
+    Log.error(
+      'Failed to initialize DmReactionRetryService',
       name: 'AppProviders',
       error: e,
     );
