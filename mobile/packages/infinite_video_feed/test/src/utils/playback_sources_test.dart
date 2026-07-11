@@ -70,10 +70,10 @@ void main() {
     });
 
     group('when URL is the raw blob URL', () {
-      test('returns [hlsUrl, rawUrl, originalUrl] deduplicated', () {
+      test('returns [rawUrl, hlsUrl, originalUrl] deduplicated', () {
         final video = _makeVideo(videoUrl: _rawUrl);
-        // raw == original -> [hlsUrl, rawUrl]
-        expect(resolvePlaybackSources(video), equals([_hlsUrl, _rawUrl]));
+        // raw == original -> progressive raw first, HLS as fallback
+        expect(resolvePlaybackSources(video), equals([_rawUrl, _hlsUrl]));
       });
 
       test('includes originalUrl when it differs from rawUrl', () {
@@ -83,7 +83,7 @@ void main() {
           video,
           urlResolver: (_) => _rawUrl,
         );
-        expect(result, equals([_hlsUrl, _rawUrl, otherOriginal]));
+        expect(result, equals([_rawUrl, _hlsUrl, otherOriginal]));
       });
     });
 
@@ -91,12 +91,12 @@ void main() {
       const variantUrl = 'https://media.divine.video/$_hash/720p.mp4';
 
       test(
-        'returns [variantUrl, hlsUrl, rawUrl, originalUrl] deduplicated',
+        'returns [variantUrl, rawUrl, hlsUrl, originalUrl] deduplicated',
         () {
           final video = _makeVideo(videoUrl: variantUrl);
           expect(
             resolvePlaybackSources(video),
-            equals([variantUrl, _hlsUrl, _rawUrl]),
+            equals([variantUrl, _rawUrl, _hlsUrl]),
           );
         },
       );
