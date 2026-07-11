@@ -330,6 +330,25 @@ void main() {
       verify(repo.getAllObjects).called(1);
     });
 
+    test('force bypasses the throttle window', () async {
+      when(repo.getAllObjects).thenAnswer((_) async => []);
+      final (manager, dir) = build();
+      final firstOrphan = writeFile(dir, 'a_1_1.mp4', 10);
+
+      await manager.enforceCacheLimits();
+      expect(firstOrphan.existsSync(), isFalse);
+
+      final secondOrphan = writeFile(dir, 'b_2_2.mp4', 10);
+      await manager.enforceCacheLimits(force: true);
+
+      expect(
+        secondOrphan.existsSync(),
+        isFalse,
+        reason: 'force runs even within the throttle interval',
+      );
+      verify(repo.getAllObjects).called(2);
+    });
+
     test('does not reclaim files still referenced by the sync '
         'manifest', () async {
       final downloader = FakeCancellableDownloader();
@@ -408,6 +427,64 @@ void main() {
 
       downloader.downloads.single.completeWith(target);
       await op.file;
+    });
+
+    test(
+      'counts manifest-only managed files towards the byte budget',
+      () async {
+        final cacheKey =
+            'manifest_budget_${DateTime.now().microsecondsSinceEpoch}';
+        final dir = Directory('$testTempPath/$cacheKey')
+          ..createSync(recursive: true);
+        final target = writeFile(dir, 'legacy-cache-file.mp4', 3);
+        var reads = 0;
+        // Simulate flutter_cache_manager demoting the row after the manifest
+        // was populated. The file remains playable through the sync manifest.
+        when(repo.getAllObjects).thenAnswer((_) async {
+          reads++;
+          return reads == 1 ? [obj('legacy-cache-file.mp4', id: 1)] : [];
+        });
+
+        final manager = MediaCacheManager(
+          config: MediaCacheConfig(
+            cacheKey: cacheKey,
+            enableSyncManifest: true,
+            maxCacheSizeBytes: 2,
+          ),
+          repoOverride: repo,
+        );
+        await manager.initialize();
+        expect(
+          manager.getCachedFileSync('key_legacy-cache-file.mp4')?.path,
+          target.path,
+        );
+
+        await manager.enforceCacheLimits();
+
+        expect(target.existsSync(), isFalse);
+        expect(manager.getCachedFileSync('key_legacy-cache-file.mp4'), isNull);
+      },
+    );
+
+    test('a runtime maxCacheSizeBytes override drives eviction', () async {
+      final (manager, dir) = build();
+      final oldest = writeFile(dir, 'a_1_1.mp4', 60);
+      final newest = writeFile(dir, 'b_2_2.mp4', 60);
+      when(repo.getAllObjects).thenAnswer(
+        (_) async => [
+          obj('a_1_1.mp4', id: 1, touched: DateTime(2020)),
+          obj('b_2_2.mp4', id: 2, touched: DateTime(2020, 1, 2)),
+        ],
+      );
+
+      // Base config has no byte budget; the override supplies one.
+      manager.maxCacheSizeBytes = 100;
+      expect(manager.maxCacheSizeBytes, 100);
+
+      await manager.enforceCacheLimits();
+
+      expect(oldest.existsSync(), isFalse);
+      expect(newest.existsSync(), isTrue);
     });
 
     test('runs a throttled sweep after enough downloads', () async {
@@ -524,6 +601,64 @@ void main() {
           reason: 'throttled downloads still count toward the next pass',
         );
       });
+    });
+
+    test('runs a throttled sweep after enough cacheFile downloads', () async {
+      final mockFile = MockFile();
+      final mockFileInfo = MockFileInfo();
+      when(mockFile.existsSync).thenReturn(true);
+      when(() => mockFile.path).thenReturn('/test/path/video.mp4');
+      when(() => mockFileInfo.file).thenReturn(mockFile);
+      when(repo.getAllObjects).thenAnswer((_) async => []);
+
+      final manager = TestableMediaCacheManager(
+        config: MediaCacheConfig(
+          cacheKey: 'cache_file_sweep_${DateTime.now().microsecondsSinceEpoch}',
+        ),
+        repoOverride: repo,
+        mockGetFileFromCache: (_) async => null,
+        mockDownloadFile: (_, {key, authHeaders}) async => mockFileInfo,
+      );
+
+      for (var i = 0; i < 25; i++) {
+        await manager.cacheFile(
+          'https://example.com/v$i.mp4',
+          key: 'k$i',
+        );
+      }
+      for (var i = 0; i < 400; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+        try {
+          verify(repo.getAllObjects).called(1);
+          return;
+        } on TestFailure {
+          // The sweep is deliberately unawaited; keep polling briefly.
+        }
+      }
+      fail('cacheFile downloads did not trigger a cache-limit sweep');
+    });
+
+    test('queues a forced sweep behind an in-progress pass', () async {
+      final gate = Completer<List<CacheObject>>();
+      var calls = 0;
+      when(repo.getAllObjects).thenAnswer((_) {
+        calls++;
+        return calls == 1 ? gate.future : Future.value([]);
+      });
+      final (manager, _) = build();
+
+      final first = manager.enforceCacheLimits();
+      final forced = manager.enforceCacheLimits(force: true);
+      var forcedCompleted = false;
+      unawaited(forced.then((_) => forcedCompleted = true));
+      await Future<void>.delayed(Duration.zero);
+      expect(forcedCompleted, isFalse);
+
+      gate.complete([]);
+      await first;
+      await forced;
+
+      expect(calls, 2);
     });
 
     test('reports the byte budget via getCacheStats', () {
