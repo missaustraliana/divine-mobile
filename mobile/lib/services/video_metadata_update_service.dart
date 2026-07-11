@@ -39,26 +39,65 @@ class VideoUpdateFailure extends VideoUpdateResult {
   final Object error;
 }
 
-/// Tag names that carry engagement counts on Vine-imported video events.
-///
-/// These must survive a metadata edit so that `originalLoops` /
-/// `originalLikes` / `originalComments` are not zeroed on the replacement
-/// event.
-const _engagementCountTagNames = {
-  'loops',
-  'likes',
-  'reposts',
-  'views',
-  'comments',
+/// Tag names the metadata-edit flow always rebuilds from the editor state
+/// or re-derives from the original event's parsed fields.
+const _editRebuiltTagNames = {
+  'd',
+  'imeta',
+  'title',
+  'summary',
+  't',
+  'published_at',
+  'duration',
+  'alt',
+  'allow_audio_reuse',
 };
 
-/// Returns the subset of [tags] that carry engagement counts.
-List<List<String>> extractEngagementCountTags(List<List<String>> tags) {
-  return tags
-      .where(
-        (tag) => tag.length >= 2 && _engagementCountTagNames.contains(tag[0]),
-      )
-      .toList();
+/// Whether [tag] is rebuilt by the edit flow instead of copied verbatim.
+///
+/// Every other tag on the original event — audio-attribution `e` tags,
+/// engagement counts, expiration, client, relay hints, ProofMode/C2PA
+/// provenance, reply threading, subtitle text-tracks, … — is preserved
+/// unchanged so a metadata edit does not drop data it does not own,
+/// provided the raw tags are available (see [_sourceOriginalTags]).
+///
+/// [isVideoReply] gates the inspired-by a-tag: the edit flow only rebuilds
+/// that tag for non-reply videos (see the rebuild block in `updateVideo`),
+/// so on a reply the inspired-by a-tag must be preserved rather than stripped
+/// — otherwise it would be dropped with no replacement.
+bool _isEditRebuiltTag(List<String> tag, {required bool isVideoReply}) {
+  if (tag.isEmpty) return false;
+  final name = tag.first;
+  if (_editRebuiltTagNames.contains(name)) return true;
+  // NIP-36 / NIP-32 content-warning group.
+  if (name == 'content-warning') return true;
+  if (name == 'L' && tag.length >= 2 && tag[1] == 'content-warning') {
+    return true;
+  }
+  if (name == 'l' && tag.length >= 3 && tag[2] == 'content-warning') {
+    return true;
+  }
+  // Collaborator p-tags; mention/reply p-tags are preserved.
+  if (name == 'p' &&
+      tag.length >= 4 &&
+      tag[3].toLowerCase() == 'collaborator') {
+    return true;
+  }
+  // Inspired-by a-tags (publish writes a 'mention' marker, edit writes
+  // 'inspired-by'). Only owned on non-reply videos; on a reply these are
+  // reply-threading metadata (or a genuine inspired-by the edit flow cannot
+  // represent) and are preserved verbatim. Unmarked reply-root a-tags are
+  // preserved either way. Match the marker case-insensitively to mirror the
+  // parser and the collaborator check above.
+  if (!isVideoReply &&
+      name == 'a' &&
+      tag.length >= 4 &&
+      (tag[3].toLowerCase() == 'mention' ||
+          tag[3].toLowerCase() == 'inspired-by') &&
+      tag[1].startsWith('${NIP71VideoKinds.addressableShortVideo}:')) {
+    return true;
+  }
+  return false;
 }
 
 /// Sends collaborator invites to any pubkeys added since the last publish.
@@ -160,6 +199,29 @@ class VideoMetadataUpdateService {
         throw Exception('User not authenticated');
       }
 
+      // A pubkey promoted from a plain mention to a collaborator in this
+      // edit changes role: drop its stale 'mention' p-tag so it is not
+      // double-listed alongside the rebuilt 'collaborator' p-tag.
+      final collaboratorPubkeys = editorState.collaboratorPubkeys
+          .map((pubkey) => pubkey.toLowerCase())
+          .toSet();
+      bool isPromotedMentionPTag(List<String> tag) =>
+          tag.length >= 4 &&
+          tag.first == 'p' &&
+          tag[3].toLowerCase() == 'mention' &&
+          collaboratorPubkeys.contains(tag[1].toLowerCase());
+
+      // Preserve every tag the edit flow does not own; the owned ones are
+      // rebuilt from the editor state below.
+      final isVideoReply = originalVideo.isVideoReply;
+      final preservedTags = _sourceOriginalTags(originalVideo)
+          .where(
+            (tag) =>
+                !_isEditRebuiltTag(tag, isVideoReply: isVideoReply) &&
+                !isPromotedMentionPTag(tag),
+          )
+          .toList();
+
       final tags = <List<String>>[];
 
       // Required 'd' tag — must match the original to replace the event.
@@ -219,17 +281,24 @@ class VideoMetadataUpdateService {
         tags.add(['title', title]);
       }
 
+      final summary = editorState.description.trim();
+      if (summary.isNotEmpty) {
+        tags.add(['summary', summary]);
+      }
+
       for (final hashtag in editorState.tags) {
         tags.add(['t', hashtag]);
       }
 
-      for (final label in editorState.contentWarnings) {
-        tags.add(['l', label.value, 'content-warning']);
+      // Mirror the NIP-36 / NIP-32 tag group written at original publish.
+      if (editorState.contentWarnings.isNotEmpty) {
+        tags
+          ..add(['content-warning', editorState.contentWarnings.first.value])
+          ..add(['L', 'content-warning']);
+        for (final label in editorState.contentWarnings) {
+          tags.add(['l', label.value, 'content-warning']);
+        }
       }
-
-      // Preserve engagement count tags so Vine-imported metrics survive
-      // the metadata edit.
-      tags.addAll(extractEngagementCountTags(originalVideo.nostrEventTags));
 
       if (originalVideo.publishedAt != null) {
         tags.add(['published_at', originalVideo.publishedAt!]);
@@ -245,7 +314,10 @@ class VideoMetadataUpdateService {
         tags.add(buildCollaboratorPTag(pubkey));
       }
 
-      if (editorState.inspiredByVideo != null) {
+      // The parser exposes an unmarked lowercase reply-root a-tag through
+      // inspiredByVideo too. Do not turn that parent reference into creator
+      // attribution when republishing a video reply.
+      if (editorState.inspiredByVideo != null && !isVideoReply) {
         tags.add([
           'a',
           editorState.inspiredByVideo!.addressableId,
@@ -257,6 +329,8 @@ class VideoMetadataUpdateService {
       if (editorState.allowAudioReuse) {
         tags.add(['allow_audio_reuse', 'true']);
       }
+
+      tags.addAll(preservedTags);
 
       var content = editorState.description.trim();
       final inspiredByNpub = editorState.inspiredByNpub;
@@ -307,6 +381,22 @@ class VideoMetadataUpdateService {
       );
       return VideoUpdateFailure(e);
     }
+  }
+
+  /// Returns the raw tags of the event being edited, for preservation.
+  ///
+  /// [VideoEvent.nostrEventTags] is empty when the in-memory event was
+  /// rehydrated from a JSON cache that omits raw tags (the own-profile grid
+  /// and cold-start feed do this). In that case, recover the raw event from
+  /// the personal cache so preservation is not silently defeated; if it is
+  /// not cached, fall back to an empty list (the pre-existing behavior).
+  List<List<String>> _sourceOriginalTags(VideoEvent video) {
+    if (video.nostrEventTags.isNotEmpty) return video.nostrEventTags;
+    final cached = _personalEventCache.getEventById(video.id);
+    if (cached == null) return const [];
+    return cached.tags
+        .map((tag) => (tag as List).map((e) => e.toString()).toList())
+        .toList();
   }
 
   /// Extracts all valid HTTP video URLs from the event's imeta tags.
