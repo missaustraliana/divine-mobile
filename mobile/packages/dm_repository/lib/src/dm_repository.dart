@@ -3193,6 +3193,11 @@ class DmRepository {
         // surfaces only as a sender-side gap until the self-wrap
         // arrives via the receive pipeline.
       }
+    } else if (result.blocked) {
+      // A confirmed #176 policy block is terminal, not a transient error:
+      // drop the row so the retry sweep stops re-attempting a send the gate
+      // refuses every time. This attempt delivered nothing.
+      await _finalizeAfterRecipientBlocked(outgoingDao: dao, rumorId: rumorId);
     } else {
       await _finalizeAfterRecipientFailure(
         outgoingDao: dao,
@@ -3272,13 +3277,28 @@ class DmRepository {
 
     var attempted = 0;
     var success = 0;
+    var blocked = 0;
+    var failure = 0;
     for (final invite in matchingInvites) {
       attempted++;
       try {
         final result = await recoverFullSend(rumorId: invite.rumorId);
         if (result.success) {
           success++;
+        } else if (result.blocked) {
+          // A confirmed #176 policy block is terminal: recoverFullSend already
+          // deleted the row, so the invite is neither delivered nor retryable.
+          // Count it apart from transient failures so the banner does not
+          // report a dropped row as "still needs to send".
+          blocked++;
+          Log.warning(
+            'Collaborator invite blocked by policy for rumor '
+            '${invite.rumorId} (recipient=${invite.collaboratorPubkey}, '
+            'video=${invite.videoAddress}); row dropped',
+            category: LogCategory.system,
+          );
         } else {
+          failure++;
           Log.warning(
             'Collaborator invite retry failed for rumor ${invite.rumorId} '
             '(recipient=${invite.collaboratorPubkey}, '
@@ -3287,6 +3307,20 @@ class DmRepository {
           );
         }
       } on Object catch (error, stackTrace) {
+        if (error is ArgumentError) {
+          // recoverFullSend throws ArgumentError when the queue row is missing
+          // or owned by another account. A concurrent drain sweep
+          // recovering/deleting the row between the banner's read and this
+          // retry is an expected race, not a defect — terminal for this
+          // invite, so skip it without a Crashlytics report (mirrors
+          // OutgoingDmRetryService's dispatch-error policy).
+          Log.warning(
+            'Skipping collaborator invite ${invite.rumorId}: $error',
+            category: LogCategory.system,
+          );
+          continue;
+        }
+        failure++;
         Log.error(
           'Collaborator invite retry threw for rumor ${invite.rumorId} '
           '(recipient=${invite.collaboratorPubkey}, '
@@ -3307,7 +3341,8 @@ class DmRepository {
     return CollaboratorInviteRetrySummary(
       attemptedCount: attempted,
       successCount: success,
-      failureCount: attempted - success,
+      failureCount: failure,
+      blockedCount: blocked,
     );
   }
 
@@ -3392,6 +3427,34 @@ class DmRepository {
       );
       // Don't rethrow — caller already gets the failure result. The
       // queue row stays retryable and the next sweep can pick it up.
+    }
+  }
+
+  /// Apply the terminal queue-row transition for a policy-blocked (#176)
+  /// recipient publish. Unlike [_finalizeAfterRecipientFailure], a block is
+  /// terminal — the send gate refuses every retry — so the row is deleted
+  /// rather than left retryable. Non-rethrowing to match the failure path: the
+  /// caller still returns the blocked result. A failed delete leaves the row in
+  /// place (still `failed` or `pending`, depending on the drain arm), which
+  /// self-heals on a later sweep — the gate re-blocks and re-drops it.
+  Future<void> _finalizeAfterRecipientBlocked({
+    required OutgoingDmsDao outgoingDao,
+    required String rumorId,
+  }) async {
+    try {
+      await outgoingDao.deleteById(rumorId);
+    } on Object catch (e, stackTrace) {
+      Log.error(
+        'Failed to delete blocked outgoing_dms row $rumorId: $e',
+        category: LogCategory.system,
+        error: e,
+        stackTrace: stackTrace,
+      );
+      _errorReporter?.call(
+        e,
+        stackTrace,
+        site: DmRepositoryReportableSites.finalizeAfterRecipientBlocked,
+      );
     }
   }
 

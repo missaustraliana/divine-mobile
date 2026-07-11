@@ -293,6 +293,39 @@ void main() {
         },
       );
 
+      test(
+        'recoverFullSend blocked path is terminal: no incrementRetry',
+        () async {
+          final row = _row(
+            id: 'rumor2c',
+            recipient: OutgoingWrapStatus.failed,
+            self: OutgoingWrapStatus.failed,
+            retryCount: 1,
+            lastAttemptAt: DateTime.utc(2025),
+          );
+          when(
+            () => dao.getRetryableForOwner(
+              ownerPubkey: any(named: 'ownerPubkey'),
+              maxRetries: any(named: 'maxRetries'),
+            ),
+          ).thenAnswer((_) async => [row]);
+          when(
+            () => dmRepository.recoverFullSend(rumorId: any(named: 'rumorId')),
+          ).thenAnswer(
+            (_) async => const NIP17SendResult.blocked('blocked by policy'),
+          );
+
+          await buildService().sweep();
+
+          verify(
+            () => dmRepository.recoverFullSend(rumorId: 'rumor2c'),
+          ).called(1);
+          // A policy block is terminal: recoverFullSend already dropped the
+          // row, so the sweep must not re-arm it with a retry bump.
+          verifyNever(() => dao.incrementRetry(any()));
+        },
+      );
+
       test('publish-failure path bumps incrementRetry once', () async {
         final row = _row(
           id: 'rumor3',
@@ -976,6 +1009,36 @@ void main() {
           verifyNever(
             () => dmRepository.recoverSelfWrap(rumorId: any(named: 'rumorId')),
           );
+        },
+      );
+
+      test(
+        'blocked interrupted-send drain is terminal: no incrementRetry',
+        () async {
+          final now = DateTime.utc(2026, 5, 10, 12);
+          final stalePending = _row(
+            id: 'interrupted-blocked',
+            recipient: OutgoingWrapStatus.pending,
+            self: OutgoingWrapStatus.pending,
+            queuedAt: now.subtract(const Duration(minutes: 5)),
+          );
+          when(
+            () => dao.getStillPendingForOwner(any()),
+          ).thenAnswer((_) async => [stalePending]);
+          when(
+            () => dmRepository.recoverFullSend(rumorId: any(named: 'rumorId')),
+          ).thenAnswer(
+            (_) async => const NIP17SendResult.blocked('blocked by policy'),
+          );
+
+          await buildService(now: () => now).sweep();
+
+          verify(
+            () => dmRepository.recoverFullSend(rumorId: 'interrupted-blocked'),
+          ).called(1);
+          // recoverFullSend already deleted the row; a policy block is
+          // terminal, so the interrupted arm must not re-arm it.
+          verifyNever(() => dao.incrementRetry(any()));
         },
       );
 

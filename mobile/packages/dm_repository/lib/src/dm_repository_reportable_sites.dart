@@ -37,8 +37,16 @@ abstract class DmRepositoryReportableSites {
   static const String finalizeAfterRecipientFailure =
       'finalizeAfterRecipientFailure';
 
-  /// `retryPendingCollaboratorInvites*`: `recoverFullSend` threw while
-  /// replaying a queued collaborator invite row.
+  /// `_finalizeAfterRecipientBlocked`: deleting the terminally-blocked
+  /// queue row threw. Caller already has the blocked result; the row
+  /// stays failed or pending and self-heals on a later sweep.
+  static const String finalizeAfterRecipientBlocked =
+      'finalizeAfterRecipientBlocked';
+
+  /// `retryPendingCollaboratorInvites*`: `recoverFullSend` threw an
+  /// unexpected error while replaying a queued collaborator invite row.
+  /// The expected `ArgumentError` race (row deleted by a concurrent drain
+  /// sweep, or a foreign-owner row) is skipped and does NOT report here.
   static const String retryPendingCollaboratorInviteUnexpectedThrow =
       'retryPendingCollaboratorInvite.unexpectedThrow';
 
