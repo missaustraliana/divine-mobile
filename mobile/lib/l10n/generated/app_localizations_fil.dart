@@ -4309,6 +4309,9 @@ class AppLocalizationsFil extends AppLocalizations {
   String get feedLoadingMore => 'Naglo-load ng iba pang video…';
 
   @override
+  String get feedRefreshed => 'Na-refresh ang feed';
+
+  @override
   String get uploadWaitingToUpload => 'Naghihintay i-upload';
 
   @override

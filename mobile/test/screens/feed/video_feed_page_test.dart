@@ -25,6 +25,7 @@ import 'package:openvine/providers/route_feed_providers.dart';
 import 'package:openvine/providers/shell_obscured_provider.dart';
 import 'package:openvine/router/router.dart';
 import 'package:openvine/screens/explore/explore_screen.dart';
+import 'package:openvine/screens/feed/home_feed_retap_cubit.dart';
 import 'package:openvine/screens/feed/video_feed_page.dart';
 import 'package:openvine/screens/feed/video_feed_page/feed_empty_widget.dart';
 import 'package:openvine/services/view_event_publisher.dart';
@@ -260,6 +261,98 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pump();
     });
+
+    testWidgets(
+      'builds without a $HomeFeedRetapCubit ancestor (direct construction)',
+      (tester) async {
+        final video = createTestVideoEvent();
+        final state = VideoFeedBlocState(
+          status: VideoFeedStatus.success,
+          videos: [video],
+        );
+        when(() => videoFeedBloc.state).thenReturn(state);
+        whenListen(
+          videoFeedBloc,
+          const Stream<VideoFeedBlocState>.empty(),
+          initialState: state,
+        );
+
+        await tester.pumpWidget(
+          testMaterialApp(
+            home: MultiBlocProvider(
+              providers: [
+                BlocProvider<VideoFeedBloc>.value(value: videoFeedBloc),
+                BlocProvider<VideoPlaybackStatusCubit>(
+                  create: (_) => VideoPlaybackStatusCubit(),
+                ),
+                BlocProvider<VideoVolumeCubit>.value(value: videoVolumeCubit),
+              ],
+              child: const VideoFeedView(),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(find.byType(VideoFeedView), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        await tester.pump(const Duration(seconds: 3));
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump();
+      },
+    );
+
+    testWidgets(
+      'home retap refreshes the feed and settles the retap cubit',
+      (tester) async {
+        final video = createTestVideoEvent();
+        final state = VideoFeedBlocState(
+          status: VideoFeedStatus.success,
+          videos: [video],
+        );
+        when(() => videoFeedBloc.state).thenReturn(state);
+        whenListen(
+          videoFeedBloc,
+          const Stream<VideoFeedBlocState>.empty(),
+          initialState: state,
+        );
+        final retapCubit = HomeFeedRetapCubit();
+        addTearDown(retapCubit.close);
+
+        await tester.pumpWidget(
+          testMaterialApp(
+            home: MultiBlocProvider(
+              providers: [
+                BlocProvider<HomeFeedRetapCubit>.value(value: retapCubit),
+                BlocProvider<VideoFeedBloc>.value(value: videoFeedBloc),
+                BlocProvider<VideoPlaybackStatusCubit>(
+                  create: (_) => VideoPlaybackStatusCubit(),
+                ),
+                BlocProvider<VideoVolumeCubit>.value(value: videoVolumeCubit),
+              ],
+              child: const VideoFeedView(),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        retapCubit.request();
+        expect(retapCubit.state.isRefreshing, isTrue);
+        // Bounded pumps instead of pumpAndSettle: the native feed keeps a
+        // continuous animation alive, so pumpAndSettle would never settle.
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        verify(
+          () => videoFeedBloc.add(const VideoFeedRefreshRequested()),
+        ).called(1);
+        expect(retapCubit.state.isRefreshing, isFalse);
+
+        await tester.pump(const Duration(seconds: 3));
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump();
+      },
+    );
 
     testWidgets(
       'holds the overlay bottom inset steady while a modal keyboard is open '

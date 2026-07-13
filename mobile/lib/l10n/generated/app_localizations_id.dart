@@ -4223,6 +4223,9 @@ class AppLocalizationsId extends AppLocalizations {
   String get feedLoadingMore => 'Memuat lebih banyak video…';
 
   @override
+  String get feedRefreshed => 'Feed disegarkan';
+
+  @override
   String get uploadWaitingToUpload => 'Menunggu unggah';
 
   @override

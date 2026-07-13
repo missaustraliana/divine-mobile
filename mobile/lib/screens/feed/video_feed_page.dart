@@ -4,12 +4,14 @@ import 'package:analytics/analytics.dart';
 import 'package:divine_ui/divine_ui.dart';
 import 'package:feed_tuning_repository/feed_tuning_repository.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:openvine/blocs/video_feed/video_feed_bloc.dart';
 import 'package:openvine/blocs/video_playback_status/video_playback_status_cubit.dart';
 import 'package:openvine/features/feature_flags/models/feature_flag.dart';
 import 'package:openvine/features/feature_flags/providers/feature_flag_providers.dart';
+import 'package:openvine/l10n/l10n.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/foreground_idle_warmup_provider.dart';
 import 'package:openvine/providers/nostr_client_provider.dart';
@@ -317,6 +319,7 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
     final feedTuningEnabled = ref.watch(
       isFeatureEnabledProvider(FeatureFlag.feedTuning),
     );
+    final retapCubit = _maybeRetapCubit(context);
 
     return BlocProvider.value(
       value: _autoAdvanceCubit,
@@ -324,22 +327,17 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
         innerColor: VineTheme.backgroundColor,
         child: MultiBlocListener(
           listeners: [
-            // Refresh and scroll to top when the user taps the home tab while
-            // already on it (TikTok-style re-tap behaviour). The signal is a
-            // counter incremented by VineBottomNav; any change means "refresh
-            // and go to top".
-            BlocListener<HomeFeedRetapCubit, HomeFeedRetapState>(
-              listenWhen: (previous, current) =>
-                  !previous.isRefreshing && current.isRefreshing,
-              listener: (context, _) async {
-                await _refreshFeed(context);
-                if (!context.mounted) return;
-                await _feedVideosKey.currentState?.animateToPage(0);
-                if (context.mounted) {
-                  context.read<HomeFeedRetapCubit>().completeRefresh();
-                }
-              },
-            ),
+            // Refresh and scroll to top when the user re-taps the home tab
+            // while already on it (TikTok-style). VineBottomNav flips the
+            // cubit to refreshing; [_onHomeRetap] settles it again. Skipped
+            // when no cubit is provided (direct construction in tests).
+            if (retapCubit != null)
+              BlocListener<HomeFeedRetapCubit, HomeFeedRetapState>(
+                bloc: retapCubit,
+                listenWhen: (previous, current) =>
+                    !previous.isRefreshing && current.isRefreshing,
+                listener: (context, _) => _onHomeRetap(context, retapCubit),
+              ),
             // Reset page position when mode changes.
             BlocListener<VideoFeedBloc, VideoFeedBlocState>(
               listenWhen: (previous, current) => previous.mode != current.mode,
@@ -521,6 +519,43 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
         ),
       ),
     );
+  }
+
+  /// Nearest [HomeFeedRetapCubit], or null when the view is constructed
+  /// without one (e.g. widget tests pumping [VideoFeedView] directly). In
+  /// the app the cubit is provided above `AppShell` — see `shell.dart`.
+  HomeFeedRetapCubit? _maybeRetapCubit(BuildContext context) {
+    try {
+      return context.read<HomeFeedRetapCubit>();
+    } on ProviderNotFoundException {
+      return null;
+    }
+  }
+
+  /// Handles a home-tab retap: refreshes the feed, scrolls back to the top,
+  /// and announces the result to screen readers.
+  ///
+  /// [HomeFeedRetapCubit.completeRefresh] runs in `finally` on the captured
+  /// cubit — not through [BuildContext] — so the nav spinner always settles
+  /// even when this view unmounts mid-refresh (the cubit outlives this view
+  /// and would otherwise stay `refreshing` forever).
+  Future<void> _onHomeRetap(
+    BuildContext context,
+    HomeFeedRetapCubit retapCubit,
+  ) async {
+    try {
+      await _refreshFeed(context);
+      if (!context.mounted) return;
+      await _feedVideosKey.currentState?.animateToPage(0);
+      if (!context.mounted) return;
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        context.l10n.feedRefreshed,
+        Directionality.of(context),
+      );
+    } finally {
+      if (!retapCubit.isClosed) retapCubit.completeRefresh();
+    }
   }
 
   /// Dispatches a refresh and resolves when the bloc settles.

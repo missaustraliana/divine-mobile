@@ -1,4 +1,5 @@
-// ABOUTME: This just allows the button to be tapped again so we can do the super cool and magnificent refresh.
+// ABOUTME: Cubit signalling a home-tab retap so the feed refreshes and the
+// ABOUTME: bottom nav renders a spinner while the refresh is in flight.
 
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -19,29 +20,29 @@ class HomeFeedRetapState extends Equatable {
   List<Object?> get props => [status];
 }
 
-/// Coordinates home tab retap gesture to refresh the feed.
+/// Coordinates the home-tab retap gesture with the feed refresh.
 ///
-/// [VineBottomNav] calls [request] when the home tab is tapped while already
-/// on home. The nav bar shows a loading spinner while [isRefreshing] is true
-/// and ignores taps until the refresh completes.
+/// `VineBottomNav` calls [request] when the home tab is tapped while already
+/// active. The nav renders a spinning refresh arrow while
+/// [HomeFeedRetapState.isRefreshing] and ignores further retaps until the
+/// refresh completes.
 ///
-/// [VideoFeedView] listens via [BlocListener]: on [request] it dispatches a
-/// feed refresh and calls [completeRefresh] when it settles, at which point
-/// [FeedVideosState.animateToPage(0)] scrolls the feed back to the top.
+/// `VideoFeedView` (in `video_feed_page.dart`) listens via a `BlocListener`:
+/// on [request] it refreshes the feed, scrolls back to the top, and calls
+/// [completeRefresh] once the refresh settles.
 ///
-/// Provided in [app_router.dart] above the home [Navigator] so it is
-/// reachable from both [VineBottomNav] (via [NavigatorKeys.home.currentContext])
-/// and [VideoFeedView].
+/// Provided above `AppShell` (see `shell.dart`) so the bottom nav and the
+/// home branch's feed reach the same instance.
 class HomeFeedRetapCubit extends Cubit<HomeFeedRetapState> {
   HomeFeedRetapCubit() : super(const HomeFeedRetapState());
 
-  /// Request a refresh.
+  /// Requests a feed refresh. No-op while a refresh is already in flight.
   void request() {
     if (state.isRefreshing) return;
     emit(state.copyWith(status: HomeFeedRetapStatus.refreshing));
   }
 
-  /// Called by [VideoFeedView] once the feed refresh has settled.
+  /// Marks the in-flight refresh as settled.
   void completeRefresh() {
     emit(state.copyWith(status: HomeFeedRetapStatus.idle));
   }

@@ -1,7 +1,6 @@
 // ABOUTME: Shared bottom navigation bar widget for app shell and profile screens
 // ABOUTME: Provides consistent bottom nav across screens with/without shell
 
-import 'dart:async';
 import 'dart:math' show pi;
 import 'dart:ui' show ImageFilter;
 
@@ -28,44 +27,11 @@ import 'package:openvine/widgets/vine_cached_image.dart';
 import 'package:unified_logger/unified_logger.dart';
 
 /// Shared bottom navigation bar used by AppShell and standalone profile screens.
-class VineBottomNav extends ConsumerStatefulWidget {
+class VineBottomNav extends ConsumerWidget {
   const VineBottomNav({required this.currentIndex, super.key});
 
   /// Currently selected tab index (0-3), or -1 if no tab is selected.
   final int currentIndex;
-
-  @override
-  ConsumerState<VineBottomNav> createState() => _VineBottomNavState();
-}
-
-class _VineBottomNavState extends ConsumerState<VineBottomNav> {
-  int get currentIndex => widget.currentIndex;
-
-  StreamSubscription<HomeFeedRetapState>? _retapSubscription;
-  HomeFeedRetapState _retapState = const HomeFeedRetapState();
-
-  @override
-  void initState() {
-    super.initState();
-    _subscribeToRetapCubit();
-  }
-
-  @override
-  void dispose() {
-    _retapSubscription?.cancel();
-    super.dispose();
-  }
-
-  void _subscribeToRetapCubit() {
-    final homeCtx = NavigatorKeys.home.currentContext;
-    if (homeCtx == null) return;
-    final cubit = homeCtx.read<HomeFeedRetapCubit>();
-    _retapSubscription?.cancel();
-    _retapState = cubit.state;
-    _retapSubscription = cubit.stream.listen((state) {
-      if (mounted) setState(() => _retapState = state);
-    });
-  }
 
   /// Maps tab index to RouteType
   RouteType _routeTypeForTab(int index) {
@@ -92,11 +58,10 @@ class _VineBottomNavState extends ConsumerState<VineBottomNav> {
       category: LogCategory.ui,
     );
 
-    // Tapping home while already on home scrolls to the top and refreshes.
-    // The cubit lives inside the home navigator's subtree, so we reach it
-    // via NavigatorKeys.home rather than the shell's BuildContext.
+    // Re-tapping the active home tab refreshes the feed instead of
+    // navigating. The cubit is provided above AppShell (see shell.dart).
     if (tabIndex == 0 && currentIndex == 0) {
-      NavigatorKeys.home.currentContext?.read<HomeFeedRetapCubit>().request();
+      context.read<HomeFeedRetapCubit>().request();
       return;
     }
 
@@ -144,8 +109,11 @@ class _VineBottomNavState extends ConsumerState<VineBottomNav> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    if (_retapSubscription == null) _subscribeToRetapCubit();
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Rebuilds only when the refreshing flag flips, not on every state emit.
+    final isHomeRefreshing = context.select(
+      (HomeFeedRetapCubit cubit) => cubit.state.isRefreshing,
+    );
     return ColoredBox(
       color: VineTheme.surfaceBackground,
       // The bottom nav has no Container padding — all four edges of the
@@ -176,7 +144,7 @@ class _VineBottomNavState extends ConsumerState<VineBottomNav> {
                 _HomeTabButton(
                   semanticLabel: context.l10n.navHome,
                   isSelected: currentIndex == 0,
-                  isRefreshing: _retapState.isRefreshing,
+                  isRefreshing: isHomeRefreshing,
                   onTap: () => _handleTabTap(context, ref, 0),
                   tapTargetWidth: _kHorizontalEdgePad + iconWidth + halfGap,
                   iconAlignment: AlignmentDirectional.centerStart,
@@ -351,11 +319,23 @@ class _HomeTabButtonState extends State<_HomeTabButton>
   }
 
   void _startRefreshAnimation() {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      // Reduced motion: swap to the arrow instantly, without zoom or spin.
+      _swapController.value = 1;
+      return;
+    }
     _swapController.forward();
     _rotationController.repeat();
   }
 
   void _stopRefreshAnimation() {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _swapController.value = 0;
+      _rotationController
+        ..stop()
+        ..value = 0;
+      return;
+    }
     // Let the current rotation complete before stopping.
     _rotationController.forward(from: _rotationController.value).then((_) {
       if (mounted) _rotationController.stop();
@@ -439,7 +419,7 @@ class _HomeTabButtonState extends State<_HomeTabButton>
   }
 }
 
-/// Tap target + Semantics wrapper shared by the three icon tabs.
+/// Tap target + Semantics wrapper shared by the Explore and Inbox tabs.
 ///
 /// The child gets the 32 %-opacity dim in the unselected state and the
 /// glyph-shaped shadow pair in the selected state. See [_ShadowedNavIcon].
@@ -447,8 +427,7 @@ class _HomeTabButtonState extends State<_HomeTabButton>
 /// [tapTargetWidth] is the full width the GestureDetector occupies inside
 /// the bottom nav row — usually larger than the 48 px icon container so
 /// taps in the surrounding gap also route to this tab. The icon itself
-/// stays a [kMinInteractiveDimension]-sized box positioned via
-/// [iconAlignment].
+/// stays a centred [kMinInteractiveDimension]-sized box.
 class _IconTabButton extends StatelessWidget {
   const _IconTabButton({
     required this.semanticIdentifier,
@@ -457,8 +436,6 @@ class _IconTabButton extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
     required this.tapTargetWidth,
-    this.iconAlignment = Alignment.center,
-    this.edgePadding = EdgeInsets.zero,
     this.badgeCount,
   });
 
@@ -468,21 +445,6 @@ class _IconTabButton extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
   final double tapTargetWidth;
-
-  /// Where to place the 48 px icon container inside the slot. Defaults to
-  /// [Alignment.center] so the icon sits at the slot's centre with equal
-  /// hit-target padding above and below it. Use `centerStart` /
-  /// `centerEnd` (combined with [edgePadding]) for the leftmost /
-  /// rightmost tabs so they hug the row's edge.
-  final AlignmentGeometry iconAlignment;
-
-  /// Horizontal inset between the slot edge and the icon container.
-  /// Non-zero only for Home and Profile, where the slot extends all the
-  /// way to the screen edge but the icon must still sit
-  /// [_kHorizontalEdgePad] in from that edge per the Figma spec. The
-  /// edge strip itself stays inside the [GestureDetector] so taps there
-  /// route to the tab.
-  final EdgeInsetsGeometry edgePadding;
 
   /// When non-null, wraps the inner icon container in a [NotificationBadge]
   /// so the badge stays anchored to the icon's top-right corner rather
@@ -525,10 +487,7 @@ class _IconTabButton extends StatelessWidget {
         child: SizedBox(
           width: tapTargetWidth,
           height: _kTabSlotHeight,
-          child: Padding(
-            padding: edgePadding,
-            child: Align(alignment: iconAlignment, child: iconBox),
-          ),
+          child: Center(child: iconBox),
         ),
       ),
     );
