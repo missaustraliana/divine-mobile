@@ -524,13 +524,11 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
   /// Nearest [HomeFeedRetapCubit], or null when the view is constructed
   /// without one (e.g. widget tests pumping [VideoFeedView] directly). In
   /// the app the cubit is provided above `AppShell` — see `shell.dart`.
-  HomeFeedRetapCubit? _maybeRetapCubit(BuildContext context) {
-    try {
-      return context.read<HomeFeedRetapCubit>();
-    } on ProviderNotFoundException {
-      return null;
-    }
-  }
+  ///
+  /// The nullable lookup returns null instead of throwing when no provider
+  /// is found, so no try/catch is needed.
+  HomeFeedRetapCubit? _maybeRetapCubit(BuildContext context) =>
+      context.read<HomeFeedRetapCubit?>();
 
   /// Handles a home-tab retap: refreshes the feed, scrolls back to the top,
   /// and announces the result to screen readers.
@@ -544,15 +542,21 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
     HomeFeedRetapCubit retapCubit,
   ) async {
     try {
-      await _refreshFeed(context);
+      final status = await _refreshFeed(context);
       if (!context.mounted) return;
       await _feedVideosKey.currentState?.animateToPage(0);
       if (!context.mounted) return;
-      SemanticsService.sendAnnouncement(
-        View.of(context),
-        context.l10n.feedRefreshed,
-        Directionality.of(context),
-      );
+      // Only announce success. A failed refresh settles on
+      // [VideoFeedStatus.failure] too, and announcing "Feed refreshed" then
+      // would mislead screen-reader users — the visible failure state
+      // already carries its own copy.
+      if (status == VideoFeedStatus.success) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          context.l10n.feedRefreshed,
+          Directionality.of(context),
+        );
+      }
     } finally {
       if (!retapCubit.isClosed) retapCubit.completeRefresh();
     }
@@ -566,7 +570,7 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
   /// settling (e.g. the user leaves the screen mid-refresh) the stream
   /// closes without matching and [Stream.firstWhere] returns the bloc's
   /// last known state via `orElse`.
-  Future<void> _refreshFeed(BuildContext context) async {
+  Future<VideoFeedStatus> _refreshFeed(BuildContext context) async {
     final bloc = context.read<VideoFeedBloc>();
     _currentIndex = 0;
     _pagePosition.value = 0;
@@ -574,12 +578,13 @@ class _VideoFeedViewState extends ConsumerState<VideoFeedView>
         .read(lastTabPositionProvider.notifier)
         .recordPosition(RouteType.home, 0);
     bloc.add(const VideoFeedRefreshRequested());
-    await bloc.stream.firstWhere(
+    final settled = await bloc.stream.firstWhere(
       (s) =>
           s.status == VideoFeedStatus.success ||
           s.status == VideoFeedStatus.failure,
       orElse: () => bloc.state,
     );
+    return settled.status;
   }
 }
 

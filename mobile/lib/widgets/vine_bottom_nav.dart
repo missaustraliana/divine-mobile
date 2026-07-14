@@ -239,6 +239,67 @@ const double _kHorizontalEdgePad = 16;
 //     `onSurfaceDisabled`); no filter / opacity / shadow on the avatar
 //     itself.
 
+/// Shared hit-target + [Semantics] wrapper for every bottom-nav tab.
+///
+/// Holds the Figma hit geometry in one place: an opaque [GestureDetector]
+/// filling [tapTargetWidth] × [_kTabSlotHeight] so taps in the surrounding
+/// gap route to the right tab, with the visible [child] positioned by
+/// [edgePadding] and [iconAlignment] (defaults centre the child, matching a
+/// bare [Center]).
+class _TabSlot extends StatelessWidget {
+  const _TabSlot({
+    required this.identifier,
+    required this.label,
+    required this.onTap,
+    required this.tapTargetWidth,
+    required this.child,
+    this.value,
+    this.edgePadding = EdgeInsets.zero,
+    this.iconAlignment = Alignment.center,
+  });
+
+  final String identifier;
+  final String label;
+
+  /// Optional [Semantics.value] — e.g. the unread badge count on the Inbox
+  /// tab. Null on tabs that carry no supplementary value.
+  final String? value;
+  final VoidCallback onTap;
+
+  /// Full width the [GestureDetector] occupies inside the nav row — usually
+  /// larger than the visible icon so taps in the surrounding gap and edge
+  /// strips also route to this tab.
+  final double tapTargetWidth;
+
+  /// Inset folded into the hit target on the outermost tabs (Home / Profile)
+  /// so taps in the screen-edge strip still route to the adjacent tab.
+  final EdgeInsetsGeometry edgePadding;
+  final AlignmentGeometry iconAlignment;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      identifier: identifier,
+      button: true,
+      label: label,
+      value: value,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: SizedBox(
+          width: tapTargetWidth,
+          height: _kTabSlotHeight,
+          child: Padding(
+            padding: edgePadding,
+            child: Align(alignment: iconAlignment, child: child),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Home tab button that animates between the house icon and a spinning
 /// refresh arrow while the feed is reloading after a retap.
 ///
@@ -280,6 +341,8 @@ class _HomeTabButtonState extends State<_HomeTabButton>
   late final Animation<double> _arrowOpacity;
   late final Animation<double> _arrowScale;
 
+  bool _didSyncInitialRefresh = false;
+
   @override
   void initState() {
     super.initState();
@@ -309,6 +372,21 @@ class _HomeTabButtonState extends State<_HomeTabButton>
     _arrowScale = Tween<double>(begin: 0.5, end: 1).animate(
       CurvedAnimation(parent: _swapController, curve: Curves.easeInOut),
     );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Sync the initial controller state on first mount. If the widget mounts
+    // while a refresh is already in flight (the cubit outlives this widget),
+    // start in the spinning-arrow state instead of the static house.
+    // Subsequent transitions are handled by [didUpdateWidget]. This lives in
+    // didChangeDependencies rather than initState because the sync reads
+    // MediaQuery.disableAnimationsOf(context) via _startRefreshAnimation.
+    if (!_didSyncInitialRefresh) {
+      _didSyncInitialRefresh = true;
+      if (widget.isRefreshing) _startRefreshAnimation();
+    }
   }
 
   @override
@@ -399,22 +477,14 @@ class _HomeTabButtonState extends State<_HomeTabButton>
       ),
     );
 
-    return Semantics(
+    return _TabSlot(
       identifier: 'home_tab',
-      button: true,
       label: widget.semanticLabel,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        behavior: HitTestBehavior.opaque,
-        child: SizedBox(
-          width: widget.tapTargetWidth,
-          height: _kTabSlotHeight,
-          child: Padding(
-            padding: widget.edgePadding,
-            child: Align(alignment: widget.iconAlignment, child: iconBox),
-          ),
-        ),
-      ),
+      onTap: widget.onTap,
+      tapTargetWidth: widget.tapTargetWidth,
+      edgePadding: widget.edgePadding,
+      iconAlignment: widget.iconAlignment,
+      child: iconBox,
     );
   }
 }
@@ -476,20 +546,13 @@ class _IconTabButton extends StatelessWidget {
         ? context.l10n.notificationsBadgeUnread(badgeCount!)
         : null;
 
-    return Semantics(
+    return _TabSlot(
       identifier: semanticIdentifier,
-      button: true,
       label: semanticLabel,
       value: semanticValue,
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: .opaque,
-        child: SizedBox(
-          width: tapTargetWidth,
-          height: _kTabSlotHeight,
-          child: Center(child: iconBox),
-        ),
-      ),
+      onTap: onTap,
+      tapTargetWidth: tapTargetWidth,
+      child: iconBox,
     );
   }
 }
@@ -578,7 +641,7 @@ class _ProfileTabButton extends ConsumerWidget {
   final double tapTargetWidth;
   final AlignmentGeometry iconAlignment;
 
-  /// See [_IconTabButton.edgePadding].
+  /// See [_TabSlot.edgePadding].
   final EdgeInsetsGeometry edgePadding;
 
   @override
@@ -609,22 +672,14 @@ class _ProfileTabButton extends ConsumerWidget {
       ),
     );
 
-    return Semantics(
+    return _TabSlot(
       identifier: 'profile_tab',
-      button: true,
       label: semanticLabel,
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: .opaque,
-        child: SizedBox(
-          width: tapTargetWidth,
-          height: _kTabSlotHeight,
-          child: Padding(
-            padding: edgePadding,
-            child: Align(alignment: iconAlignment, child: iconBox),
-          ),
-        ),
-      ),
+      onTap: onTap,
+      tapTargetWidth: tapTargetWidth,
+      edgePadding: edgePadding,
+      iconAlignment: iconAlignment,
+      child: iconBox,
     );
   }
 }
@@ -693,32 +748,23 @@ class _CameraButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
+    // The pill is centred (default [_TabSlot] alignment) so it keeps its
+    // on-screen position even though the slot is taller and wider than the
+    // pill — the extra space all goes to hit-target absorption.
+    return _TabSlot(
       identifier: 'camera_button',
-      button: true,
       label: context.l10n.navOpenCamera,
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: .opaque,
-        child: SizedBox(
-          width: tapTargetWidth,
-          height: _kTabSlotHeight,
-          // Centered so the visible pill keeps its on-screen position
-          // even though the slot is taller and wider than the pill —
-          // the extra space all goes to hit-target absorption.
-          child: Center(
-            child: Container(
-              width: _kCameraButtonWidth,
-              height: kMinInteractiveDimension,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              decoration: BoxDecoration(
-                color: VineTheme.cameraButtonGreen,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const DivineIcon(icon: .cameraRetro, size: 32),
-            ),
-          ),
+      onTap: onTap,
+      tapTargetWidth: tapTargetWidth,
+      child: Container(
+        width: _kCameraButtonWidth,
+        height: kMinInteractiveDimension,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        decoration: BoxDecoration(
+          color: VineTheme.cameraButtonGreen,
+          borderRadius: BorderRadius.circular(20),
         ),
+        child: const DivineIcon(icon: .cameraRetro, size: 32),
       ),
     );
   }
