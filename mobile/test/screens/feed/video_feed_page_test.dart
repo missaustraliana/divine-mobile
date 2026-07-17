@@ -355,6 +355,76 @@ void main() {
     );
 
     testWidgets(
+      'settles the retap cubit when the view unmounts mid-refresh',
+      (tester) async {
+        final video = createTestVideoEvent();
+        final state = VideoFeedBlocState(
+          status: VideoFeedStatus.success,
+          videos: [video],
+        );
+        // Drive the bloc stream by hand so the refresh can be held in flight:
+        // the view's _refreshFeed awaits this stream settling, so while it
+        // emits nothing the retap cubit stays in the refreshing state.
+        final feedStates = StreamController<VideoFeedBlocState>();
+        addTearDown(feedStates.close);
+        when(() => videoFeedBloc.state).thenReturn(state);
+        whenListen(videoFeedBloc, feedStates.stream, initialState: state);
+        // The cubit is owned by the test so it outlives the view — the whole
+        // point of settling via the captured cubit rather than through
+        // BuildContext.
+        final retapCubit = HomeFeedRetapCubit();
+        addTearDown(retapCubit.close);
+
+        await tester.pumpWidget(
+          testMaterialApp(
+            home: MultiBlocProvider(
+              providers: [
+                BlocProvider<HomeFeedRetapCubit>.value(value: retapCubit),
+                BlocProvider<VideoFeedBloc>.value(value: videoFeedBloc),
+                BlocProvider<VideoPlaybackStatusCubit>(
+                  create: (_) => VideoPlaybackStatusCubit(),
+                ),
+                BlocProvider<VideoVolumeCubit>.value(value: videoVolumeCubit),
+              ],
+              child: const VideoFeedView(),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Start the refresh; it cannot settle while the stream emits nothing.
+        retapCubit.request();
+        await tester.pump();
+        expect(retapCubit.state.isRefreshing, isTrue);
+        verify(
+          () => videoFeedBloc.add(const VideoFeedRefreshRequested()),
+        ).called(1);
+
+        // Drain the native feed's preload grace timer while the view is still
+        // mounted (as the sibling tests do), so no timer is left pending once
+        // the tree is disposed. The refresh is unaffected: the stream has not
+        // settled, so the retap cubit stays refreshing.
+        await tester.pump(const Duration(seconds: 3));
+        expect(retapCubit.state.isRefreshing, isTrue);
+
+        // Unmount the feed while the refresh is still in flight.
+        await tester.pumpWidget(const SizedBox());
+        // Still refreshing: the finally block has not run because the refresh
+        // has not settled yet.
+        expect(retapCubit.state.isRefreshing, isTrue);
+
+        // The refresh settles after the view is gone: _refreshFeed's firstWhere
+        // matches this terminal state, _onHomeRetap hits
+        // `if (!context.mounted) return`, and the finally block on the captured
+        // cubit must still fire even though the view is disposed.
+        feedStates.add(state);
+        await tester.pump();
+
+        expect(retapCubit.state.isRefreshing, isFalse);
+      },
+    );
+
+    testWidgets(
       'holds the overlay bottom inset steady while a modal keyboard is open '
       '(no slide on keyboard close, #5758 follow-up)',
       (tester) async {
